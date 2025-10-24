@@ -274,3 +274,35 @@ export interface DashboardState {
   recentInsights: Insight[];
   achievements: Achievement[];
 }
+
+export interface AnalyticsData {
+  planVsActual: Array<{
+    date: string;
+    planned: number;
+    actual: number;
+    adherence: number;
+  }>;
+  timeAllocation: Array<{
+    domain: string;
+    hours: number;
+    color: string;
+  }>;
+  focusTrend: Array<{
+    date: string;
+    focusMinutes: number;
+    mood: number;
+    energy: number;
+  }>;
+  correlations: Array<{
+    factor1: string;
+    factor2: string;
+    correlation: number;
+    significance: string;
+  }>;
+  weeklyReview: {
+    highlights: string[];
+    challenges: string[];
+    insights: string[];
+    nextWeekGoals: string[];
+  };
+}

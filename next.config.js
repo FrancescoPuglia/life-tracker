@@ -6,7 +6,13 @@ const nextConfig = {
     unoptimized: true
   },
   basePath: '/life-tracker',
-  assetPrefix: '/life-tracker/'
+  assetPrefix: '/life-tracker/',
+  typescript: {
+    ignoreBuildErrors: false
+  },
+  eslint: {
+    ignoreDuringBuilds: false
+  }
 }
 
 module.exports = nextConfig
