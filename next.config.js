@@ -5,8 +5,8 @@ const nextConfig = {
   images: {
     unoptimized: true
   },
-  basePath: '/life-tracker',
-  assetPrefix: '/life-tracker/',
+  basePath: process.env.NODE_ENV === 'production' ? '/life-tracker' : '',
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/life-tracker/' : '',
   typescript: {
     ignoreBuildErrors: false
   },

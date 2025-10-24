@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { Session, TimeBlock } from '@/types';
 
 interface NowBarProps {
-  currentSession?: Session;
-  currentTimeBlock?: TimeBlock;
+  currentSession?: Session | null;
+  currentTimeBlock?: TimeBlock | null;
   onStartSession: (taskId?: string) => void;
   onPauseSession: () => void;
   onStopSession: () => void;
