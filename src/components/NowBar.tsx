@@ -65,7 +65,7 @@ export default function NowBar({
     });
   };
 
-  const getNextBlock = () => {
+  const getNextBlock = (): TimeBlock | null => {
     // This would typically come from props or context
     return null; // Placeholder
   };

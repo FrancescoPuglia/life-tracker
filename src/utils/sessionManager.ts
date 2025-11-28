@@ -20,6 +20,9 @@ export class SessionManager {
   }
 
   private setupIdleDetection() {
+    // Only run in browser environment
+    if (typeof window === 'undefined') return;
+    
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
     
     const resetIdleTimer = () => {
@@ -70,6 +73,11 @@ export class SessionManager {
   }
 
   private async promptIdleAction(idleStartTime: Date): Promise<'pause' | 'stop' | 'continue' | 'subtract'> {
+    // Only run in browser environment
+    if (typeof window === 'undefined') {
+      return 'continue';
+    }
+    
     return new Promise((resolve) => {
       const modal = document.createElement('div');
       modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
