@@ -212,11 +212,11 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
       case 'goals_completed':
         return userStats.goalsCompleted >= badge.requirement.value;
       case 'goals_created':
-        return userStats.goalsCreated >= badge.requirement.value;
+        return (userStats.goalsCreated || 0) >= badge.requirement.value;
       case 'total_sessions':
-        return userStats.totalSessions >= badge.requirement.value;
+        return (userStats.totalSessions || 0) >= badge.requirement.value;
       case 'time_blocks_created':
-        return userStats.timeBlocksCreated >= badge.requirement.value;
+        return (userStats.timeBlocksCreated || 0) >= badge.requirement.value;
       case 'early_sessions':
         return userStats.earlySessionsCount >= badge.requirement.value;
       case 'evening_sessions':
