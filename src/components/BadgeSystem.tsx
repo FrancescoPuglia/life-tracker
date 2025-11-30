@@ -20,15 +20,44 @@ export interface Badge {
 }
 
 const ACHIEVEMENT_BADGES: Badge[] = [
-  // STREAK BADGES
+  // BEGINNER BADGES (Easy to achieve)
+  {
+    id: 'welcome',
+    name: 'Welcome Warrior',
+    description: 'Benvenuto nel tuo viaggio verso il successo!',
+    icon: 'Star',
+    rarity: 'common',
+    category: 'milestone',
+    requirement: { type: 'days_tracked', value: 1, description: '1 giorno di utilizzo' }
+  },
+  {
+    id: 'first-session',
+    name: 'Session Starter',
+    description: 'Avvia la tua prima sessione di lavoro',
+    icon: 'Rocket',
+    rarity: 'common',
+    category: 'milestone',
+    requirement: { type: 'total_sessions', value: 1, description: '1 sessione completata' }
+  },
+  {
+    id: 'time-planner',
+    name: 'Time Master',
+    description: 'Crea il tuo primo time block',
+    icon: 'Target',
+    rarity: 'common',
+    category: 'milestone',
+    requirement: { type: 'time_blocks_created', value: 1, description: '1 time block creato' }
+  },
+
+  // STREAK BADGES (Progressive)
   {
     id: 'first-streak',
     name: 'First Fire',
-    description: 'Completa la tua prima streak di 3 giorni',
+    description: 'Completa una streak di 2 giorni',
     icon: 'Flame',
     rarity: 'common',
     category: 'streak',
-    requirement: { type: 'habit_streak', value: 3, description: '3 giorni consecutivi' }
+    requirement: { type: 'habit_streak', value: 2, description: '2 giorni consecutivi' }
   },
   {
     id: 'week-warrior',
@@ -42,12 +71,83 @@ const ACHIEVEMENT_BADGES: Badge[] = [
   {
     id: 'month-master',
     name: 'Month Master',
-    description: 'Streak di 30 giorni - Sei un vero campione!',
+    description: 'Streak di 30 giorni - Sei un campione!',
     icon: 'Crown',
     rarity: 'epic',
     category: 'streak',
     requirement: { type: 'habit_streak', value: 30, description: '30 giorni consecutivi' }
   },
+
+  // FOCUS BADGES (Achievable goals)
+  {
+    id: 'first-focus',
+    name: 'Focus Initiate',
+    description: 'Completa 15 minuti di focus time',
+    icon: 'Target',
+    rarity: 'common',
+    category: 'focus',
+    requirement: { type: 'total_focus', value: 15, description: '15 minuti totali' }
+  },
+  {
+    id: 'focus-hour',
+    name: 'Focus Hour',
+    description: '1 ora di deep focus raggiunta',
+    icon: 'Zap',
+    rarity: 'rare',
+    category: 'focus',
+    requirement: { type: 'total_focus', value: 60, description: '60 minuti totali' }
+  },
+  {
+    id: 'focus-master',
+    name: 'Focus Master',
+    description: '10 ore di focus totali - Mente di ferro!',
+    icon: 'Award',
+    rarity: 'epic',
+    category: 'focus',
+    requirement: { type: 'total_focus', value: 600, description: '10 ore totali' }
+  },
+
+  // GOAL BADGES
+  {
+    id: 'goal-setter',
+    name: 'Goal Setter',
+    description: 'Crea il tuo primo obiettivo',
+    icon: 'Star',
+    rarity: 'common',
+    category: 'goal',
+    requirement: { type: 'goals_created', value: 1, description: '1 goal creato' }
+  },
+  {
+    id: 'goal-achiever',
+    name: 'Goal Achiever',
+    description: 'Completa il tuo primo obiettivo',
+    icon: 'Trophy',
+    rarity: 'rare',
+    category: 'goal',
+    requirement: { type: 'goals_completed', value: 1, description: '1 obiettivo completato' }
+  },
+
+  // CONSISTENCY BADGES (Realistic)
+  {
+    id: 'early-riser',
+    name: 'Early Riser',
+    description: 'Avvia 3 sessioni prima delle 8:00',
+    icon: 'Rocket',
+    rarity: 'rare',
+    category: 'consistency',
+    requirement: { type: 'early_sessions', value: 3, description: '3 sessioni mattutine' }
+  },
+  {
+    id: 'consistent-tracker',
+    name: 'Consistent Tracker',
+    description: 'Utilizza Life Tracker per 3 giorni',
+    icon: 'Shield',
+    rarity: 'rare',
+    category: 'milestone',
+    requirement: { type: 'days_tracked', value: 3, description: '3 giorni di utilizzo' }
+  },
+
+  // LEGENDARY ACHIEVEMENTS (Long-term)
   {
     id: 'legendary-streak',
     name: 'Legendary Streak',
@@ -57,92 +157,12 @@ const ACHIEVEMENT_BADGES: Badge[] = [
     category: 'streak',
     requirement: { type: 'habit_streak', value: 100, description: '100 giorni consecutivi' }
   },
-
-  // FOCUS BADGES  
-  {
-    id: 'first-focus',
-    name: 'Focus Initiate',
-    description: 'Completa la tua prima sessione di deep focus',
-    icon: 'Target',
-    rarity: 'common',
-    category: 'focus',
-    requirement: { type: 'focus_session', value: 1, description: '1 sessione focus' }
-  },
-  {
-    id: 'focus-master',
-    name: 'Focus Master',
-    description: '10 ore di deep focus in una settimana',
-    icon: 'Zap',
-    rarity: 'rare',
-    category: 'focus',
-    requirement: { type: 'weekly_focus', value: 600, description: '10 ore settimanali' }
-  },
-  {
-    id: 'focus-legend',
-    name: 'Focus Legend',
-    description: '100 ore di focus totali - Mente di acciaio!',
-    icon: 'Award',
-    rarity: 'legendary',
-    category: 'focus',
-    requirement: { type: 'total_focus', value: 6000, description: '100 ore totali' }
-  },
-
-  // GOAL BADGES
-  {
-    id: 'first-goal',
-    name: 'Goal Setter',
-    description: 'Completa il tuo primo obiettivo',
-    icon: 'Star',
-    rarity: 'common',
-    category: 'goal',
-    requirement: { type: 'goals_completed', value: 1, description: '1 obiettivo completato' }
-  },
-  {
-    id: 'goal-crusher',
-    name: 'Goal Crusher',
-    description: '5 obiettivi completati - Inarrestabile!',
-    icon: 'Trophy',
-    rarity: 'epic',
-    category: 'goal',
-    requirement: { type: 'goals_completed', value: 5, description: '5 obiettivi completati' }
-  },
-
-  // CONSISTENCY BADGES
-  {
-    id: 'early-bird',
-    name: 'Early Bird',
-    description: 'Inizia 10 sessioni prima delle 8:00',
-    icon: 'Rocket',
-    rarity: 'rare',
-    category: 'consistency',
-    requirement: { type: 'early_sessions', value: 10, description: '10 sessioni mattutine' }
-  },
-  {
-    id: 'night-owl',
-    name: 'Night Owl',
-    description: '20 sessioni serali di successo',
-    icon: 'Shield',
-    rarity: 'rare',
-    category: 'consistency',
-    requirement: { type: 'evening_sessions', value: 20, description: '20 sessioni serali' }
-  },
-
-  // MILESTONE BADGES
-  {
-    id: 'first-week',
-    name: 'First Week',
-    description: 'La tua prima settimana con Life Tracker',
-    icon: 'Star',
-    rarity: 'common',
-    category: 'milestone',
-    requirement: { type: 'days_tracked', value: 7, description: '7 giorni di utilizzo' }
-  },
   {
     id: 'power-user',
     name: 'Power User',
-    description: '30 giorni di tracciamento attivo',
+    description: '30 giorni di utilizzo attivo',
     icon: 'Crown',
-    rarity: 'epic',
+    rarity: 'legendary',
     category: 'milestone',
     requirement: { type: 'days_tracked', value: 30, description: '30 giorni di utilizzo' }
   }
@@ -166,6 +186,9 @@ interface BadgeSystemProps {
     maxStreak: number;
     totalFocusMinutes: number;
     goalsCompleted: number;
+    goalsCreated?: number;
+    totalSessions?: number;
+    timeBlocksCreated?: number;
     daysTracked: number;
     earlySessionsCount: number;
     eveningSessionsCount: number;
@@ -182,14 +205,18 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
     switch (badge.requirement.type) {
       case 'habit_streak':
         return userStats.maxStreak >= badge.requirement.value;
-      case 'focus_session':
-        return userStats.totalFocusMinutes > 0;
-      case 'weekly_focus':
-        return userStats.weeklyFocusMinutes >= badge.requirement.value;
       case 'total_focus':
         return userStats.totalFocusMinutes >= badge.requirement.value;
+      case 'weekly_focus':
+        return userStats.weeklyFocusMinutes >= badge.requirement.value;
       case 'goals_completed':
         return userStats.goalsCompleted >= badge.requirement.value;
+      case 'goals_created':
+        return userStats.goalsCreated >= badge.requirement.value;
+      case 'total_sessions':
+        return userStats.totalSessions >= badge.requirement.value;
+      case 'time_blocks_created':
+        return userStats.timeBlocksCreated >= badge.requirement.value;
       case 'early_sessions':
         return userStats.earlySessionsCount >= badge.requirement.value;
       case 'evening_sessions':
@@ -207,14 +234,23 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
       case 'habit_streak':
         current = userStats.maxStreak;
         break;
-      case 'weekly_focus':
-        current = userStats.weeklyFocusMinutes;
-        break;
       case 'total_focus':
         current = userStats.totalFocusMinutes;
         break;
+      case 'weekly_focus':
+        current = userStats.weeklyFocusMinutes;
+        break;
       case 'goals_completed':
         current = userStats.goalsCompleted;
+        break;
+      case 'goals_created':
+        current = userStats.goalsCreated || 0;
+        break;
+      case 'total_sessions':
+        current = userStats.totalSessions || 0;
+        break;
+      case 'time_blocks_created':
+        current = userStats.timeBlocksCreated || 0;
         break;
       case 'early_sessions':
         current = userStats.earlySessionsCount;

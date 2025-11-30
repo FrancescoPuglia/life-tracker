@@ -41,6 +41,9 @@ export default function HomePage() {
     maxStreak: 0,
     totalFocusMinutes: 0,
     goalsCompleted: 0,
+    goalsCreated: 0,
+    totalSessions: 0,
+    timeBlocksCreated: 0,
     daysTracked: 0,
     earlySessionsCount: 0,
     eveningSessionsCount: 0,
@@ -161,42 +164,61 @@ export default function HomePage() {
       const allSessions = await db.getAll<Session>('sessions');
       const userSessions = allSessions.filter(s => s.userId === 'user-1');
       
-      // Calculate max streak from habits
+      // Calculate max streak from habits (real data)
       const maxStreak = habits.reduce((max, habit) => Math.max(max, habit.streakCount || 0), 0);
       
-      // Calculate total focus minutes
-      const totalFocusMinutes = userSessions
-        .filter(s => s.tags.includes('focus'))
-        .reduce((total, s) => total + (s.duration || 0), 0) / 60;
+      // Calculate total focus minutes from actual sessions
+      const focusSessions = userSessions.filter(s => s.tags && s.tags.includes('focus'));
+      const totalFocusMinutes = focusSessions.reduce((total, s) => total + (s.duration || 0), 0) / 60;
 
-      // Calculate goals completed
+      // Calculate goals completed and created (real data)
       const goalsCompleted = goals.filter(g => g.status === 'completed').length;
+      const goalsCreated = goals.length;
 
-      // Days tracked (simplified - should be based on actual usage)
-      const daysTracked = Math.min(Math.floor((Date.now() - new Date('2024-01-01').getTime()) / (1000 * 60 * 60 * 24)), 365);
+      // Calculate total sessions and time blocks created (real data)
+      const totalSessions = userSessions.length;
+      const timeBlocksCreated = timeBlocks.length;
 
-      // Early sessions (before 8 AM)
+      // Calculate REAL days tracked based on actual data
+      const uniqueDays = new Set();
+      userSessions.forEach(session => {
+        const day = new Date(session.startTime).toDateString();
+        uniqueDays.add(day);
+      });
+      // Include today if user has used the app today
+      if (userSessions.some(s => new Date(s.startTime).toDateString() === new Date().toDateString()) || 
+          timeBlocks.length > 0 || goals.length > 0 || habits.length > 0) {
+        uniqueDays.add(new Date().toDateString());
+      }
+      const daysTracked = uniqueDays.size;
+
+      // Early sessions (before 8 AM) - real data
       const earlySessionsCount = userSessions.filter(s => {
         const hour = new Date(s.startTime).getHours();
         return hour < 8;
       }).length;
 
-      // Evening sessions (after 6 PM)
+      // Evening sessions (after 6 PM) - real data  
       const eveningSessionsCount = userSessions.filter(s => {
         const hour = new Date(s.startTime).getHours();
         return hour >= 18;
       }).length;
 
-      // Weekly focus minutes
+      // Weekly focus minutes (real data from last 7 days)
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const weeklyFocusMinutes = userSessions
-        .filter(s => new Date(s.startTime) >= oneWeekAgo && s.tags.includes('focus'))
-        .reduce((total, s) => total + (s.duration || 0), 0) / 60;
+      const recentFocusSessions = userSessions.filter(s => 
+        new Date(s.startTime) >= oneWeekAgo && 
+        s.tags && s.tags.includes('focus')
+      );
+      const weeklyFocusMinutes = recentFocusSessions.reduce((total, s) => total + (s.duration || 0), 0) / 60;
 
       setUserStats({
         maxStreak,
         totalFocusMinutes,
         goalsCompleted,
+        goalsCreated,
+        totalSessions,
+        timeBlocksCreated,
         daysTracked,
         earlySessionsCount,
         eveningSessionsCount,
