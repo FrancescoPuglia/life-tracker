@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Trophy, Star, Flame, Target, Zap, Crown, Award, Shield, Rocket, Diamond } from 'lucide-react';
 
 export interface Badge {
