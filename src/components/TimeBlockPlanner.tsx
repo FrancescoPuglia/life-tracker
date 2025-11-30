@@ -26,6 +26,7 @@ export default function TimeBlockPlanner({
 }: TimeBlockPlannerProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number; time: Date } | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ startTime: Date; endTime: Date } | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newBlockData, setNewBlockData] = useState<Partial<TimeBlock>>({});
@@ -73,6 +74,11 @@ export default function TimeBlockPlanner({
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const rect = plannerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const relativeY = e.clientY - rect.top;
     const time = getTimeFromPosition(e.clientY);
     setDragStart({ x: e.clientX, y: e.clientY, time });
     setIsDragging(true);
@@ -81,12 +87,21 @@ export default function TimeBlockPlanner({
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !dragStart) return;
     
-    // Visual feedback for drag selection could be added here
+    e.preventDefault();
+    
+    const currentTime = getTimeFromPosition(e.clientY);
+    const startTime = dragStart.time;
+    
+    setDragPreview({
+      startTime: startTime < currentTime ? startTime : currentTime,
+      endTime: startTime < currentTime ? currentTime : startTime
+    });
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (!isDragging || !dragStart) return;
     
+    e.preventDefault();
     const endTime = getTimeFromPosition(e.clientY);
     const startTime = dragStart.time;
     
@@ -107,6 +122,28 @@ export default function TimeBlockPlanner({
     
     setIsDragging(false);
     setDragStart(null);
+    setDragPreview(null);
+  };
+
+  const handleQuickCreateBlock = (hour: number) => {
+    const startTime = new Date(selectedDate);
+    startTime.setHours(hour, 0, 0, 0);
+    
+    const endTime = new Date(selectedDate);
+    endTime.setHours(hour + 1, 0, 0, 0);
+
+    const newBlock: Partial<TimeBlock> = {
+      startTime,
+      endTime,
+      title: 'New Time Block',
+      status: 'planned',
+      type: 'work',
+      userId: 'user-1',
+      domainId: 'domain-1',
+    };
+    
+    setNewBlockData(newBlock);
+    setShowCreateModal(true);
   };
 
   const handleCreateBlock = () => {
@@ -161,6 +198,13 @@ export default function TimeBlockPlanner({
         
         <div className="flex items-center space-x-2">
           <button
+            onClick={() => handleQuickCreateBlock(new Date().getHours())}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            + Add Block
+          </button>
+          <div className="border-l border-gray-300 h-6"></div>
+          <button
             onClick={() => onDateChange(new Date(selectedDate.getTime() - 24 * 60 * 60 * 1000))}
             className="p-2 text-gray-400 hover:text-gray-600"
           >
@@ -185,22 +229,34 @@ export default function TimeBlockPlanner({
       <div className="relative">
         <div 
           ref={plannerRef}
-          className="relative h-96 overflow-y-auto"
+          className="relative h-96 overflow-y-auto bg-white"
           style={{ height: `${24 * HOUR_HEIGHT}px` }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onMouseLeave={() => {
+            setIsDragging(false);
+            setDragStart(null);
+            setDragPreview(null);
+          }}
         >
           {/* Hour Grid */}
           {HOURS.map(hour => (
             <div
               key={hour}
-              className="absolute left-0 right-0 border-t border-gray-100"
+              className="absolute left-0 right-0 border-t border-gray-100 group hover:bg-blue-50 transition-colors"
               style={{ top: `${hour * HOUR_HEIGHT}px`, height: `${HOUR_HEIGHT}px` }}
             >
               <div className="absolute left-2 top-1 text-xs text-gray-500 font-mono">
                 {formatTime(hour)}
               </div>
+              <button
+                onClick={() => handleQuickCreateBlock(hour)}
+                className="absolute right-4 top-1 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-500 text-white w-6 h-6 rounded-full text-xs flex items-center justify-center hover:bg-blue-600"
+                title={`Add block at ${formatTime(hour)}`}
+              >
+                +
+              </button>
             </div>
           ))}
 
@@ -230,6 +286,20 @@ export default function TimeBlockPlanner({
             </div>
           ))}
 
+          {/* Drag Preview */}
+          {dragPreview && (
+            <div
+              className="absolute left-16 right-4 bg-blue-200 border-2 border-blue-400 border-dashed rounded-lg opacity-60 z-20 flex items-center justify-center"
+              style={{
+                top: `${getPositionFromTime(dragPreview.startTime)}px`,
+                height: `${getDurationHeight(dragPreview.startTime, dragPreview.endTime)}px`,
+                minHeight: '40px'
+              }}
+            >
+              <span className="text-blue-700 text-sm font-medium">New Block</span>
+            </div>
+          )}
+
           {/* Current Time Indicator */}
           {selectedDate.toDateString() === new Date().toDateString() && (
             <div
@@ -241,6 +311,20 @@ export default function TimeBlockPlanner({
           )}
         </div>
       </div>
+
+      {/* Help Section */}
+      {filteredBlocks.length === 0 && (
+        <div className="p-4 bg-gray-50 border-t border-gray-200">
+          <div className="text-center text-gray-500">
+            <p className="text-sm mb-2">📅 <strong>Come creare time blocks:</strong></p>
+            <div className="text-xs space-y-1">
+              <p>• Clicca e trascina sulla griglia per creare un blocco</p>
+              <p>• Usa il pulsante "+ Add Block" nell'header</p>
+              <p>• Hover su un'ora e clicca il pulsante "+" che appare</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Block Modal */}
       {showCreateModal && (

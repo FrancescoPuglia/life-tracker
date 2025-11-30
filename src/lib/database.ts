@@ -224,6 +224,304 @@ class LifeTrackerDB {
       energy: todaySessions.find(s => s.energy !== undefined)?.energy,
     };
   }
+
+  async calculatePlanVsActualData(userId: string, days: number = 7): Promise<Array<{
+    date: string;
+    planned: number;
+    actual: number;
+    adherence: number;
+  }>> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const result = [];
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dayStart = new Date(d);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(d);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      // Get all time blocks for this day
+      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+      const dayTimeBlocks = allTimeBlocks.filter(block => 
+        block.userId === userId &&
+        new Date(block.startTime) >= dayStart && 
+        new Date(block.startTime) <= dayEnd
+      );
+
+      // Calculate planned hours
+      const plannedMinutes = dayTimeBlocks.reduce((total, block) => {
+        const startTime = new Date(block.startTime);
+        const endTime = new Date(block.endTime);
+        return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
+      }, 0);
+
+      // Calculate actual hours
+      const actualMinutes = dayTimeBlocks.reduce((total, block) => {
+        if (block.actualStartTime && block.actualEndTime) {
+          const actualStart = new Date(block.actualStartTime);
+          const actualEnd = new Date(block.actualEndTime);
+          return total + (actualEnd.getTime() - actualStart.getTime()) / (1000 * 60);
+        }
+        return total;
+      }, 0);
+
+      const plannedHours = plannedMinutes / 60;
+      const actualHours = actualMinutes / 60;
+      const adherence = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
+
+      result.push({
+        date: d.toISOString().split('T')[0],
+        planned: Number(plannedHours.toFixed(1)),
+        actual: Number(actualHours.toFixed(1)),
+        adherence: Math.round(adherence)
+      });
+    }
+
+    return result;
+  }
+
+  async calculateTimeAllocation(userId: string, days: number = 7): Promise<Array<{
+    domain: string;
+    hours: number;
+    color: string;
+  }>> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    // Get all domains
+    const allDomains = await this.getAll<Domain>('domains');
+    const userDomains = allDomains.filter(d => d.userId === userId);
+
+    // Get all sessions in the period
+    const allSessions = await this.getAll<Session>('sessions');
+    const periodSessions = allSessions.filter(session => 
+      session.userId === userId &&
+      new Date(session.startTime) >= startDate &&
+      new Date(session.startTime) <= endDate &&
+      session.status === 'completed'
+    );
+
+    // Default colors for domains
+    const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
+
+    const domainHours = new Map<string, number>();
+
+    // Calculate hours per domain
+    for (const session of periodSessions) {
+      const domain = userDomains.find(d => d.id === session.domainId);
+      const domainName = domain?.name || 'Uncategorized';
+      const hours = (session.duration || 0) / 3600; // Convert seconds to hours
+
+      domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
+    }
+
+    // Convert to array format
+    const result = Array.from(domainHours.entries()).map(([domain, hours], index) => ({
+      domain,
+      hours: Number(hours.toFixed(1)),
+      color: userDomains.find(d => d.name === domain)?.color || defaultColors[index % defaultColors.length]
+    }));
+
+    // Sort by hours descending
+    return result.sort((a, b) => b.hours - a.hours);
+  }
+
+  async calculateFocusTrend(userId: string, days: number = 7): Promise<Array<{
+    date: string;
+    focusMinutes: number;
+    mood: number;
+    energy: number;
+  }>> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const result = [];
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dayStart = new Date(d);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(d);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      // Get all sessions for this day
+      const allSessions = await this.getAll<Session>('sessions');
+      const daySessions = allSessions.filter(session => 
+        session.userId === userId &&
+        new Date(session.startTime) >= dayStart &&
+        new Date(session.startTime) <= dayEnd &&
+        session.status === 'completed'
+      );
+
+      // Calculate focus minutes
+      const focusMinutes = daySessions
+        .filter(session => session.tags.includes('focus'))
+        .reduce((total, session) => total + (session.duration || 0), 0) / 60;
+
+      // Calculate average mood and energy
+      const moodSessions = daySessions.filter(s => s.mood !== undefined);
+      const energySessions = daySessions.filter(s => s.energy !== undefined);
+
+      const avgMood = moodSessions.length > 0 
+        ? moodSessions.reduce((sum, s) => sum + (s.mood || 0), 0) / moodSessions.length 
+        : 5;
+
+      const avgEnergy = energySessions.length > 0
+        ? energySessions.reduce((sum, s) => sum + (s.energy || 0), 0) / energySessions.length
+        : 5;
+
+      result.push({
+        date: d.toISOString().split('T')[0],
+        focusMinutes: Math.round(focusMinutes),
+        mood: Math.round(avgMood * 10) / 10,
+        energy: Math.round(avgEnergy * 10) / 10
+      });
+    }
+
+    return result;
+  }
+
+  async calculateCorrelations(userId: string, days: number = 30): Promise<Array<{
+    factor1: string;
+    factor2: string;
+    correlation: number;
+    significance: string;
+  }>> {
+    const focusTrend = await this.calculateFocusTrend(userId, days);
+    
+    if (focusTrend.length < 3) {
+      return []; // Need at least 3 data points for correlation
+    }
+
+    const correlations = [];
+
+    // Calculate correlation between mood and focus
+    const moodFocusCorr = this.calculatePearsonCorrelation(
+      focusTrend.map(d => d.mood),
+      focusTrend.map(d => d.focusMinutes)
+    );
+
+    // Calculate correlation between energy and focus
+    const energyFocusCorr = this.calculatePearsonCorrelation(
+      focusTrend.map(d => d.energy),
+      focusTrend.map(d => d.focusMinutes)
+    );
+
+    // Calculate correlation between mood and energy
+    const moodEnergyCorr = this.calculatePearsonCorrelation(
+      focusTrend.map(d => d.mood),
+      focusTrend.map(d => d.energy)
+    );
+
+    if (!isNaN(moodFocusCorr)) {
+      correlations.push({
+        factor1: 'Mood',
+        factor2: 'Focus',
+        correlation: Math.round(moodFocusCorr * 100) / 100,
+        significance: this.getSignificance(Math.abs(moodFocusCorr))
+      });
+    }
+
+    if (!isNaN(energyFocusCorr)) {
+      correlations.push({
+        factor1: 'Energy',
+        factor2: 'Focus',
+        correlation: Math.round(energyFocusCorr * 100) / 100,
+        significance: this.getSignificance(Math.abs(energyFocusCorr))
+      });
+    }
+
+    if (!isNaN(moodEnergyCorr)) {
+      correlations.push({
+        factor1: 'Mood',
+        factor2: 'Energy',
+        correlation: Math.round(moodEnergyCorr * 100) / 100,
+        significance: this.getSignificance(Math.abs(moodEnergyCorr))
+      });
+    }
+
+    return correlations;
+  }
+
+  private calculatePearsonCorrelation(x: number[], y: number[]): number {
+    if (x.length !== y.length || x.length === 0) return NaN;
+
+    const n = x.length;
+    const sumX = x.reduce((a, b) => a + b, 0);
+    const sumY = y.reduce((a, b) => a + b, 0);
+    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
+    const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
+    const sumYY = y.reduce((sum, yi) => sum + yi * yi, 0);
+
+    const numerator = n * sumXY - sumX * sumY;
+    const denominator = Math.sqrt((n * sumXX - sumX * sumX) * (n * sumYY - sumY * sumY));
+
+    return denominator === 0 ? NaN : numerator / denominator;
+  }
+
+  private getSignificance(correlation: number): string {
+    if (correlation >= 0.7) return 'High';
+    if (correlation >= 0.5) return 'Medium';
+    if (correlation >= 0.3) return 'Low';
+    return 'None';
+  }
+
+  async generateWeeklyReview(userId: string): Promise<{
+    highlights: string[];
+    challenges: string[];
+    insights: string[];
+    nextWeekGoals: string[];
+  }> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7);
+
+    const planVsActual = await this.calculatePlanVsActualData(userId, 7);
+    const timeAllocation = await this.calculateTimeAllocation(userId, 7);
+    const focusTrend = await this.calculateFocusTrend(userId, 7);
+
+    const highlights = [];
+    const challenges = [];
+    const insights = [];
+    const nextWeekGoals = [];
+
+    // Analyze adherence
+    const avgAdherence = planVsActual.reduce((sum, day) => sum + day.adherence, 0) / planVsActual.length;
+    if (avgAdherence >= 90) {
+      highlights.push('Excellent planning adherence this week');
+    } else if (avgAdherence < 70) {
+      challenges.push('Low planning adherence - consider more realistic time blocks');
+      nextWeekGoals.push('Improve time estimation accuracy');
+    }
+
+    // Analyze focus time
+    const totalFocusHours = focusTrend.reduce((sum, day) => sum + day.focusMinutes, 0) / 60;
+    if (totalFocusHours >= 20) {
+      highlights.push('Strong focus time this week');
+    } else if (totalFocusHours < 10) {
+      challenges.push('Limited focused work time');
+      nextWeekGoals.push('Schedule more deep focus blocks');
+    }
+
+    // Analyze domain balance
+    const topDomain = timeAllocation[0];
+    if (topDomain && topDomain.hours > timeAllocation.reduce((sum, d) => sum + d.hours, 0) * 0.6) {
+      insights.push(`${topDomain.domain} dominated this week - consider better balance`);
+      nextWeekGoals.push('Diversify time allocation across domains');
+    }
+
+    // Default content if nothing specific found
+    if (highlights.length === 0) highlights.push('Keep building consistent habits');
+    if (challenges.length === 0) challenges.push('Continue monitoring time allocation');
+    if (insights.length === 0) insights.push('Track mood and energy for better patterns');
+    if (nextWeekGoals.length === 0) nextWeekGoals.push('Maintain current momentum');
+
+    return { highlights, challenges, insights, nextWeekGoals };
+  }
 }
 
 export const db = new LifeTrackerDB();
