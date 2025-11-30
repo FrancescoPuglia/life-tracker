@@ -14,6 +14,8 @@ import TimeBlockPlanner from '@/components/TimeBlockPlanner';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 import HabitsTracker from '@/components/HabitsTracker';
 import OKRManager from '@/components/OKRManager';
+import DailyMotivation from '@/components/DailyMotivation';
+import BadgeSystem from '@/components/BadgeSystem';
 
 export default function HomePage() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
@@ -35,10 +37,20 @@ export default function HomePage() {
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [userStats, setUserStats] = useState({
+    maxStreak: 0,
+    totalFocusMinutes: 0,
+    goalsCompleted: 0,
+    daysTracked: 0,
+    earlySessionsCount: 0,
+    eveningSessionsCount: 0,
+    weeklyFocusMinutes: 0
+  });
+  const [showBadges, setShowBadges] = useState(false);
 
   // UI states
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'planner' | 'habits' | 'okr' | 'analytics'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'habits' | 'okr' | 'analytics' | 'badges'>('planner');
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -136,10 +148,62 @@ export default function HomePage() {
         setCurrentSession(activeSessions[0]);
       }
 
-      // Load analytics data
+      // Load analytics data and user stats
       await loadAnalyticsData();
+      await calculateUserStats();
     } catch (error) {
       console.error('Failed to load data:', error);
+    }
+  };
+
+  const calculateUserStats = async () => {
+    try {
+      const allSessions = await db.getAll<Session>('sessions');
+      const userSessions = allSessions.filter(s => s.userId === 'user-1');
+      
+      // Calculate max streak from habits
+      const maxStreak = habits.reduce((max, habit) => Math.max(max, habit.streakCount || 0), 0);
+      
+      // Calculate total focus minutes
+      const totalFocusMinutes = userSessions
+        .filter(s => s.tags.includes('focus'))
+        .reduce((total, s) => total + (s.duration || 0), 0) / 60;
+
+      // Calculate goals completed
+      const goalsCompleted = goals.filter(g => g.status === 'completed').length;
+
+      // Days tracked (simplified - should be based on actual usage)
+      const daysTracked = Math.min(Math.floor((Date.now() - new Date('2024-01-01').getTime()) / (1000 * 60 * 60 * 24)), 365);
+
+      // Early sessions (before 8 AM)
+      const earlySessionsCount = userSessions.filter(s => {
+        const hour = new Date(s.startTime).getHours();
+        return hour < 8;
+      }).length;
+
+      // Evening sessions (after 6 PM)
+      const eveningSessionsCount = userSessions.filter(s => {
+        const hour = new Date(s.startTime).getHours();
+        return hour >= 18;
+      }).length;
+
+      // Weekly focus minutes
+      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const weeklyFocusMinutes = userSessions
+        .filter(s => new Date(s.startTime) >= oneWeekAgo && s.tags.includes('focus'))
+        .reduce((total, s) => total + (s.duration || 0), 0) / 60;
+
+      setUserStats({
+        maxStreak,
+        totalFocusMinutes,
+        goalsCompleted,
+        daysTracked,
+        earlySessionsCount,
+        eveningSessionsCount,
+        weeklyFocusMinutes
+      });
+    } catch (error) {
+      console.error('Failed to calculate user stats:', error);
     }
   };
 
@@ -392,6 +456,11 @@ export default function HomePage() {
     }
   };
 
+  const handleBadgeUnlocked = (badge: any) => {
+    // Show celebration toast or animation
+    console.log('Badge unlocked:', badge.name);
+  };
+
   const handleCreateTask = async (taskData: Partial<Task>) => {
     try {
       const newTask = await db.create<Task>('tasks', taskData as Task);
@@ -430,56 +499,76 @@ export default function HomePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading Life Tracker...</p>
+          <div className="w-20 h-20 mx-auto mb-8">
+            <div className="w-20 h-20 border-4 border-transparent rounded-full animate-spin neon-border"></div>
+          </div>
+          <h2 className="text-3xl font-bold holographic-text mb-4">LIFE TRACKER</h2>
+          <p className="text-gray-300 text-lg">Inizializzazione sistema...</p>
+          <div className="mt-6 flex justify-center space-x-2">
+            {[...Array(3)].map((_, i) => (
+              <div 
+                key={i}
+                className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse"
+                style={{ animationDelay: `${i * 0.3}s` }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
+      {/* Daily Motivation */}
+      <DailyMotivation />
+
       {/* NOW Bar - Always visible at top */}
-      <NowBar
-        currentSession={currentSession}
-        currentTimeBlock={currentTimeBlock}
-        onStartSession={handleStartSession}
-        onPauseSession={handlePauseSession}
-        onStopSession={handleStopSession}
-      />
+      <div className="glass-navbar fixed top-0 left-0 right-0 z-40">
+        <NowBar
+          currentSession={currentSession}
+          currentTimeBlock={currentTimeBlock}
+          onStartSession={handleStartSession}
+          onPauseSession={handlePauseSession}
+          onStopSession={handleStopSession}
+        />
+      </div>
 
       {/* Main Content */}
       <div className="pt-20 pb-8">
         <div className="max-w-7xl mx-auto px-4 space-y-6">
           {/* KPI Dashboard */}
-          <KPIDashboard 
-            kpis={todayKPIs}
-            onRefresh={loadData}
-          />
+          <div className="futuristic-card">
+            <KPIDashboard 
+              kpis={todayKPIs}
+              onRefresh={loadData}
+            />
+          </div>
 
           {/* Navigation Tabs */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="border-b border-gray-200">
+          <div className="futuristic-card">
+            <div className="border-b border-gray-700">
               <nav className="flex space-x-8 px-6">
                 {[
-                  { id: 'planner', label: 'Time Planner', icon: '📅' },
+                  { id: 'planner', label: 'Time Planner', icon: '🚀' },
                   { id: 'habits', label: 'Habits', icon: '🔥' },
                   { id: 'okr', label: 'Goals & Projects', icon: '🎯' },
                   { id: 'analytics', label: 'Analytics', icon: '📊' },
+                  { id: 'badges', label: 'Badges', icon: '🏆' },
                 ].map(({ id, label, icon }) => (
                   <button
                     key={id}
                     onClick={() => setActiveTab(id as any)}
-                    className={`flex items-center space-x-2 py-4 text-sm font-medium border-b-2 transition-colors ${
+                    className={`flex items-center space-x-3 py-4 text-sm font-medium border-b-2 transition-all duration-300 btn-futuristic ${
                       activeTab === id
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                        ? 'border-blue-400 text-blue-400 neon-text'
+                        : 'border-transparent text-gray-400 hover:text-white'
                     }`}
                   >
-                    <span>{icon}</span>
-                    <span>{label}</span>
+                    <span className="text-xl">{icon}</span>
+                    <span className="font-semibold tracking-wider">{label}</span>
                   </button>
                 ))}
               </nav>
@@ -533,6 +622,13 @@ export default function HomePage() {
                   data={analyticsData || emptyAnalyticsData}
                   timeRange={timeRange}
                   onTimeRangeChange={setTimeRange}
+                />
+              )}
+
+              {activeTab === 'badges' && (
+                <BadgeSystem
+                  userStats={userStats}
+                  onBadgeUnlocked={handleBadgeUnlocked}
                 />
               )}
             </div>

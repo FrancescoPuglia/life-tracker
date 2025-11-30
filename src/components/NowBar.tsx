@@ -71,31 +71,33 @@ export default function NowBar({
   };
 
   return (
-    <div className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 shadow-sm z-50">
+    <div className="w-full bg-transparent">
       <div className="max-w-7xl mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
           {/* Current Time */}
           <div className="flex items-center space-x-6">
-            <div className="text-2xl font-mono font-bold text-gray-900">
+            <div className="text-3xl font-mono font-bold neon-text">
               {formatClock(currentTime)}
             </div>
             
             {/* Time Block Info */}
             {currentTimeBlock && (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-4 glass-card p-4">
                 <div className="text-sm">
-                  <div className="font-medium text-gray-900">{currentTimeBlock.title}</div>
-                  <div className={`text-xs ${isOverrun ? 'text-red-600' : 'text-gray-500'}`}>
-                    {isOverrun ? 'Overrun: ' : 'Remaining: '}
-                    {formatTime(timeBlockRemaining)}
+                  <div className="font-medium text-white text-lg">{currentTimeBlock.title}</div>
+                  <div className={`text-xs ${isOverrun ? 'text-red-400' : 'text-blue-300'}`}>
+                    {isOverrun ? '⚠️ Overrun: ' : '⏰ Remaining: '}
+                    <span className="font-mono font-bold">
+                      {formatTime(timeBlockRemaining)}
+                    </span>
                   </div>
                 </div>
                 
                 {/* Progress Bar */}
-                <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div className="w-40 futuristic-progress">
                   <div 
-                    className={`h-full transition-all duration-300 ${
-                      isOverrun ? 'bg-red-500' : 'bg-blue-500'
+                    className={`progress-fill-futuristic ${
+                      isOverrun ? 'bg-gradient-to-r from-red-500 to-orange-500' : ''
                     }`}
                     style={{
                       width: `${Math.min(100, Math.max(0, 
@@ -142,35 +144,36 @@ export default function NowBar({
           </div>
 
           {/* Session Controls */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
             {!currentSession ? (
               <button
                 onClick={() => onStartSession()}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="btn-futuristic bg-gradient-to-r from-green-500 to-emerald-600 flex items-center space-x-2 pulse-glow"
               >
-                Start Session
+                <span>▶️</span>
+                <span>START POWER</span>
               </button>
             ) : currentSession.status === 'active' ? (
               <>
                 <button
                   onClick={onPauseSession}
-                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
+                  className="btn-futuristic bg-gradient-to-r from-yellow-500 to-orange-600"
                 >
-                  Pause
+                  ⏸️ PAUSE
                 </button>
                 <button
                   onClick={onStopSession}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  className="btn-futuristic bg-gradient-to-r from-red-500 to-pink-600"
                 >
-                  Stop
+                  ⏹️ STOP
                 </button>
               </>
             ) : (
               <button
                 onClick={() => onStartSession()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="btn-futuristic bg-gradient-to-r from-blue-500 to-purple-600 pulse-glow"
               >
-                Resume
+                🔄 RESUME
               </button>
             )}
           </div>
