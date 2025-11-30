@@ -68,95 +68,135 @@ export default function AnalyticsDashboard({
     ? data.focusTrend.reduce((sum, item) => sum + item.focusMinutes, 0) / data.focusTrend.length
     : 0;
 
-  const PlanVsActualChart = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900">Plan vs Actual</h3>
-        <div className="flex items-center space-x-4 text-sm">
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-blue-500 rounded"></div>
-            <span>Planned</span>
+  const PlanVsActualChart = () => {
+    if (data.planVsActual.length === 0) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Plan vs Actual</h3>
+          <div className="bg-gray-50 rounded-lg p-8 text-center">
+            <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h4 className="text-lg font-medium text-gray-600 mb-2">No Time Tracking Data</h4>
+            <p className="text-sm text-gray-500 mb-4">
+              Create time blocks in the Time Planner and track sessions to see your planning accuracy.
+            </p>
+            <div className="text-xs text-gray-400">
+              This chart shows how well you stick to your planned schedule vs actual time spent.
+            </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-green-500 rounded"></div>
-            <span>Actual</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">Plan vs Actual</h3>
+          <div className="flex items-center space-x-4 text-sm">
+            <div className="flex items-center space-x-2">
+              <div className="w-3 h-3 bg-blue-500 rounded"></div>
+              <span>Planned</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <div className="w-3 h-3 bg-green-500 rounded"></div>
+              <span>Actual</span>
+            </div>
           </div>
         </div>
-      </div>
-      
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data.planVsActual}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="date" />
-          <YAxis />
-          <Tooltip 
-            formatter={(value: number, name: string) => [formatHours(value), name]}
-            labelFormatter={(label) => `Date: ${label}`}
-          />
-          <Bar dataKey="planned" fill="#3B82F6" name="Planned Hours" />
-          <Bar dataKey="actual" fill="#10B981" name="Actual Hours" />
-        </BarChart>
-      </ResponsiveContainer>
-
-      <div className="grid grid-cols-3 gap-4 mt-4">
-        <div className="bg-blue-50 rounded-lg p-3">
-          <div className="text-sm font-medium text-blue-600">Avg Adherence</div>
-          <div className="text-xl font-bold text-blue-900">{formatPercentage(averageAdherence)}</div>
-        </div>
-        <div className="bg-gray-50 rounded-lg p-3">
-          <div className="text-sm font-medium text-gray-600">Total Planned</div>
-          <div className="text-xl font-bold text-gray-900">{formatHours(totalPlannedHours)}</div>
-        </div>
-        <div className="bg-green-50 rounded-lg p-3">
-          <div className="text-sm font-medium text-green-600">Total Actual</div>
-          <div className="text-xl font-bold text-green-900">{formatHours(totalActualHours)}</div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const TimeAllocationChart = () => (
-    <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-gray-900">Time Allocation</h3>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ResponsiveContainer width="100%" height={250}>
-          <PieChart>
-            <Pie
-              data={data.timeAllocation}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={({ domain, percent }) => `${domain} (${(percent * 100).toFixed(0)}%)`}
-              outerRadius={80}
-              fill="#8884d8"
-              dataKey="hours"
-            >
-              {data.timeAllocation.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value: number) => [formatHours(value), 'Hours']} />
-          </PieChart>
+        
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={data.planVsActual}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="date" />
+            <YAxis />
+            <Tooltip 
+              formatter={(value: number, name: string) => [formatHours(value), name]}
+              labelFormatter={(label) => `Date: ${label}`}
+            />
+            <Bar dataKey="planned" fill="#3B82F6" name="Planned Hours" />
+            <Bar dataKey="actual" fill="#10B981" name="Actual Hours" />
+          </BarChart>
         </ResponsiveContainer>
 
-        <div className="space-y-2">
-          {data.timeAllocation.map((item, index) => (
-            <div key={item.domain} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-              <div className="flex items-center space-x-2">
-                <div 
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: item.color || COLORS[index % COLORS.length] }}
-                ></div>
-                <span className="text-sm font-medium">{item.domain}</span>
-              </div>
-              <span className="text-sm text-gray-600">{formatHours(item.hours)}</span>
-            </div>
-          ))}
+        <div className="grid grid-cols-3 gap-4 mt-4">
+          <div className="bg-blue-50 rounded-lg p-3">
+            <div className="text-sm font-medium text-blue-600">Avg Adherence</div>
+            <div className="text-xl font-bold text-blue-900">{formatPercentage(averageAdherence)}</div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-sm font-medium text-gray-600">Total Planned</div>
+            <div className="text-xl font-bold text-gray-900">{formatHours(totalPlannedHours)}</div>
+          </div>
+          <div className="bg-green-50 rounded-lg p-3">
+            <div className="text-sm font-medium text-green-600">Total Actual</div>
+            <div className="text-xl font-bold text-green-900">{formatHours(totalActualHours)}</div>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const TimeAllocationChart = () => {
+    if (data.timeAllocation.length === 0) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Time Allocation</h3>
+          <div className="bg-gray-50 rounded-lg p-8 text-center">
+            <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h4 className="text-lg font-medium text-gray-600 mb-2">No Domain Tracking</h4>
+            <p className="text-sm text-gray-500 mb-4">
+              Start tracking sessions across different life domains to see how you allocate your time.
+            </p>
+            <div className="text-xs text-gray-400">
+              This chart shows time distribution across domains like Work, Health, Learning, etc.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Time Allocation</h3>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <ResponsiveContainer width="100%" height={250}>
+            <PieChart>
+              <Pie
+                data={data.timeAllocation}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ domain, percent }) => `${domain} (${(percent * 100).toFixed(0)}%)`}
+                outerRadius={80}
+                fill="#8884d8"
+                dataKey="hours"
+              >
+                {data.timeAllocation.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value: number) => [formatHours(value), 'Hours']} />
+            </PieChart>
+          </ResponsiveContainer>
+
+          <div className="space-y-2">
+            {data.timeAllocation.map((item, index) => (
+              <div key={item.domain} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                <div className="flex items-center space-x-2">
+                  <div 
+                    className="w-4 h-4 rounded"
+                    style={{ backgroundColor: item.color || COLORS[index % COLORS.length] }}
+                  ></div>
+                  <span className="text-sm font-medium">{item.domain}</span>
+                </div>
+                <span className="text-sm text-gray-600">{formatHours(item.hours)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const FocusTrendChart = () => (
     <div className="space-y-4">
@@ -181,48 +221,68 @@ export default function AnalyticsDashboard({
     </div>
   );
 
-  const CorrelationsView = () => (
-    <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-gray-900">Pattern Correlations</h3>
-      
-      <div className="space-y-3">
-        {data.correlations.map((correlation, index) => (
-          <div key={index} className="bg-gray-50 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-medium text-gray-900">
-                  {correlation.factor1} ↔ {correlation.factor2}
-                </div>
-                <div className="text-sm text-gray-600">
-                  Significance: {correlation.significance}
-                </div>
-              </div>
-              <div className={`text-lg font-bold ${
-                correlation.correlation > 0.5 ? 'text-green-600' :
-                correlation.correlation > 0.2 ? 'text-yellow-600' :
-                correlation.correlation > -0.2 ? 'text-gray-600' :
-                correlation.correlation > -0.5 ? 'text-orange-600' : 'text-red-600'
-              }`}>
-                {correlation.correlation > 0 ? '+' : ''}{(correlation.correlation * 100).toFixed(0)}%
-              </div>
-            </div>
-            
-            <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className={`h-2 rounded-full ${
-                  correlation.correlation > 0 ? 'bg-green-500' : 'bg-red-500'
-                }`}
-                style={{ 
-                  width: `${Math.abs(correlation.correlation) * 100}%`,
-                  marginLeft: correlation.correlation < 0 ? `${(1 - Math.abs(correlation.correlation)) * 100}%` : '0'
-                }}
-              ></div>
+  const CorrelationsView = () => {
+    if (data.correlations.length === 0) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Pattern Correlations</h3>
+          <div className="bg-gray-50 rounded-lg p-8 text-center">
+            <TrendingUp className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h4 className="text-lg font-medium text-gray-600 mb-2">No Correlation Data</h4>
+            <p className="text-sm text-gray-500 mb-4">
+              Track mood, energy, and focus scores for at least 3 days to see correlations between different factors.
+            </p>
+            <div className="text-xs text-gray-400">
+              Correlations help you understand how sleep, exercise, and mood affect your productivity.
             </div>
           </div>
-        ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Pattern Correlations</h3>
+        
+        <div className="space-y-3">
+          {data.correlations.map((correlation, index) => (
+            <div key={index} className="bg-gray-50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-gray-900">
+                    {correlation.factor1} ↔ {correlation.factor2}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    Significance: {correlation.significance}
+                  </div>
+                </div>
+                <div className={`text-lg font-bold ${
+                  correlation.correlation > 0.5 ? 'text-green-600' :
+                  correlation.correlation > 0.2 ? 'text-yellow-600' :
+                  correlation.correlation > -0.2 ? 'text-gray-600' :
+                  correlation.correlation > -0.5 ? 'text-orange-600' : 'text-red-600'
+                }`}>
+                  {correlation.correlation > 0 ? '+' : ''}{(correlation.correlation * 100).toFixed(0)}%
+                </div>
+              </div>
+              
+              <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className={`h-2 rounded-full ${
+                    correlation.correlation > 0 ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                  style={{ 
+                    width: `${Math.abs(correlation.correlation) * 100}%`,
+                    marginLeft: correlation.correlation < 0 ? `${(1 - Math.abs(correlation.correlation)) * 100}%` : '0'
+                  }}
+                ></div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const WeeklyReview = () => (
     <div className="space-y-6">

@@ -33,6 +33,8 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
   // UI states
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -74,6 +76,13 @@ export default function HomePage() {
 
     return () => clearInterval(interval);
   }, [currentSession]);
+
+  // Reload analytics when timeRange changes
+  useEffect(() => {
+    if (!isLoading && analyticsData) {
+      loadAnalyticsData();
+    }
+  }, [timeRange, isLoading]);
 
   // Update current time block
   useEffect(() => {
@@ -126,8 +135,66 @@ export default function HomePage() {
       if (activeSessions.length > 0) {
         setCurrentSession(activeSessions[0]);
       }
+
+      // Load analytics data
+      await loadAnalyticsData();
     } catch (error) {
       console.error('Failed to load data:', error);
+    }
+  };
+
+  const loadAnalyticsData = async () => {
+    try {
+      setAnalyticsLoading(true);
+      
+      const userId = 'user-1';
+      const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
+
+      const [
+        planVsActual,
+        timeAllocation,
+        focusTrend,
+        correlations,
+        weeklyReview
+      ] = await Promise.all([
+        db.calculatePlanVsActualData(userId, days),
+        db.calculateTimeAllocation(userId, days),
+        db.calculateFocusTrend(userId, days),
+        db.calculateCorrelations(userId, days),
+        db.generateWeeklyReview(userId)
+      ]);
+
+      // Check if we have enough data
+      const hasEnoughData = planVsActual.length > 0 || timeAllocation.length > 0 || focusTrend.length > 0;
+
+      if (!hasEnoughData) {
+        // Show empty state instead of fake data
+        setAnalyticsData({
+          planVsActual: [],
+          timeAllocation: [],
+          focusTrend: [],
+          correlations: [],
+          weeklyReview: {
+            highlights: ['Start tracking to see your patterns'],
+            challenges: ['No data available yet'],
+            insights: ['Create time blocks and sessions to generate insights'],
+            nextWeekGoals: ['Begin using the Life Tracker consistently']
+          }
+        });
+      } else {
+        setAnalyticsData({
+          planVsActual,
+          timeAllocation,
+          focusTrend,
+          correlations,
+          weeklyReview
+        });
+      }
+
+      setAnalyticsLoading(false);
+    } catch (error) {
+      console.error('Failed to load analytics data:', error);
+      setAnalyticsLoading(false);
     }
   };
 
@@ -347,33 +414,17 @@ export default function HomePage() {
     }
   };
 
-  // Mock analytics data (in a real app, this would be calculated from actual data)
-  const mockAnalyticsData: AnalyticsData = {
-    planVsActual: [
-      { date: '2024-01-01', planned: 8, actual: 7.5, adherence: 94 },
-      { date: '2024-01-02', planned: 8, actual: 8.2, adherence: 103 },
-      { date: '2024-01-03', planned: 7, actual: 6.5, adherence: 93 },
-    ],
-    timeAllocation: [
-      { domain: 'Work', hours: 35, color: '#3b82f6' },
-      { domain: 'Learning', hours: 10, color: '#10b981' },
-      { domain: 'Health', hours: 8, color: '#f59e0b' },
-      { domain: 'Personal', hours: 15, color: '#ef4444' },
-    ],
-    focusTrend: [
-      { date: '2024-01-01', focusMinutes: 180, mood: 7, energy: 6 },
-      { date: '2024-01-02', focusMinutes: 220, mood: 8, energy: 7 },
-      { date: '2024-01-03', focusMinutes: 150, mood: 6, energy: 5 },
-    ],
-    correlations: [
-      { factor1: 'Sleep', factor2: 'Focus', correlation: 0.7, significance: 'High' },
-      { factor1: 'Exercise', factor2: 'Mood', correlation: 0.6, significance: 'Medium' },
-    ],
+  // Default empty analytics data for loading state
+  const emptyAnalyticsData: AnalyticsData = {
+    planVsActual: [],
+    timeAllocation: [],
+    focusTrend: [],
+    correlations: [],
     weeklyReview: {
-      highlights: ['Completed major project milestone', 'Maintained workout streak'],
-      challenges: ['Struggled with time blocking adherence', 'Interrupted focus sessions'],
-      insights: ['Morning workouts boost afternoon productivity', 'Too many meeting blocks reduce deep work'],
-      nextWeekGoals: ['Implement meeting-free mornings', 'Add 15min buffer between blocks'],
+      highlights: ['Loading...'],
+      challenges: ['Loading...'],
+      insights: ['Loading...'],
+      nextWeekGoals: ['Loading...'],
     },
   };
 
@@ -479,7 +530,7 @@ export default function HomePage() {
 
               {activeTab === 'analytics' && (
                 <AnalyticsDashboard
-                  data={mockAnalyticsData}
+                  data={analyticsData || emptyAnalyticsData}
                   timeRange={timeRange}
                   onTimeRangeChange={setTimeRange}
                 />
