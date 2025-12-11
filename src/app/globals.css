@@ -341,6 +341,77 @@ body::before {
   }
 }
 
+/* ===== PORTAL MODAL FIX ===== */
+/* Ensure modals always appear on top and are properly isolated */
+.modal-portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 999999 !important;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+/* Fix stacking context issues from parent containers */
+.futuristic-card {
+  /* Remove problematic properties that create stacking contexts */
+  transform: none !important;
+}
+
+/* Ensure modal inputs are always interactive and visible */
+.modal-portal input,
+.modal-portal textarea,
+.modal-portal select,
+.modal-portal button {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 1;
+}
+
+/* Fix input text visibility in modals - Override futuristic theme */
+.modal-portal input[type="text"],
+.modal-portal input[type="number"],
+.modal-portal input[type="date"],
+.modal-portal textarea,
+.modal-portal select {
+  color: #111827 !important; /* gray-900 */
+  background-color: #ffffff !important;
+  border: 1px solid #d1d5db !important; /* gray-300 */
+  -webkit-text-fill-color: #111827 !important; /* Override webkit text fill */
+  text-shadow: none !important; /* Remove any text shadows */
+  font-family: inherit !important;
+  font-size: inherit !important;
+}
+
+/* Force visible text with inline styles backup */
+.modal-portal input[style*="color"],
+.modal-portal textarea[style*="color"] {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+
+.modal-portal input[type="text"]:focus,
+.modal-portal input[type="number"]:focus,
+.modal-portal input[type="date"]:focus,
+.modal-portal textarea:focus,
+.modal-portal select:focus {
+  color: #111827 !important; /* gray-900 */
+  background-color: #ffffff !important;
+  border-color: #3b82f6 !important; /* blue-500 */
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+  -webkit-text-fill-color: #111827 !important; /* Override webkit text fill */
+  text-shadow: none !important; /* Remove any text shadows */
+}
+
+/* Placeholder text visibility */
+.modal-portal input::placeholder,
+.modal-portal textarea::placeholder {
+  color: #6b7280 !important; /* gray-500 */
+  opacity: 1 !important;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

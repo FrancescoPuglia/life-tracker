@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Goal, KeyResult, Project, Task } from '@/types';
 import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 
@@ -36,6 +37,20 @@ export default function OKRManager({
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<'goal' | 'keyResult' | 'project' | 'task' | null>(null);
   const [newItemData, setNewItemData] = useState<any>({});
+
+  // Refs to maintain focus
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Optimized callbacks to prevent re-render issues
+  const handleTitleChange = useCallback((value: string) => {
+    const fieldName = showCreateModal === 'project' ? 'name' : 'title';
+    setNewItemData(prev => ({ ...prev, [fieldName]: value }));
+  }, [showCreateModal]);
+
+  const handleDescriptionChange = useCallback((value: string) => {
+    setNewItemData(prev => ({ ...prev, description: value }));
+  }, []);
 
   const getGoalKeyResults = (goalId: string) => {
     return keyResults.filter(kr => kr.goalId === goalId);
@@ -292,6 +307,7 @@ export default function OKRManager({
 
   const CreateModal = () => {
     if (!showCreateModal) return null;
+    if (typeof window === 'undefined') return null; // SSR safety
 
     const modalTitle = {
       goal: 'Create New Goal',
@@ -300,47 +316,112 @@ export default function OKRManager({
       task: 'Create Task'
     }[showCreateModal];
 
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 w-96 max-w-full max-h-screen overflow-y-auto">
-          <h3 className="text-lg font-semibold mb-4">{modalTitle}</h3>
+    // Debug: Log current state
+    console.log('CreateModal State:', { 
+      showCreateModal, 
+      newItemData,
+      titleValue: showCreateModal === 'project' ? newItemData.name : newItemData.title,
+      descriptionValue: newItemData.description
+    });
+
+    const modalContent = (
+      <div 
+        className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
+        style={{ 
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)'
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowCreateModal(null);
+            setNewItemData({});
+          }
+        }}
+      >
+        <div 
+          className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+          style={{
+            transform: 'translateZ(0)', // Force hardware acceleration
+            position: 'relative',
+            zIndex: 10000
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900">{modalTitle}</h3>
+              <button
+                onClick={() => {
+                  setShowCreateModal(null);
+                  setNewItemData({});
+                }}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
           
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {showCreateModal === 'keyResult' ? 'Key Result' : 'Title'}
-              </label>
-              <input
-                type="text"
-                value={newItemData.title || newItemData.name || ''}
-                onChange={(e) => setNewItemData({ 
-                  ...newItemData, 
-                  [showCreateModal === 'project' ? 'name' : 'title']: e.target.value 
-                })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder={`Enter ${showCreateModal} title`}
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {showCreateModal === 'keyResult' ? 'Key Result' : 'Title'}
+                </label>
+                <input
+                  ref={titleInputRef}
+                  id="modal-title-input"
+                  type="text"
+                  value={showCreateModal === 'project' ? (newItemData.name || '') : (newItemData.title || '')}
+                  onChange={(e) => handleTitleChange(e.target.value)}
+                  style={{
+                    color: 'black',
+                    backgroundColor: 'white',
+                    border: '2px solid #007bff',
+                    fontSize: '16px'
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  placeholder={`Enter ${showCreateModal} title`}
+                  autoFocus
+                  autoComplete="off"
+                />
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea
-                value={newItemData.description || ''}
-                onChange={(e) => setNewItemData({ ...newItemData, description: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                rows={3}
-                placeholder="Description"
-              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  ref={descriptionInputRef}
+                  id="modal-description-input"
+                  value={newItemData.description || ''}
+                  onChange={(e) => handleDescriptionChange(e.target.value)}
+                  style={{
+                    color: 'black',
+                    backgroundColor: 'white',
+                    border: '2px solid #007bff',
+                    fontSize: '16px'
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  rows={3}
+                  placeholder="Description"
+                  autoComplete="off"
+                />
             </div>
 
             {showCreateModal === 'goal' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
                 <input
+                  id="modal-date-input"
                   type="date"
                   value={newItemData.targetDate ? newItemData.targetDate.toISOString().split('T')[0] : ''}
                   onChange={(e) => setNewItemData({ ...newItemData, targetDate: new Date(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{
+                    color: '#111827',
+                    backgroundColor: '#ffffff',
+                    WebkitTextFillColor: '#111827',
+                    textShadow: 'none'
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                 />
               </div>
             )}
@@ -350,19 +431,31 @@ export default function OKRManager({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Target Value</label>
                   <input
+                    id="modal-target-value-input"
                     type="number"
                     value={newItemData.targetValue || ''}
                     onChange={(e) => setNewItemData({ ...newItemData, targetValue: parseInt(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
                   <input
+                    id="modal-unit-input"
                     type="text"
                     value={newItemData.unit || ''}
                     onChange={(e) => setNewItemData({ ...newItemData, unit: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                     placeholder="e.g., users, $, %"
                   />
                 </div>
@@ -373,9 +466,16 @@ export default function OKRManager({
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
                 <select
+                  id="modal-priority-select"
                   value={newItemData.priority || 'medium'}
                   onChange={(e) => setNewItemData({ ...newItemData, priority: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{
+                    color: '#111827',
+                    backgroundColor: '#ffffff',
+                    WebkitTextFillColor: '#111827',
+                    textShadow: 'none'
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -389,18 +489,30 @@ export default function OKRManager({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Minutes</label>
                   <input
+                    id="modal-estimated-minutes-input"
                     type="number"
                     value={newItemData.estimatedMinutes || 60}
                     onChange={(e) => setNewItemData({ ...newItemData, estimatedMinutes: parseInt(e.target.value) || 60 })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">If-Then Plan</label>
                   <textarea
+                    id="modal-if-then-input"
                     value={newItemData.ifThenPlan || ''}
                     onChange={(e) => setNewItemData({ ...newItemData, ifThenPlan: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                     rows={2}
                     placeholder="If [context/time/location], then [specific action]"
                   />
@@ -408,10 +520,16 @@ export default function OKRManager({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Why (Purpose)</label>
                   <input
+                    id="modal-why-input"
                     type="text"
                     value={newItemData.why || ''}
                     onChange={(e) => setNewItemData({ ...newItemData, why: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                     placeholder="Why is this important?"
                   />
                 </div>
@@ -419,26 +537,31 @@ export default function OKRManager({
             )}
           </div>
           
-          <div className="flex justify-end space-x-3 mt-6">
-            <button
-              onClick={() => {
-                setShowCreateModal(null);
-                setNewItemData({});
-              }}
-              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCreateItem}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              Create
-            </button>
+            <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowCreateModal(null);
+                  setNewItemData({});
+                }}
+                className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateItem}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                type="button"
+              >
+                Create
+              </button>
+            </div>
           </div>
         </div>
       </div>
     );
+
+    return createPortal(modalContent, document.body);
   };
 
   return (
@@ -535,6 +658,7 @@ export default function OKRManager({
         </div>
       )}
 
+      {/* Modal will be rendered via portal */}
       <CreateModal />
     </div>
   );
