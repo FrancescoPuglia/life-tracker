@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Habit, HabitLog } from '@/types';
 import { CheckCircle, Circle, Flame, Calendar, Plus, Edit, Trash2 } from 'lucide-react';
 
@@ -25,6 +26,31 @@ export default function HabitsTracker({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [newHabitData, setNewHabitData] = useState<Partial<Habit>>({});
+
+  // Refs to maintain focus
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Optimized callbacks to prevent re-render issues
+  const handleNameChange = useCallback((value: string) => {
+    setNewHabitData((prev: any) => ({ ...prev, name: value }));
+  }, []);
+
+  const handleDescriptionChange = useCallback((value: string) => {
+    setNewHabitData((prev: any) => ({ ...prev, description: value }));
+  }, []);
+
+  const handleFrequencyChange = useCallback((value: string) => {
+    setNewHabitData((prev: any) => ({ ...prev, frequency: value }));
+  }, []);
+
+  const handleUnitChange = useCallback((value: string) => {
+    setNewHabitData((prev: any) => ({ ...prev, unit: value }));
+  }, []);
+
+  const handleTargetValueChange = useCallback((value: number | undefined) => {
+    setNewHabitData((prev: any) => ({ ...prev, targetValue: value }));
+  }, []);
 
   const today = new Date();
   const isToday = selectedDate.toDateString() === today.toDateString();
@@ -242,97 +268,175 @@ export default function HabitsTracker({
     );
   };
 
-  const HabitModal = ({ isEdit = false }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-96 max-w-full">
-        <h3 className="text-lg font-semibold mb-4">
-          {isEdit ? 'Edit Habit' : 'Create New Habit'}
-        </h3>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input
-              type="text"
-              value={newHabitData.name || ''}
-              onChange={(e) => setNewHabitData({ ...newHabitData, name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="e.g., Morning meditation"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea
-              value={newHabitData.description || ''}
-              onChange={(e) => setNewHabitData({ ...newHabitData, description: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              rows={2}
-              placeholder="Optional description"
-            />
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Frequency</label>
-              <select
-                value={newHabitData.frequency || 'daily'}
-                onChange={(e) => setNewHabitData({ ...newHabitData, frequency: e.target.value as any })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  const HabitModal = ({ isEdit = false }) => {
+    if (typeof window === 'undefined') return null; // SSR safety
+
+    const modalContent = (
+      <div 
+        className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4"
+        style={{ 
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)'
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowCreateModal(false);
+            setEditingHabit(null);
+            setNewHabitData({});
+          }
+        }}
+      >
+        <div 
+          className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+          style={{
+            transform: 'translateZ(0)', // Force hardware acceleration
+            position: 'relative',
+            zIndex: 10000
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900">
+                {isEdit ? 'Edit Habit' : 'Create New Habit'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setEditingHabit(null);
+                  setNewHabitData({});
+                }}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                type="button"
               >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
+                ×
+              </button>
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit (Optional)</label>
-              <input
-                type="text"
-                value={newHabitData.unit || ''}
-                onChange={(e) => setNewHabitData({ ...newHabitData, unit: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., minutes, pages"
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  value={newHabitData.name || ''}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  style={{
+                    color: 'black',
+                    backgroundColor: 'white',
+                    border: '2px solid #007bff',
+                    fontSize: '16px'
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  placeholder="e.g., Morning meditation"
+                  autoFocus
+                  autoComplete="off"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  ref={descriptionInputRef}
+                  value={newHabitData.description || ''}
+                  onChange={(e) => handleDescriptionChange(e.target.value)}
+                  style={{
+                    color: 'black',
+                    backgroundColor: 'white',
+                    border: '2px solid #007bff',
+                    fontSize: '16px'
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  rows={2}
+                  placeholder="Optional description"
+                  autoComplete="off"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Frequency</label>
+                  <select
+                    value={newHabitData.frequency || 'daily'}
+                    onChange={(e) => handleFrequencyChange(e.target.value)}
+                    style={{
+                      color: '#111827',
+                      backgroundColor: '#ffffff',
+                      WebkitTextFillColor: '#111827',
+                      textShadow: 'none'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Unit (Optional)</label>
+                  <input
+                    type="text"
+                    value={newHabitData.unit || ''}
+                    onChange={(e) => handleUnitChange(e.target.value)}
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                    placeholder="e.g., minutes, pages"
+                  />
+                </div>
+              </div>
+              
+              {newHabitData.unit && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Value</label>
+                  <input
+                    type="number"
+                    value={newHabitData.targetValue || ''}
+                    onChange={(e) => handleTargetValueChange(parseInt(e.target.value) || undefined)}
+                    style={{
+                      color: 'black',
+                      backgroundColor: 'white',
+                      border: '1px solid #ccc'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                    placeholder="e.g., 20"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setEditingHabit(null);
+                  setNewHabitData({});
+                }}
+                className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={isEdit ? handleEditHabit : handleCreateHabit}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                type="button"
+              >
+                {isEdit ? 'Update' : 'Create'}
+              </button>
             </div>
           </div>
-          
-          {newHabitData.unit && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Target Value</label>
-              <input
-                type="number"
-                value={newHabitData.targetValue || ''}
-                onChange={(e) => setNewHabitData({ ...newHabitData, targetValue: parseInt(e.target.value) || undefined })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., 20"
-              />
-            </div>
-          )}
-        </div>
-        
-        <div className="flex justify-end space-x-3 mt-6">
-          <button
-            onClick={() => {
-              setShowCreateModal(false);
-              setEditingHabit(null);
-              setNewHabitData({});
-            }}
-            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={isEdit ? handleEditHabit : handleCreateHabit}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            {isEdit ? 'Update' : 'Create'}
-          </button>
         </div>
       </div>
-    </div>
-  );
+    );
+
+    return createPortal(modalContent, document.body);
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
