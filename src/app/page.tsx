@@ -16,6 +16,7 @@ import HabitsTracker from '@/components/HabitsTracker';
 import OKRManager from '@/components/OKRManager';
 import DailyMotivation from '@/components/DailyMotivation';
 import BadgeSystem from '@/components/BadgeSystem';
+import TestModal from '@/components/TestModal';
 
 export default function HomePage() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
@@ -63,9 +64,11 @@ export default function HomePage() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        await db.init();
-        await loadData();
+        // Skip database init for now to test modal
+        console.log('Skipping database init for testing');
         setIsLoading(false);
+        // await db.init();
+        // await loadData();
       } catch (error) {
         console.error('Failed to initialize app:', error);
         setIsLoading(false);
@@ -544,8 +547,32 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
+      {/* EMERGENCY TEST - VERY VISIBLE */}
+      <div style={{ 
+        position: 'fixed', 
+        top: '0', 
+        left: '0', 
+        width: '100vw', 
+        height: '50px', 
+        backgroundColor: 'red', 
+        color: 'white', 
+        fontSize: '24px', 
+        textAlign: 'center', 
+        zIndex: 999999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        🚨 MODIFICHE APPLICATE - SERVER RIAVVIATO! 🚨
+      </div>
+
       {/* Daily Motivation */}
       <DailyMotivation />
+
+      {/* TEST MODAL - Remove after debugging */}
+      <div style={{ position: 'fixed', top: '60px', right: '10px', zIndex: 999999 }}>
+        <TestModal />
+      </div>
 
       {/* NOW Bar - Always visible at top */}
       <div className="glass-navbar fixed top-0 left-0 right-0 z-40">
