@@ -45,11 +45,11 @@ export default function OKRManager({
   // Optimized callbacks to prevent re-render issues
   const handleTitleChange = useCallback((value: string) => {
     const fieldName = showCreateModal === 'project' ? 'name' : 'title';
-    setNewItemData(prev => ({ ...prev, [fieldName]: value }));
+    setNewItemData((prev: any) => ({ ...prev, [fieldName]: value }));
   }, [showCreateModal]);
 
   const handleDescriptionChange = useCallback((value: string) => {
-    setNewItemData(prev => ({ ...prev, description: value }));
+    setNewItemData((prev: any) => ({ ...prev, description: value }));
   }, []);
 
   const getGoalKeyResults = (goalId: string) => {
