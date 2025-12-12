@@ -38,6 +38,14 @@ export interface Goal {
   createdAt: Date;
   updatedAt: Date;
   keyResults: KeyResult[];
+  // ===== GOAL-CENTRIC ANALYTICS ENHANCEMENTS =====
+  timeAllocationTarget: number;  // Hours per week target
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  category: 'urgent_important' | 'important_not_urgent' | 'urgent_not_important' | 'neither';
+  complexity: 'simple' | 'moderate' | 'complex' | 'expert';
+  estimatedHours?: number; // Total hours estimated to complete
+  actualHoursSpent?: number; // Calculated field for analytics
+  progressVelocity?: number; // Progress per hour (calculated)
 }
 
 export interface KeyResult {
@@ -106,6 +114,14 @@ export interface TimeBlock {
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
+  // ===== GOAL-CENTRIC ANALYTICS ENHANCEMENTS =====
+  goalIds?: string[];        // Multiple goals per time block
+  goalAllocation?: {         // Time percentage allocation per goal
+    [goalId: string]: number; // 0-100% how much of this time block is for each goal
+  };
+  expectedImpact?: {         // Expected progress impact per goal
+    [goalId: string]: number; // 0-100 estimated progress points
+  };
 }
 
 export interface Session {
@@ -126,6 +142,16 @@ export interface Session {
   focus?: number;
   createdAt: Date;
   updatedAt: Date;
+  // ===== GOAL-CENTRIC ANALYTICS ENHANCEMENTS =====
+  goalIds?: string[];        // Multiple goals per session
+  goalContribution?: {       // Actual contribution scoring
+    [goalId: string]: number; // 0-100% how much this session helped each goal
+  };
+  progressMade?: {           // Actual progress made per goal
+    [goalId: string]: number; // Progress points achieved
+  };
+  learnings?: string[];      // Key learnings/insights from this session
+  blockers?: string[];       // What blocked progress (for analytics)
 }
 
 export interface Habit {
@@ -273,6 +299,100 @@ export interface DashboardState {
   upcomingBlocks: TimeBlock[];
   recentInsights: Insight[];
   achievements: Achievement[];
+  goalAnalytics?: GoalAnalytics[];
+  strategicAllocation?: StrategicAllocation;
+}
+
+// ===== GOAL-CENTRIC ANALYTICS INTERFACES =====
+
+export interface GoalAnalytics {
+  goalId: string;
+  timeInvestment: GoalTimeInvestment;
+  roi: GoalROI;
+  completion: GoalCompletion;
+  efficiency: GoalEfficiency;
+  trends: GoalTrends;
+  recommendations: GoalRecommendation[];
+}
+
+export interface GoalTimeInvestment {
+  totalHours: number;
+  dailyAverage: number;
+  weeklyTarget: number;
+  weeklyActual: number;
+  adherencePercentage: number;
+  dailyTrend: Array<{ date: string; hours: number; sessions: number }>;
+  weeklyTrend: Array<{ week: string; hours: number; efficiency: number }>;
+  monthlyComparison: Array<{ month: string; hours: number; progress: number }>;
+}
+
+export interface GoalROI {
+  hoursInvested: number;
+  progressAchieved: number;
+  progressPerHour: number;
+  efficiency: 'exceptional' | 'high' | 'medium' | 'low' | 'critical';
+  benchmarkComparison: number; // vs average for similar goals
+  trendDirection: 'improving' | 'stable' | 'declining';
+  optimalSessionLength: number; // hours
+}
+
+export interface GoalCompletion {
+  currentProgress: number;
+  estimatedCompletionDate: Date;
+  onTrackStatus: 'ahead' | 'on_track' | 'behind' | 'critical';
+  confidence: number; // 0-100%
+  bottlenecks: Array<{ type: string; impact: number; solution: string }>;
+  milestones: Array<{ date: Date; target: number; actual?: number }>;
+  riskFactors: Array<{ factor: string; probability: number; impact: number }>;
+}
+
+export interface GoalEfficiency {
+  sessionsCount: number;
+  averageSessionLength: number;
+  optimalTimeBlocks: string[]; // time of day when most productive
+  moodImpactCorrelation: number;
+  energyImpactCorrelation: number;
+  focusImpactCorrelation: number;
+  bestDaysOfWeek: string[];
+  productivityPatterns: Array<{ pattern: string; efficiency: number }>;
+}
+
+export interface GoalTrends {
+  progressVelocity: Array<{ period: string; velocity: number }>;
+  timeConsistency: Array<{ period: string; consistency: number }>;
+  qualityTrend: Array<{ period: string; quality: number }>;
+  motivationTrend: Array<{ period: string; motivation: number }>;
+  blockerTrend: Array<{ period: string; blockers: string[] }>;
+}
+
+export interface GoalRecommendation {
+  type: 'time_allocation' | 'scheduling' | 'priority' | 'strategy' | 'tools';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  expectedImpact: number; // 0-100%
+  effort: 'low' | 'medium' | 'high';
+  timeline: string;
+  actions: string[];
+  reasoning: string;
+}
+
+export interface StrategicAllocation {
+  currentAllocation: Array<{ goalId: string; hours: number; percentage: number; priority: string }>;
+  recommendedAllocation: Array<{ goalId: string; hours: number; reason: string; impact: number }>;
+  misalignmentScore: number; // 0-100, 0 = perfect alignment
+  rebalancingSuggestions: Array<{
+    fromGoal: string;
+    toGoal: string;
+    hours: number;
+    reasoning: string;
+    expectedBenefit: number;
+  }>;
+  opportunityCost: Array<{
+    goalId: string;
+    missedOpportunity: number;
+    consequence: string;
+  }>;
 }
 
 export interface AnalyticsData {

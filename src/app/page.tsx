@@ -13,6 +13,7 @@ import NowBar from '@/components/NowBar';
 import KPIDashboard from '@/components/KPIDashboard';
 import TimeBlockPlanner from '@/components/TimeBlockPlanner';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
+import GoalAnalyticsDashboard from '@/components/GoalAnalyticsDashboard';
 import HabitsTracker from '@/components/HabitsTracker';
 import OKRManager from '@/components/OKRManager';
 import DailyMotivation from '@/components/DailyMotivation';
@@ -60,7 +61,8 @@ export default function HomePage() {
 
   // UI states
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'planner' | 'habits' | 'okr' | 'analytics' | 'badges'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges'>('planner');
+  const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -658,6 +660,7 @@ export default function HomePage() {
                   { id: 'habits', label: 'Habits', icon: '🔥' },
                   { id: 'okr', label: 'Goals & Projects', icon: '🎯' },
                   { id: 'analytics', label: 'Analytics', icon: '📊' },
+                  { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🧠' },
                   { id: 'badges', label: 'Badges', icon: '🏆' },
                 ].map(({ id, label, icon }) => (
                   <button
@@ -683,6 +686,7 @@ export default function HomePage() {
                   timeBlocks={timeBlocks}
                   tasks={tasks}
                   projects={projects}
+                  goals={goals}
                   onCreateTimeBlock={handleCreateTimeBlock}
                   onUpdateTimeBlock={handleUpdateTimeBlock}
                   onDeleteTimeBlock={handleDeleteTimeBlock}
@@ -724,6 +728,15 @@ export default function HomePage() {
                   data={analyticsData || emptyAnalyticsData}
                   timeRange={timeRange}
                   onTimeRangeChange={setTimeRange}
+                />
+              )}
+
+              {activeTab === 'goal_analytics' && (
+                <GoalAnalyticsDashboard
+                  goals={goals}
+                  userId={currentUser?.uid || 'user-1'}
+                  selectedGoalId={selectedGoalId}
+                  onGoalSelect={setSelectedGoalId}
                 />
               )}
 

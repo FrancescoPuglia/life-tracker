@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { TimeBlock, Task, Project } from '@/types';
+import { TimeBlock, Task, Project, Goal } from '@/types';
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
   tasks: Task[];
   projects: Project[];
+  goals: Goal[];
   onCreateTimeBlock: (block: Partial<TimeBlock>) => void;
   onUpdateTimeBlock: (id: string, updates: Partial<TimeBlock>) => void;
   onDeleteTimeBlock: (id: string) => void;
@@ -18,6 +19,7 @@ export default function TimeBlockPlanner({
   timeBlocks,
   tasks,
   projects,
+  goals,
   onCreateTimeBlock,
   onUpdateTimeBlock,
   onDeleteTimeBlock,
@@ -205,6 +207,16 @@ export default function TimeBlockPlanner({
     const blockDate = new Date(block.startTime);
     return blockDate.toDateString() === selectedDate.toDateString();
   });
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'critical': return 'bg-red-100 text-red-800';
+      case 'high': return 'bg-orange-100 text-orange-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-800';
+      case 'low': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   return (
     <div className="glass-card border border-gray-200 shadow-xl">
@@ -419,6 +431,91 @@ export default function TimeBlockPlanner({
                   rows={3}
                   placeholder="Why are you doing this? What's the purpose? 🤔"
                 />
+              </div>
+              
+              {/* GOAL SELECTION - THE MAGIC HAPPENS HERE! */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  🎯 Connect to Goals
+                </label>
+                <div className="space-y-2 max-h-32 overflow-y-auto">
+                  {goals.filter(g => g.status === 'active').map(goal => (
+                    <label key={goal.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded-lg">
+                      <input
+                        type="checkbox"
+                        checked={newBlockData.goalIds?.includes(goal.id) || false}
+                        onChange={(e) => {
+                          const currentGoals = newBlockData.goalIds || [];
+                          if (e.target.checked) {
+                            setNewBlockData({
+                              ...newBlockData,
+                              goalIds: [...currentGoals, goal.id],
+                              goalAllocation: {
+                                ...newBlockData.goalAllocation,
+                                [goal.id]: 100 / (currentGoals.length + 1)
+                              }
+                            });
+                          } else {
+                            const filteredGoals = currentGoals.filter(id => id !== goal.id);
+                            const newAllocation = { ...newBlockData.goalAllocation };
+                            delete newAllocation[goal.id];
+                            setNewBlockData({
+                              ...newBlockData,
+                              goalIds: filteredGoals,
+                              goalAllocation: newAllocation
+                            });
+                          }
+                        }}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">{goal.title}</div>
+                        <div className="text-xs text-gray-500">{goal.description}</div>
+                        <div className={`inline-block px-2 py-1 rounded text-xs font-bold ${getPriorityColor(goal.priority)}`}>
+                          {goal.priority}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                
+                {/* Goal Allocation Sliders */}
+                {newBlockData.goalIds && newBlockData.goalIds.length > 1 && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                    <div className="text-sm font-semibold text-gray-800 mb-2">⚖️ Time Allocation %</div>
+                    <div className="space-y-2">
+                      {newBlockData.goalIds.map(goalId => {
+                        const goal = goals.find(g => g.id === goalId);
+                        return (
+                          <div key={goalId} className="flex items-center space-x-2">
+                            <span className="text-xs font-medium text-gray-700 w-20 truncate">
+                              {goal?.title}
+                            </span>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={newBlockData.goalAllocation?.[goalId] || 0}
+                              onChange={(e) => {
+                                setNewBlockData({
+                                  ...newBlockData,
+                                  goalAllocation: {
+                                    ...newBlockData.goalAllocation,
+                                    [goalId]: Number(e.target.value)
+                                  }
+                                });
+                              }}
+                              className="flex-1"
+                            />
+                            <span className="text-xs font-bold text-gray-800 w-12">
+                              {newBlockData.goalAllocation?.[goalId] || 0}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div className="grid grid-cols-2 gap-4">

@@ -26,7 +26,8 @@
       "Bash(gh workflow:*)",
       "Bash(npx tsc:*)",
       "Bash(python3:*)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(npm run lint:*)"
     ],
     "deny": []
   }

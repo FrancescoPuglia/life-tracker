@@ -84,6 +84,7 @@ export default function OKRManager({
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
+      case 'critical': return 'text-red-800 bg-red-100 border border-red-200';
       case 'high': return 'text-red-600 bg-red-50';
       case 'medium': return 'text-yellow-600 bg-yellow-50';
       case 'low': return 'text-green-600 bg-green-50';
@@ -103,7 +104,17 @@ export default function OKRManager({
 
     switch (showCreateModal) {
       case 'goal':
-        onCreateGoal({ ...newItemData, ...baseData, status: 'active' });
+        onCreateGoal({ 
+          ...newItemData, 
+          ...baseData, 
+          status: 'active',
+          // Set default values for new analytics fields
+          timeAllocationTarget: newItemData.timeAllocationTarget || 0,
+          priority: newItemData.priority || 'medium',
+          category: newItemData.category || 'important_not_urgent',
+          complexity: newItemData.complexity || 'moderate',
+          estimatedHours: newItemData.estimatedHours || undefined
+        });
         break;
       case 'keyResult':
         onCreateKeyResult({ 
@@ -160,11 +171,21 @@ export default function OKRManager({
               <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(goal.status)}`}>
                 {goal.status}
               </span>
+              <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(goal.priority)}`}>
+                {goal.priority}
+              </span>
               <span className="text-gray-500 flex items-center">
                 <Calendar className="w-4 h-4 mr-1" />
                 {goal.targetDate.toLocaleDateString()}
               </span>
             </div>
+            
+            {goal.timeAllocationTarget > 0 && (
+              <div className="mt-2 text-xs text-blue-600 flex items-center">
+                <Clock className="w-3 h-3 mr-1" />
+                Target: {goal.timeAllocationTarget}hrs/week
+              </div>
+            )}
           </div>
           
           <div className="text-right">
@@ -408,22 +429,127 @@ export default function OKRManager({
             </div>
 
             {showCreateModal === 'goal' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
-                <input
-                  id="modal-date-input"
-                  type="date"
-                  value={newItemData.targetDate ? newItemData.targetDate.toISOString().split('T')[0] : ''}
-                  onChange={(e) => setNewItemData({ ...newItemData, targetDate: new Date(e.target.value) })}
-                  style={{
-                    color: '#111827',
-                    backgroundColor: '#ffffff',
-                    WebkitTextFillColor: '#111827',
-                    textShadow: 'none'
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
+                  <input
+                    id="modal-date-input"
+                    type="date"
+                    value={newItemData.targetDate ? newItemData.targetDate.toISOString().split('T')[0] : ''}
+                    onChange={(e) => setNewItemData({ ...newItemData, targetDate: new Date(e.target.value) })}
+                    style={{
+                      color: '#111827',
+                      backgroundColor: '#ffffff',
+                      WebkitTextFillColor: '#111827',
+                      textShadow: 'none'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Time Allocation Target (hrs/week)</label>
+                    <input
+                      id="modal-time-allocation-input"
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={newItemData.timeAllocationTarget || ''}
+                      onChange={(e) => setNewItemData({ ...newItemData, timeAllocationTarget: parseFloat(e.target.value) || 0 })}
+                      style={{
+                        color: 'black',
+                        backgroundColor: 'white',
+                        border: '1px solid #ccc'
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                      placeholder="e.g., 5.0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Total Hours</label>
+                    <input
+                      id="modal-estimated-hours-input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={newItemData.estimatedHours || ''}
+                      onChange={(e) => setNewItemData({ ...newItemData, estimatedHours: parseInt(e.target.value) || undefined })}
+                      style={{
+                        color: 'black',
+                        backgroundColor: 'white',
+                        border: '1px solid #ccc'
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                      placeholder="e.g., 100"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                    <select
+                      id="modal-goal-priority-select"
+                      value={newItemData.priority || 'medium'}
+                      onChange={(e) => setNewItemData({ ...newItemData, priority: e.target.value })}
+                      style={{
+                        color: '#111827',
+                        backgroundColor: '#ffffff',
+                        WebkitTextFillColor: '#111827',
+                        textShadow: 'none'
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Complexity</label>
+                    <select
+                      id="modal-complexity-select"
+                      value={newItemData.complexity || 'moderate'}
+                      onChange={(e) => setNewItemData({ ...newItemData, complexity: e.target.value })}
+                      style={{
+                        color: '#111827',
+                        backgroundColor: '#ffffff',
+                        WebkitTextFillColor: '#111827',
+                        textShadow: 'none'
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                    >
+                      <option value="simple">Simple</option>
+                      <option value="moderate">Moderate</option>
+                      <option value="complex">Complex</option>
+                      <option value="expert">Expert</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category (Eisenhower Matrix)</label>
+                  <select
+                    id="modal-category-select"
+                    value={newItemData.category || 'important_not_urgent'}
+                    onChange={(e) => setNewItemData({ ...newItemData, category: e.target.value })}
+                    style={{
+                      color: '#111827',
+                      backgroundColor: '#ffffff',
+                      WebkitTextFillColor: '#111827',
+                      textShadow: 'none'
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  >
+                    <option value="urgent_important">Urgent & Important (Do First)</option>
+                    <option value="important_not_urgent">Important, Not Urgent (Schedule)</option>
+                    <option value="urgent_not_important">Urgent, Not Important (Delegate)</option>
+                    <option value="neither">Neither (Eliminate)</option>
+                  </select>
+                </div>
+              </>
             )}
 
             {showCreateModal === 'keyResult' && (
@@ -589,7 +715,30 @@ export default function OKRManager({
       {selectedGoal && (
         <div className="bg-gray-50 rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
+              <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(selectedGoal.priority)}`}>
+                  {selectedGoal.priority} priority
+                </span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700">
+                  {selectedGoal.complexity} complexity
+                </span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
+                  {selectedGoal.category.replace('_', ' & ').replace('urgent', 'Urgent').replace('important', 'Important').replace('not', 'Not')}
+                </span>
+                {selectedGoal.timeAllocationTarget > 0 && (
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
+                    {selectedGoal.timeAllocationTarget}hrs/week target
+                  </span>
+                )}
+                {selectedGoal.estimatedHours && (
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700">
+                    ~{selectedGoal.estimatedHours}hrs total
+                  </span>
+                )}
+              </div>
+            </div>
             <div className="flex space-x-2">
               <button
                 onClick={() => setShowCreateModal('keyResult')}
