@@ -1,11 +1,12 @@
-# 🎯 Life Tracker
+# 🎯 Life Tracker - Firebase Edition
 
-> **Know Every Second What To Do** - A comprehensive life tracking system based on scientific research
+> **Know Every Second What To Do** - A comprehensive life tracking system with Firebase cloud sync
 
 ![Life Tracker](https://img.shields.io/badge/Life-Tracker-blue?style=for-the-badge)
 ![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript)
 ![PWA](https://img.shields.io/badge/PWA-Ready-green?style=flat-square)
+![Firebase](https://img.shields.io/badge/Firebase-Integrated-orange?style=flat-square&logo=firebase)
 
 ## 🌟 Features
 
@@ -80,8 +81,9 @@
 ### Prerequisites
 - Node.js 18+ and npm
 - Modern browser with IndexedDB support
+- Firebase project (optional - works offline without it)
 
-### Installation
+### Quick Start
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/life-tracker.git
@@ -96,6 +98,17 @@ npm run dev
 # Open browser
 # Navigate to http://localhost:3000
 ```
+
+### 🔥 Firebase Setup (Optional)
+For cloud sync and cross-device functionality:
+
+1. **Create a Firebase project** at [Firebase Console](https://console.firebase.google.com)
+2. **Copy `.env.example` to `.env.local`** and fill in your Firebase credentials
+3. **Enable Authentication** (Email/Password + Google) in Firebase Console
+4. **Create Firestore Database** in Firebase Console
+5. **Apply security rules**: `npm run firebase:rules`
+
+📖 **Detailed instructions**: See `FIREBASE_SETUP.md`
 
 ### First Steps
 1. **Start a session** in the NOW bar

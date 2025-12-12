@@ -7,6 +7,7 @@ import {
 } from '@/types';
 import { SessionManager } from '@/utils/sessionManager';
 import { db } from '@/lib/database';
+import { useAuth, AuthUser } from '@/lib/auth';
 
 import NowBar from '@/components/NowBar';
 import KPIDashboard from '@/components/KPIDashboard';
@@ -16,8 +17,14 @@ import HabitsTracker from '@/components/HabitsTracker';
 import OKRManager from '@/components/OKRManager';
 import DailyMotivation from '@/components/DailyMotivation';
 import BadgeSystem from '@/components/BadgeSystem';
+import AuthModal from '@/components/AuthModal';
+import SyncStatusIndicator from '@/components/SyncStatus';
 
 export default function HomePage() {
+  const auth = useAuth();
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [currentTimeBlock, setCurrentTimeBlock] = useState<TimeBlock | null>(null);
   const [todayKPIs, setTodayKPIs] = useState<KPI>({
@@ -59,30 +66,47 @@ export default function HomePage() {
 
   const sessionManager = SessionManager.getInstance();
 
+  // Initialize auth state listener
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChange((user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+    });
+
+    return unsubscribe;
+  }, [auth]);
+
   // Initialize database and load data
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // Skip database init for now to test modal
-        console.log('Skipping database init for testing');
+        await db.init();
+        if (currentUser) {
+          await loadData();
+        } else if (!authLoading) {
+          // Show auth modal for anonymous users after auth loading is complete
+          setShowAuthModal(true);
+        }
         setIsLoading(false);
-        // await db.init();
-        // await loadData();
       } catch (error) {
         console.error('Failed to initialize app:', error);
         setIsLoading(false);
       }
     };
 
-    initializeApp();
-  }, []);
+    if (!authLoading) {
+      initializeApp();
+    }
+  }, [currentUser, authLoading]);
 
   // Update KPIs periodically
   useEffect(() => {
     const updateKPIs = async () => {
       try {
-        const kpis = await db.calculateTodayKPIs('user-1');
-        setTodayKPIs(kpis);
+        if (currentUser) {
+          const kpis = await db.calculateTodayKPIs(currentUser.uid);
+          setTodayKPIs(kpis);
+        }
       } catch (error) {
         console.error('Failed to update KPIs:', error);
       }
@@ -92,7 +116,7 @@ export default function HomePage() {
     const interval = setInterval(updateKPIs, 60000); // Update every minute
 
     return () => clearInterval(interval);
-  }, [currentSession]);
+  }, [currentSession, currentUser]);
 
   // Reload analytics when timeRange changes
   useEffect(() => {
@@ -148,14 +172,16 @@ export default function HomePage() {
       setHabitLogs(allHabitLogs);
 
       // Load current session
-      const activeSessions = await db.getActiveSessions('user-1');
-      if (activeSessions.length > 0) {
-        setCurrentSession(activeSessions[0]);
-      }
+      if (currentUser) {
+        const activeSessions = await db.getActiveSessions(currentUser.uid);
+        if (activeSessions.length > 0) {
+          setCurrentSession(activeSessions[0]);
+        }
 
-      // Load analytics data and user stats
-      await loadAnalyticsData();
-      await calculateUserStats();
+        // Load analytics data and user stats
+        await loadAnalyticsData();
+        await calculateUserStats();
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
     }
@@ -521,7 +547,7 @@ export default function HomePage() {
     },
   };
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -529,7 +555,9 @@ export default function HomePage() {
             <div className="w-20 h-20 border-4 border-transparent rounded-full animate-spin neon-border"></div>
           </div>
           <h2 className="text-3xl font-bold holographic-text mb-4">LIFE TRACKER</h2>
-          <p className="text-gray-300 text-lg">Inizializzazione sistema...</p>
+          <p className="text-gray-300 text-lg">
+            {authLoading ? 'Checking authentication...' : 'Initializing system...'}
+          </p>
           <div className="mt-6 flex justify-center space-x-2">
             {[...Array(3)].map((_, i) => (
               <div 
@@ -546,33 +574,83 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
+      {/* Auth Modal */}
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)} 
+      />
+
       {/* Daily Motivation */}
-      <DailyMotivation />
+      {currentUser && <DailyMotivation />}
 
       {/* NOW Bar - Always visible at top */}
       <div className="glass-navbar fixed top-0 left-0 right-0 z-40">
-        <NowBar
-          currentSession={currentSession}
-          currentTimeBlock={currentTimeBlock}
-          onStartSession={handleStartSession}
-          onPauseSession={handlePauseSession}
-          onStopSession={handleStopSession}
-        />
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
+          {/* Left side - NOW Bar */}
+          <div className="flex-1">
+            <NowBar
+              currentSession={currentSession}
+              currentTimeBlock={currentTimeBlock}
+              onStartSession={handleStartSession}
+              onPauseSession={handlePauseSession}
+              onStopSession={handleStopSession}
+            />
+          </div>
+          
+          {/* Right side - User controls */}
+          <div className="flex items-center space-x-4 ml-4">
+            {currentUser ? (
+              <div className="flex items-center space-x-4">
+                {/* Sync status indicator */}
+                <SyncStatusIndicator />
+                
+                {/* User info */}
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+                    {currentUser.displayName?.[0] || currentUser.email?.[0] || 'U'}
+                  </div>
+                  <div className="hidden md:block">
+                    <div className="text-sm font-medium text-white">
+                      {currentUser.displayName || 'User'}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {currentUser.email}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => auth.signOut()}
+                    className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 rounded transition-colors"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="btn-futuristic bg-gradient-to-r from-blue-500 to-purple-600 text-sm px-4 py-2"
+              >
+                Sign In
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Main Content */}
       <div className="pt-20 pb-8">
-        <div className="max-w-7xl mx-auto px-4 space-y-6">
-          {/* KPI Dashboard */}
-          <div className="futuristic-card">
-            <KPIDashboard 
-              kpis={todayKPIs}
-              onRefresh={loadData}
-            />
-          </div>
+        {currentUser ? (
+          <div className="max-w-7xl mx-auto px-4 space-y-6">
+            {/* KPI Dashboard */}
+            <div className="futuristic-card">
+              <KPIDashboard 
+                kpis={todayKPIs}
+                onRefresh={loadData}
+              />
+            </div>
 
-          {/* Navigation Tabs */}
-          <div className="futuristic-card">
+            {/* Navigation Tabs */}
+            <div className="futuristic-card">
             <div className="border-b border-gray-700">
               <nav className="flex space-x-8 px-6">
                 {[
@@ -656,8 +734,60 @@ export default function HomePage() {
                 />
               )}
             </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          // Landing page for non-authenticated users
+          <div className="max-w-4xl mx-auto px-4 text-center py-20">
+            <div className="space-y-8">
+              <h1 className="text-6xl font-bold holographic-text mb-6">
+                LIFE TRACKER
+              </h1>
+              <p className="text-xl text-gray-300 max-w-2xl mx-auto leading-relaxed">
+                Transform your productivity with evidence-based time tracking, habit formation, and goal achievement. 
+                Know every second what to do.
+              </p>
+              
+              <div className="grid md:grid-cols-3 gap-8 mt-16">
+                <div className="glass-card p-8">
+                  <div className="text-4xl mb-4">🚀</div>
+                  <h3 className="text-xl font-bold neon-text mb-3">Smart Planning</h3>
+                  <p className="text-gray-300">
+                    Drag-and-drop timeboxing with automatic conflict detection and real-time adjustments.
+                  </p>
+                </div>
+                
+                <div className="glass-card p-8">
+                  <div className="text-4xl mb-4">🔥</div>
+                  <h3 className="text-xl font-bold neon-text mb-3">Habit Mastery</h3>
+                  <p className="text-gray-300">
+                    Build lasting habits with streak tracking, implementation intentions, and smart reminders.
+                  </p>
+                </div>
+                
+                <div className="glass-card p-8">
+                  <div className="text-4xl mb-4">📊</div>
+                  <h3 className="text-xl font-bold neon-text mb-3">Deep Analytics</h3>
+                  <p className="text-gray-300">
+                    Correlation analysis, performance trends, and actionable insights powered by your data.
+                  </p>
+                </div>
+              </div>
+              
+              <div className="mt-12">
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="btn-futuristic bg-gradient-to-r from-blue-500 to-purple-600 text-lg px-8 py-4 pulse-glow"
+                >
+                  🚀 START YOUR JOURNEY
+                </button>
+                <p className="text-sm text-gray-400 mt-4">
+                  Free to use • Cloud sync with Firebase • Offline capable
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

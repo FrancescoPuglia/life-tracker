@@ -7,7 +7,25 @@
       "Bash(npx tailwindcss init:*)",
       "Bash(npm run dev:*)",
       "Bash(npx next:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm run lint)",
+      "Bash(gh workflow run:*)",
+      "Bash(git push:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(npm run build:*)",
+      "Bash(git commit:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(rm:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh api:*)",
+      "Bash(gh workflow:*)",
+      "Bash(npx tsc:*)",
+      "Bash(python3:*)"
     ],
     "deny": []
   }

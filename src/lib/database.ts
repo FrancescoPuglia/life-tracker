@@ -3,13 +3,19 @@ import {
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
   Insight, Achievement, KPI, DashboardState 
 } from '@/types';
+import { DatabaseAdapter, firebaseAdapter } from './firebaseAdapter';
 
-class LifeTrackerDB {
+// IndexedDB Adapter (existing implementation)
+class IndexedDBAdapter implements DatabaseAdapter {
   private db: IDBDatabase | null = null;
   private dbName = 'LifeTrackerDB';
   private version = 1;
 
   async init(): Promise<void> {
+    if (typeof window === 'undefined') {
+      throw new Error('IndexedDB not available in server environment');
+    }
+    
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.version);
 
@@ -82,7 +88,7 @@ class LifeTrackerDB {
     return transaction.objectStore(storeName);
   }
 
-  async create<T extends { id: string }>(storeName: string, data: T): Promise<T> {
+  async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
     const store = await this.getStore(storeName, 'readwrite');
     return new Promise((resolve, reject) => {
       const request = store.add(data);
@@ -137,6 +143,46 @@ class LifeTrackerDB {
     });
   }
 
+  async query<T>(storeName: string, constraints: any[]): Promise<T[]> {
+    // Simple implementation for IndexedDB - would need more complex logic for full query support
+    return this.getAll<T>(storeName);
+  }
+
+  subscribe<T>(storeName: string, callback: (data: T[]) => void): () => void {
+    // IndexedDB doesn't support real-time subscriptions
+    // This is a simplified implementation that polls
+    let isActive = true;
+    const interval = setInterval(async () => {
+      if (isActive) {
+        try {
+          const data = await this.getAll<T>(storeName);
+          callback(data);
+        } catch (error) {
+          console.error(`Subscription error for ${storeName}:`, error);
+        }
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }
+
+  isOnline(): boolean {
+    return navigator.onLine;
+  }
+
+  async enableOffline(): Promise<void> {
+    // IndexedDB is always offline
+    return Promise.resolve();
+  }
+
+  async enableOnline(): Promise<void> {
+    // IndexedDB is always offline
+    return Promise.resolve();
+  }
+
   // Specific methods for common queries
   async getActiveSessions(userId: string): Promise<Session[]> {
     return this.getByIndex<Session>('sessions', 'status', 'active');
@@ -160,6 +206,489 @@ class LifeTrackerDB {
       };
       request.onerror = () => reject(request.error);
     });
+  }
+
+  async getActiveHabits(userId: string): Promise<Habit[]> {
+    const habits = await this.getByIndex<Habit>('habits', 'userId', userId);
+    return habits.filter(habit => habit.isActive);
+  }
+
+  async getTodayHabitLogs(userId: string): Promise<HabitLog[]> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const logs = await this.getByIndex<HabitLog>('habitLogs', 'date', today);
+    return logs.filter(log => log.userId === userId);
+  }
+
+  async getPendingInsights(userId: string): Promise<Insight[]> {
+    const insights = await this.getByIndex<Insight>('insights', 'userId', userId);
+    return insights.filter(insight => !insight.dismissed);
+  }
+
+  async calculateTodayKPIs(userId: string): Promise<KPI> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Get today's completed sessions
+    const sessions = await this.getByIndex<Session>('sessions', 'userId', userId);
+    const todaySessions = sessions.filter(session => 
+      session.startTime >= today && session.startTime < tomorrow && session.status === 'completed'
+    );
+
+    // Get today's time blocks
+    const timeBlocks = await this.getTodayTimeBlocks(userId);
+    
+    // Calculate focus minutes
+    const focusMinutes = todaySessions
+      .filter(session => session.tags.includes('focus'))
+      .reduce((total, session) => total + (session.duration || 0), 0);
+
+    // Calculate plan vs actual
+    const plannedMinutes = timeBlocks.reduce((total, block) => 
+      total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60), 0
+    );
+    const actualMinutes = timeBlocks
+      .filter(block => block.actualStartTime && block.actualEndTime)
+      .reduce((total, block) => 
+        total + (block.actualEndTime!.getTime() - block.actualStartTime!.getTime()) / (1000 * 60), 0
+      );
+    const planVsActual = plannedMinutes > 0 ? (actualMinutes / plannedMinutes) * 100 : 0;
+
+    // Get active streaks
+    const habits = await this.getActiveHabits(userId);
+    const activeStreaks = habits.filter(habit => habit.streakCount > 0).length;
+
+    return {
+      focusMinutes: Math.round(focusMinutes),
+      planVsActual: Math.round(planVsActual),
+      activeStreaks,
+      keyResultsProgress: 0, // TODO: Calculate from goals
+      mood: todaySessions.find(s => s.mood !== undefined)?.mood,
+      energy: todaySessions.find(s => s.energy !== undefined)?.energy,
+    };
+  }
+
+  async calculatePlanVsActualData(userId: string, days: number = 7): Promise<Array<{
+    date: string;
+    planned: number;
+    actual: number;
+    adherence: number;
+  }>> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const result = [];
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dayStart = new Date(d);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(d);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      // Get all time blocks for this day
+      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+      const dayTimeBlocks = allTimeBlocks.filter(block => 
+        block.userId === userId &&
+        new Date(block.startTime) >= dayStart && 
+        new Date(block.startTime) <= dayEnd
+      );
+
+      // Calculate planned hours
+      const plannedMinutes = dayTimeBlocks.reduce((total, block) => {
+        const startTime = new Date(block.startTime);
+        const endTime = new Date(block.endTime);
+        return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
+      }, 0);
+
+      // Calculate actual hours
+      const actualMinutes = dayTimeBlocks.reduce((total, block) => {
+        if (block.actualStartTime && block.actualEndTime) {
+          const actualStart = new Date(block.actualStartTime);
+          const actualEnd = new Date(block.actualEndTime);
+          return total + (actualEnd.getTime() - actualStart.getTime()) / (1000 * 60);
+        }
+        return total;
+      }, 0);
+
+      const plannedHours = plannedMinutes / 60;
+      const actualHours = actualMinutes / 60;
+      const adherence = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
+
+      result.push({
+        date: d.toISOString().split('T')[0],
+        planned: Number(plannedHours.toFixed(1)),
+        actual: Number(actualHours.toFixed(1)),
+        adherence: Math.round(adherence)
+      });
+    }
+
+    return result;
+  }
+
+  async calculateTimeAllocation(userId: string, days: number = 7): Promise<Array<{
+    domain: string;
+    hours: number;
+    color: string;
+  }>> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    // Get all domains
+    const allDomains = await this.getAll<Domain>('domains');
+    const userDomains = allDomains.filter(d => d.userId === userId);
+
+    // Get all sessions in the period
+    const allSessions = await this.getAll<Session>('sessions');
+    const periodSessions = allSessions.filter(session => 
+      session.userId === userId &&
+      new Date(session.startTime) >= startDate &&
+      new Date(session.startTime) <= endDate &&
+      session.status === 'completed'
+    );
+
+    // Default colors for domains
+    const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
+
+    const domainHours = new Map<string, number>();
+
+    // Calculate hours per domain
+    for (const session of periodSessions) {
+      const domain = userDomains.find(d => d.id === session.domainId);
+      const domainName = domain?.name || 'Uncategorized';
+      const hours = (session.duration || 0) / 3600; // Convert seconds to hours
+
+      domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
+    }
+
+    // Convert to array format
+    const result = Array.from(domainHours.entries()).map(([domain, hours], index) => ({
+      domain,
+      hours: Number(hours.toFixed(1)),
+      color: userDomains.find(d => d.name === domain)?.color || defaultColors[index % defaultColors.length]
+    }));
+
+    // Sort by hours descending
+    return result.sort((a, b) => b.hours - a.hours);
+  }
+
+  async calculateFocusTrend(userId: string, days: number = 7): Promise<Array<{
+    date: string;
+    focusMinutes: number;
+    mood: number;
+    energy: number;
+  }>> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const result = [];
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dayStart = new Date(d);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(d);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      // Get all sessions for this day
+      const allSessions = await this.getAll<Session>('sessions');
+      const daySessions = allSessions.filter(session => 
+        session.userId === userId &&
+        new Date(session.startTime) >= dayStart &&
+        new Date(session.startTime) <= dayEnd &&
+        session.status === 'completed'
+      );
+
+      // Calculate focus minutes
+      const focusMinutes = daySessions
+        .filter(session => session.tags.includes('focus'))
+        .reduce((total, session) => total + (session.duration || 0), 0) / 60;
+
+      // Calculate average mood and energy
+      const moodSessions = daySessions.filter(s => s.mood !== undefined);
+      const energySessions = daySessions.filter(s => s.energy !== undefined);
+
+      const avgMood = moodSessions.length > 0 
+        ? moodSessions.reduce((sum, s) => sum + (s.mood || 0), 0) / moodSessions.length 
+        : 5;
+
+      const avgEnergy = energySessions.length > 0
+        ? energySessions.reduce((sum, s) => sum + (s.energy || 0), 0) / energySessions.length
+        : 5;
+
+      result.push({
+        date: d.toISOString().split('T')[0],
+        focusMinutes: Math.round(focusMinutes),
+        mood: Math.round(avgMood * 10) / 10,
+        energy: Math.round(avgEnergy * 10) / 10
+      });
+    }
+
+    return result;
+  }
+
+  async calculateCorrelations(userId: string, days: number = 30): Promise<Array<{
+    factor1: string;
+    factor2: string;
+    correlation: number;
+    significance: string;
+  }>> {
+    const focusTrend = await this.calculateFocusTrend(userId, days);
+    
+    if (focusTrend.length < 3) {
+      return []; // Need at least 3 data points for correlation
+    }
+
+    const correlations = [];
+
+    // Calculate correlation between mood and focus
+    const moodFocusCorr = this.calculatePearsonCorrelation(
+      focusTrend.map(d => d.mood),
+      focusTrend.map(d => d.focusMinutes)
+    );
+
+    // Calculate correlation between energy and focus
+    const energyFocusCorr = this.calculatePearsonCorrelation(
+      focusTrend.map(d => d.energy),
+      focusTrend.map(d => d.focusMinutes)
+    );
+
+    // Calculate correlation between mood and energy
+    const moodEnergyCorr = this.calculatePearsonCorrelation(
+      focusTrend.map(d => d.mood),
+      focusTrend.map(d => d.energy)
+    );
+
+    if (!isNaN(moodFocusCorr)) {
+      correlations.push({
+        factor1: 'Mood',
+        factor2: 'Focus',
+        correlation: Math.round(moodFocusCorr * 100) / 100,
+        significance: this.getSignificance(Math.abs(moodFocusCorr))
+      });
+    }
+
+    if (!isNaN(energyFocusCorr)) {
+      correlations.push({
+        factor1: 'Energy',
+        factor2: 'Focus',
+        correlation: Math.round(energyFocusCorr * 100) / 100,
+        significance: this.getSignificance(Math.abs(energyFocusCorr))
+      });
+    }
+
+    if (!isNaN(moodEnergyCorr)) {
+      correlations.push({
+        factor1: 'Mood',
+        factor2: 'Energy',
+        correlation: Math.round(moodEnergyCorr * 100) / 100,
+        significance: this.getSignificance(Math.abs(moodEnergyCorr))
+      });
+    }
+
+    return correlations;
+  }
+
+  private calculatePearsonCorrelation(x: number[], y: number[]): number {
+    if (x.length !== y.length || x.length === 0) return NaN;
+
+    const n = x.length;
+    const sumX = x.reduce((a, b) => a + b, 0);
+    const sumY = y.reduce((a, b) => a + b, 0);
+    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
+    const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
+    const sumYY = y.reduce((sum, yi) => sum + yi * yi, 0);
+
+    const numerator = n * sumXY - sumX * sumY;
+    const denominator = Math.sqrt((n * sumXX - sumX * sumX) * (n * sumYY - sumY * sumY));
+
+    return denominator === 0 ? NaN : numerator / denominator;
+  }
+
+  private getSignificance(correlation: number): string {
+    if (correlation >= 0.7) return 'High';
+    if (correlation >= 0.5) return 'Medium';
+    if (correlation >= 0.3) return 'Low';
+    return 'None';
+  }
+
+  async generateWeeklyReview(userId: string): Promise<{
+    highlights: string[];
+    challenges: string[];
+    insights: string[];
+    nextWeekGoals: string[];
+  }> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7);
+
+    const planVsActual = await this.calculatePlanVsActualData(userId, 7);
+    const timeAllocation = await this.calculateTimeAllocation(userId, 7);
+    const focusTrend = await this.calculateFocusTrend(userId, 7);
+
+    const highlights = [];
+    const challenges = [];
+    const insights = [];
+    const nextWeekGoals = [];
+
+    // Analyze adherence
+    const avgAdherence = planVsActual.reduce((sum, day) => sum + day.adherence, 0) / planVsActual.length;
+    if (avgAdherence >= 90) {
+      highlights.push('Excellent planning adherence this week');
+    } else if (avgAdherence < 70) {
+      challenges.push('Low planning adherence - consider more realistic time blocks');
+      nextWeekGoals.push('Improve time estimation accuracy');
+    }
+
+    // Analyze focus time
+    const totalFocusHours = focusTrend.reduce((sum, day) => sum + day.focusMinutes, 0) / 60;
+    if (totalFocusHours >= 20) {
+      highlights.push('Strong focus time this week');
+    } else if (totalFocusHours < 10) {
+      challenges.push('Limited focused work time');
+      nextWeekGoals.push('Schedule more deep focus blocks');
+    }
+
+    // Analyze domain balance
+    const topDomain = timeAllocation[0];
+    if (topDomain && topDomain.hours > timeAllocation.reduce((sum, d) => sum + d.hours, 0) * 0.6) {
+      insights.push(`${topDomain.domain} dominated this week - consider better balance`);
+      nextWeekGoals.push('Diversify time allocation across domains');
+    }
+
+    // Default content if nothing specific found
+    if (highlights.length === 0) highlights.push('Keep building consistent habits');
+    if (challenges.length === 0) challenges.push('Continue monitoring time allocation');
+    if (insights.length === 0) insights.push('Track mood and energy for better patterns');
+    if (nextWeekGoals.length === 0) nextWeekGoals.push('Maintain current momentum');
+
+    return { highlights, challenges, insights, nextWeekGoals };
+  }
+}
+
+// Main Database Wrapper
+class LifeTrackerDB {
+  private adapter: DatabaseAdapter;
+  private useFirebase: boolean;
+
+  constructor() {
+    // Determine which adapter to use based on environment and configuration
+    // Only use Firebase if we're in the browser and have proper config
+    this.useFirebase = !!(typeof window !== 'undefined' && 
+                     process.env.NEXT_PUBLIC_USE_FIREBASE === 'true' &&
+                     process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
+                     process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key');
+    this.adapter = this.useFirebase ? firebaseAdapter : new IndexedDBAdapter();
+  }
+
+  async init(): Promise<void> {
+    await this.adapter.init();
+  }
+
+  async switchToFirebase(userId: string): Promise<void> {
+    if (!this.useFirebase) {
+      this.adapter = firebaseAdapter;
+      this.useFirebase = true;
+      
+      if ('setUserId' in this.adapter) {
+        (this.adapter as any).setUserId(userId);
+      }
+      
+      await this.adapter.init();
+      console.log('Switched to Firebase adapter');
+    }
+  }
+
+  async switchToIndexedDB(): Promise<void> {
+    if (this.useFirebase) {
+      this.adapter = new IndexedDBAdapter();
+      this.useFirebase = false;
+      await this.adapter.init();
+      console.log('Switched to IndexedDB adapter');
+    }
+  }
+
+  isUsingFirebase(): boolean {
+    return this.useFirebase;
+  }
+
+  // Delegate all methods to the current adapter
+  async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
+    return this.adapter.create(storeName, data);
+  }
+
+  async read<T>(storeName: string, id: string): Promise<T | null> {
+    return this.adapter.read(storeName, id);
+  }
+
+  async update<T extends { id: string }>(storeName: string, data: T): Promise<T> {
+    return this.adapter.update(storeName, data);
+  }
+
+  async delete(storeName: string, id: string): Promise<void> {
+    return this.adapter.delete(storeName, id);
+  }
+
+  async getAll<T>(storeName: string): Promise<T[]> {
+    return this.adapter.getAll(storeName);
+  }
+
+  async getByIndex<T>(storeName: string, indexName: string, value: any): Promise<T[]> {
+    return this.adapter.getByIndex(storeName, indexName, value);
+  }
+
+  subscribe<T>(storeName: string, callback: (data: T[]) => void): () => void {
+    return this.adapter.subscribe(storeName, callback);
+  }
+
+  isOnline(): boolean {
+    return this.adapter.isOnline();
+  }
+
+  async enableOffline(): Promise<void> {
+    return this.adapter.enableOffline();
+  }
+
+  async enableOnline(): Promise<void> {
+    return this.adapter.enableOnline();
+  }
+
+  // Specific methods for common queries (keep existing implementation)
+  async getActiveSessions(userId: string): Promise<Session[]> {
+    return this.getByIndex<Session>('sessions', 'status', 'active');
+  }
+
+  async getTodayTimeBlocks(userId: string): Promise<TimeBlock[]> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    if (this.useFirebase) {
+      // Use Firebase query
+      return (this.adapter as any).query('timeBlocks', [
+        { type: 'where', field: 'startTime', operator: '>=', value: today },
+        { type: 'where', field: 'startTime', operator: '<', value: tomorrow }
+      ]);
+    } else {
+      // Fallback to IndexedDB implementation
+      const store = await (this.adapter as any).getStore('timeBlocks');
+      const index = store.index('startTime');
+      
+      return new Promise((resolve, reject) => {
+        const range = IDBKeyRange.bound(today, tomorrow, false, true);
+        const request = index.getAll(range);
+        request.onsuccess = () => {
+          const blocks = request.result.filter((block: TimeBlock) => block.userId === userId);
+          resolve(blocks);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }
   }
 
   async getActiveHabits(userId: string): Promise<Habit[]> {
