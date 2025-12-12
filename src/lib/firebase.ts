@@ -14,37 +14,67 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || 'G-DEMO',
 };
 
-// Initialize Firebase only if we have real config
+// Initialize Firebase with lazy initialization pattern
 let app: any = null;
 let db: any = null;
 let auth: any = null;
+let initPromise: Promise<void> | null = null;
 
-const hasFirebaseConfig = typeof window !== 'undefined' && 
-  process.env.NEXT_PUBLIC_FIREBASE_API_KEY && 
-  process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key';
+function initializeFirebaseIfNeeded() {
+  if (initPromise) return initPromise;
+  
+  initPromise = new Promise<void>((resolve) => {
+    // Only initialize in browser with proper config
+    if (typeof window === 'undefined') {
+      console.log('🏗️ Firebase init skipped - SSR environment');
+      resolve();
+      return;
+    }
+    
+    const hasValidConfig = process.env.NEXT_PUBLIC_FIREBASE_API_KEY && 
+                          process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key';
+    
+    if (!hasValidConfig) {
+      console.log('⚠️ Firebase not configured - using offline mode');
+      resolve();
+      return;
+    }
 
-if (hasFirebaseConfig) {
-  try {
-    app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    auth = getAuth(app);
-    console.log('✅ Firebase initialized successfully');
-  } catch (error) {
-    console.error('❌ Firebase initialization failed:', error);
-    // Keep as null to prevent function calls
-    app = null;
-    db = null;
-    auth = null;
-  }
-} else {
-  console.warn('⚠️ Firebase not configured - using offline mode');
-  // Keep as null instead of empty objects
-  app = null;
-  db = null;
-  auth = null;
+    try {
+      app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      console.log('✅ Firebase initialized successfully');
+    } catch (error) {
+      console.error('❌ Firebase initialization failed:', error);
+      app = null;
+      db = null;
+      auth = null;
+    }
+    
+    resolve();
+  });
+  
+  return initPromise;
 }
 
-// Export the initialized objects
+// Auto-initialize on module load only in browser
+if (typeof window !== 'undefined') {
+  initializeFirebaseIfNeeded();
+}
+
+// Export getters for lazy access
+export const getFirestoreDB = () => {
+  initializeFirebaseIfNeeded();
+  return db;
+};
+
+export const getFirebaseAuth = () => {
+  initializeFirebaseIfNeeded();
+  return auth;
+};
+
+// For backward compatibility
 export { db, auth };
 
 // Development mode setup

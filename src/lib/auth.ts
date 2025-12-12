@@ -11,7 +11,7 @@ import {
   sendEmailVerification,
   AuthError
 } from 'firebase/auth';
-import { auth } from './firebase';
+import { getFirebaseAuth } from './firebase';
 import { db } from './database';
 
 export interface AuthUser {
@@ -47,6 +47,7 @@ class AuthManager {
   }
 
   private initAuthStateListener() {
+    const auth = getFirebaseAuth();
     if (!auth) {
       console.warn('⚠️ Firebase Auth not initialized - skipping auth state listener');
       return;
@@ -98,6 +99,7 @@ class AuthManager {
   }
 
   async signInWithEmail(email: string, password: string): Promise<AuthUser> {
+    const auth = getFirebaseAuth();
     if (!auth) {
       throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
     }
@@ -111,6 +113,7 @@ class AuthManager {
   }
 
   async signUpWithEmail(email: string, password: string, displayName?: string): Promise<AuthUser> {
+    const auth = getFirebaseAuth();
     if (!auth) {
       throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
     }
@@ -133,6 +136,7 @@ class AuthManager {
   }
 
   async signInWithGoogle(): Promise<AuthUser> {
+    const auth = getFirebaseAuth();
     if (!auth) {
       throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
     }
@@ -151,6 +155,7 @@ class AuthManager {
   }
 
   async signOut(): Promise<void> {
+    const auth = getFirebaseAuth();
     if (!auth) {
       throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
     }
@@ -165,6 +170,7 @@ class AuthManager {
   }
 
   async sendPasswordReset(email: string): Promise<void> {
+    const auth = getFirebaseAuth();
     try {
       await sendPasswordResetEmail(auth, email);
     } catch (error) {
@@ -173,8 +179,9 @@ class AuthManager {
   }
 
   async updateUserProfile(updates: { displayName?: string; photoURL?: string }): Promise<void> {
+    const auth = getFirebaseAuth();
     try {
-      const user = auth.currentUser;
+      const user = auth?.currentUser;
       if (!user) throw new Error('No authenticated user');
       
       await updateProfile(user, updates);
@@ -184,8 +191,9 @@ class AuthManager {
   }
 
   async sendEmailVerification(): Promise<void> {
+    const auth = getFirebaseAuth();
     try {
-      const user = auth.currentUser;
+      const user = auth?.currentUser;
       if (!user) throw new Error('No authenticated user');
       
       await sendEmailVerification(user);
