@@ -373,11 +373,27 @@ export default function TimeBlockPlanner({
 
       {/* Create Block Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 modal-portal">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-96 max-w-full border border-gray-200">
-            <h3 className="text-xl font-bold mb-6 text-gray-900 flex items-center">
-              ⏰ Create Time Block
-            </h3>
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 modal-portal p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowCreateModal(false);
+            }
+          }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-gray-200">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900 flex items-center">
+                ⏰ Create Time Block
+              </h3>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+                aria-label="Close modal"
+              >
+                ×
+              </button>
+            </div>
             
             <div className="space-y-5">
               <div>
