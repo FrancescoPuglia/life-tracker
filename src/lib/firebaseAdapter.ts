@@ -22,7 +22,7 @@ import {
   Query,
   DocumentSnapshot,
 } from 'firebase/firestore';
-import { getFirestoreDB } from './firebase';
+import { db as firestore } from './firebase';
 import { 
   User, Domain, Goal, KeyResult, Project, Task, TimeBlock, Session, 
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
@@ -62,7 +62,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async init(): Promise<void> {
     if (this.isInitialized) return;
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       console.warn('⚠️ Firebase Firestore not available - skipping adapter initialization');
       return;
@@ -94,7 +93,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async create<T extends { id?: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore || !this.isInitialized) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -133,7 +131,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async read<T>(collectionName: string, id: string): Promise<T | null> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -158,7 +155,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async update<T extends { id: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -186,7 +182,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async delete(collectionName: string, id: string): Promise<void> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -204,7 +199,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -230,7 +224,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getByIndex<T>(collectionName: string, field: string, value: any): Promise<T[]> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -257,7 +250,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async query<T>(collectionName: string, constraints: QueryConstraint[]): Promise<T[]> {
     await this.init();
     
-    const firestore = getFirestoreDB();
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -306,7 +298,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   subscribe<T>(collectionName: string, callback: (data: T[]) => void): () => void {
-    const firestore = getFirestoreDB();
     if (!firestore) {
       console.warn('Firebase Firestore not initialized - cannot subscribe');
       return () => {};
@@ -341,7 +332,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   async enableOffline(): Promise<void> {
-    const firestore = getFirestoreDB();
     if (!firestore) return;
     try {
       await disableNetwork(firestore);
@@ -351,7 +341,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   async enableOnline(): Promise<void> {
-    const firestore = getFirestoreDB();
     if (!firestore) return;
     try {
       await enableNetwork(firestore);
@@ -400,7 +389,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
 
 // Factory function to create adapter only when Firebase is available
 export function createFirebaseAdapter(): FirebaseAdapter | null {
-  const firestore = getFirestoreDB();
   if (!firestore) {
     console.warn('⚠️ Firebase Firestore not initialized - adapter not available');
     return null;
