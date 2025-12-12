@@ -160,13 +160,32 @@ export default function TimeBlockPlanner({
   };
 
   const getBlockColor = (block: TimeBlock) => {
+    const baseClasses = 'text-white font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2';
+    
     switch (block.type) {
-      case 'work': return 'bg-blue-100 border-blue-300 text-blue-800';
-      case 'break': return 'bg-green-100 border-green-300 text-green-800';
-      case 'focus': return 'bg-purple-100 border-purple-300 text-purple-800';
-      case 'meeting': return 'bg-yellow-100 border-yellow-300 text-yellow-800';
-      case 'admin': return 'bg-gray-100 border-gray-300 text-gray-800';
-      default: return 'bg-blue-100 border-blue-300 text-blue-800';
+      case 'work': 
+        return `${baseClasses} time-block-work text-white`;
+      case 'break': 
+        return `${baseClasses} time-block-break text-white`;
+      case 'focus': 
+        return `${baseClasses} time-block-focus text-white animate-pulse-slow`;
+      case 'meeting': 
+        return `${baseClasses} time-block-meeting text-gray-900 font-black`;
+      case 'admin': 
+        return `${baseClasses} time-block-admin text-white`;
+      default: 
+        return `${baseClasses} time-block-work text-white`;
+    }
+  };
+
+  const getBlockIcon = (block: TimeBlock) => {
+    switch (block.type) {
+      case 'work': return '💼';
+      case 'break': return '☕';
+      case 'focus': return '🎯';
+      case 'meeting': return '🤝';
+      case 'admin': return '⚙️';
+      default: return '📋';
     }
   };
 
@@ -176,10 +195,10 @@ export default function TimeBlockPlanner({
     const isActive = block.status === 'in_progress';
     const isCompleted = block.status === 'completed';
     
-    if (isCompleted) return '✓';
-    if (isActive) return '▶';
-    if (isOverdue) return '⚠';
-    return '';
+    if (isCompleted) return '✅';
+    if (isActive) return '🔴';
+    if (isOverdue) return '⚠️';
+    return '⏰';
   };
 
   const filteredBlocks = timeBlocks.filter(block => {
@@ -188,12 +207,14 @@ export default function TimeBlockPlanner({
   });
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div className="glass-card border border-gray-200 shadow-xl">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+      <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Time Planner</h2>
-          <p className="text-sm text-gray-600">{formatDate(selectedDate)}</p>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center">
+            📅 Time Planner
+          </h2>
+          <p className="text-sm text-gray-600 font-medium">{formatDate(selectedDate)}</p>
         </div>
         
         <div className="flex items-center space-x-2">
@@ -264,24 +285,30 @@ export default function TimeBlockPlanner({
           {filteredBlocks.map(block => (
             <div
               key={block.id}
-              className={`absolute left-16 right-4 border-l-4 rounded-lg p-2 cursor-pointer ${getBlockColor(block)}`}
+              className={`absolute left-16 right-4 rounded-xl p-3 cursor-pointer ${getBlockColor(block)} z-10`}
               style={{
                 top: `${getPositionFromTime(block.startTime)}px`,
                 height: `${getDurationHeight(block.startTime, block.endTime)}px`,
-                minHeight: '40px'
+                minHeight: '60px'
               }}
               onClick={() => setSelectedBlock(block)}
             >
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between h-full">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{block.title}</div>
-                  <div className="text-xs opacity-75 truncate">{block.description}</div>
-                  <div className="text-xs opacity-75">
-                    {block.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
+                  <div className="text-sm font-bold truncate mb-1 drop-shadow-sm">
+                    {getBlockIcon(block)} {block.title}
+                  </div>
+                  {block.description && (
+                    <div className="text-xs opacity-90 truncate mb-1 drop-shadow-sm">
+                      {block.description}
+                    </div>
+                  )}
+                  <div className="text-xs opacity-80 font-mono drop-shadow-sm">
+                    ⏰ {block.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
                     {block.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-                <div className="text-sm">{getStatusIndicator(block)}</div>
+                <div className="text-lg drop-shadow-sm">{getStatusIndicator(block)}</div>
               </div>
             </div>
           ))}
@@ -289,14 +316,20 @@ export default function TimeBlockPlanner({
           {/* Drag Preview */}
           {dragPreview && (
             <div
-              className="absolute left-16 right-4 bg-blue-200 border-2 border-blue-400 border-dashed rounded-lg opacity-60 z-20 flex items-center justify-center"
+              className="absolute left-16 right-4 bg-gradient-to-r from-blue-400 to-indigo-500 border-2 border-blue-300 border-dashed rounded-xl opacity-70 z-20 flex items-center justify-center shadow-lg"
               style={{
                 top: `${getPositionFromTime(dragPreview.startTime)}px`,
                 height: `${getDurationHeight(dragPreview.startTime, dragPreview.endTime)}px`,
-                minHeight: '40px'
+                minHeight: '60px'
               }}
             >
-              <span className="text-blue-700 text-sm font-medium">New Block</span>
+              <div className="text-white text-center">
+                <div className="text-sm font-bold">✨ New Block</div>
+                <div className="text-xs opacity-90 font-mono">
+                  {dragPreview.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
+                  {dragPreview.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
             </div>
           )}
 
@@ -328,51 +361,71 @@ export default function TimeBlockPlanner({
 
       {/* Create Block Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 max-w-full">
-            <h3 className="text-lg font-semibold mb-4">Create Time Block</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 modal-portal">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-96 max-w-full border border-gray-200">
+            <h3 className="text-xl font-bold mb-6 text-gray-900 flex items-center">
+              ⏰ Create Time Block
+            </h3>
             
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  🎯 Title
+                </label>
                 <input
                   type="text"
                   value={newBlockData.title || ''}
                   onChange={(e) => setNewBlockData({ ...newBlockData, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="What are you working on?"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                  style={{ color: '#111827', backgroundColor: '#ffffff' }}
+                  placeholder="What are you working on? 🚀"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  🏷️ Type
+                </label>
                 <select
                   value={newBlockData.type || 'work'}
                   onChange={(e) => setNewBlockData({ ...newBlockData, type: e.target.value as any })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                  style={{ color: '#111827', backgroundColor: '#ffffff' }}
                 >
-                  <option value="work">Work</option>
-                  <option value="focus">Deep Focus</option>
-                  <option value="meeting">Meeting</option>
-                  <option value="break">Break</option>
-                  <option value="admin">Admin</option>
+                  <option value="work">💼 Work - Blue Power</option>
+                  <option value="focus">🎯 Deep Focus - Purple Excellence</option>
+                  <option value="meeting">🤝 Meeting - Golden Hour</option>
+                  <option value="break">☕ Break - Emerald Zen</option>
+                  <option value="admin">⚙️ Admin - Steel Gray</option>
                 </select>
+                
+                {/* Color Preview */}
+                <div className="mt-3">
+                  <div className={`h-8 rounded-lg flex items-center justify-center text-sm font-bold ${getBlockColor({ type: newBlockData.type || 'work' } as TimeBlock)}`}>
+                    {getBlockIcon({ type: newBlockData.type || 'work' } as TimeBlock)} Preview Color
+                  </div>
+                </div>
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  📝 Description
+                </label>
                 <textarea
                   value={newBlockData.description || ''}
                   onChange={(e) => setNewBlockData({ ...newBlockData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                  style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   rows={3}
-                  placeholder="Why are you doing this?"
+                  placeholder="Why are you doing this? What's the purpose? 🤔"
                 />
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                  <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                    🕐 Start Time
+                  </label>
                   <input
                     type="time"
                     value={newBlockData.startTime?.toTimeString().slice(0, 5) || ''}
@@ -382,12 +435,15 @@ export default function TimeBlockPlanner({
                       time.setHours(parseInt(hours), parseInt(minutes), 0, 0);
                       setNewBlockData({ ...newBlockData, startTime: time });
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                    style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   />
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                  <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                    🕕 End Time
+                  </label>
                   <input
                     type="time"
                     value={newBlockData.endTime?.toTimeString().slice(0, 5) || ''}
@@ -397,24 +453,25 @@ export default function TimeBlockPlanner({
                       time.setHours(parseInt(hours), parseInt(minutes), 0, 0);
                       setNewBlockData({ ...newBlockData, endTime: time });
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                    style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   />
                 </div>
               </div>
             </div>
             
-            <div className="flex justify-end space-x-3 mt-6">
+            <div className="flex justify-end space-x-3 mt-8">
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
               >
-                Cancel
+                ❌ Cancel
               </button>
               <button
                 onClick={handleCreateBlock}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg transform hover:scale-105"
               >
-                Create
+                ✨ Create Block
               </button>
             </div>
           </div>

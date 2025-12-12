@@ -412,6 +412,45 @@ body::before {
   opacity: 1 !important;
 }
 
+/* ===== TIME PLANNER ENHANCEMENTS ===== */
+.time-block-work {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+  position: relative;
+}
+
+.time-block-work::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--neon-blue), transparent, var(--neon-blue));
+  opacity: 0.8;
+}
+
+.time-block-focus {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+  border: 2px solid var(--neon-purple);
+}
+
+.time-block-break {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+}
+
+.time-block-meeting {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+}
+
+.time-block-admin {
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+  box-shadow: 0 4px 20px rgba(107, 114, 128, 0.4);
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
