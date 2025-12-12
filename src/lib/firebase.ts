@@ -19,15 +19,29 @@ let app: any = null;
 let db: any = null;
 let auth: any = null;
 
-if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key') {
-  app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
-  auth = getAuth(app);
+const hasFirebaseConfig = typeof window !== 'undefined' && 
+  process.env.NEXT_PUBLIC_FIREBASE_API_KEY && 
+  process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key';
+
+if (hasFirebaseConfig) {
+  try {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    auth = getAuth(app);
+    console.log('✅ Firebase initialized successfully');
+  } catch (error) {
+    console.error('❌ Firebase initialization failed:', error);
+    // Keep as null to prevent function calls
+    app = null;
+    db = null;
+    auth = null;
+  }
 } else {
-  // Mock objects for SSR or when Firebase is not configured
-  app = {};
-  db = {};
-  auth = {};
+  console.warn('⚠️ Firebase not configured - using offline mode');
+  // Keep as null instead of empty objects
+  app = null;
+  db = null;
+  auth = null;
 }
 
 // Export the initialized objects

@@ -22,7 +22,7 @@ import {
   Query,
   DocumentSnapshot,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db as firestore } from './firebase';
 import { 
   User, Domain, Goal, KeyResult, Project, Task, TimeBlock, Session, 
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
@@ -62,13 +62,17 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async init(): Promise<void> {
     if (this.isInitialized) return;
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       // Test connection
-      await enableNetwork(db);
+      await enableNetwork(firestore);
       this.isInitialized = true;
-      console.log('Firebase adapter initialized successfully');
+      console.log('✅ Firebase adapter initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize Firebase adapter:', error);
+      console.error('❌ Failed to initialize Firebase adapter:', error);
       throw error;
     }
   }
@@ -87,9 +91,13 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async create<T extends { id?: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const collectionRef = collection(db, collectionPath);
+      const collectionRef = collection(firestore, collectionPath);
       
       // Prepare data with timestamps
       const dataWithTimestamps: any = {
@@ -97,19 +105,20 @@ export class FirebaseAdapter implements DatabaseAdapter {
         createdAt: (data as any).createdAt ? Timestamp.fromDate(new Date((data as any).createdAt)) : serverTimestamp(),
         updatedAt: (data as any).updatedAt ? Timestamp.fromDate(new Date((data as any).updatedAt)) : serverTimestamp(),
       };
-
+      
+      // Convert date fields to Timestamps
+      this.convertDatesToTimestamps(dataWithTimestamps);
+      
       if (data.id) {
-        // Use provided ID
-        const docRef = doc(db, collectionPath, data.id);
+        // Use custom ID
+        const docRef = doc(collectionRef, data.id);
         await updateDoc(docRef, dataWithTimestamps);
-        return data;
+        return { ...data, ...dataWithTimestamps };
       } else {
         // Auto-generate ID
         const docRef = await addDoc(collectionRef, dataWithTimestamps);
-        return {
-          ...data,
-          id: docRef.id,
-        } as T;
+        const newData = { ...data, id: docRef.id, ...dataWithTimestamps };
+        return this.convertTimestampsToDates(newData) as T;
       }
     } catch (error) {
       console.error(`Failed to create document in ${collectionName}:`, error);
@@ -120,17 +129,23 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async read<T>(collectionName: string, id: string): Promise<T | null> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const docRef = doc(db, collectionPath, id);
+      const docRef = doc(firestore, collectionPath, id);
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
-        return this.convertFirestoreDoc(docSnap) as T;
+        const data = { id: docSnap.id, ...docSnap.data() };
+        return this.convertTimestampsToDates(data) as T;
       }
+      
       return null;
     } catch (error) {
-      console.error(`Failed to read document ${id} from ${collectionName}:`, error);
+      console.error(`Failed to read document from ${collectionName}:`, error);
       throw error;
     }
   }
@@ -138,19 +153,26 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async update<T extends { id: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const docRef = doc(db, collectionPath, data.id);
+      const docRef = doc(firestore, collectionPath, data.id);
       
       const dataWithTimestamps = {
         ...data,
         updatedAt: serverTimestamp(),
       };
       
+      // Convert date fields to Timestamps
+      this.convertDatesToTimestamps(dataWithTimestamps);
+      
       await updateDoc(docRef, dataWithTimestamps);
-      return data;
+      return this.convertTimestampsToDates(dataWithTimestamps) as T;
     } catch (error) {
-      console.error(`Failed to update document ${data.id} in ${collectionName}:`, error);
+      console.error(`Failed to update document in ${collectionName}:`, error);
       throw error;
     }
   }
@@ -158,12 +180,16 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async delete(collectionName: string, id: string): Promise<void> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const docRef = doc(db, collectionPath, id);
+      const docRef = doc(firestore, collectionPath, id);
       await deleteDoc(docRef);
     } catch (error) {
-      console.error(`Failed to delete document ${id} from ${collectionName}:`, error);
+      console.error(`Failed to delete document from ${collectionName}:`, error);
       throw error;
     }
   }
@@ -171,12 +197,22 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const collectionRef = collection(db, collectionPath);
+      const collectionRef = collection(firestore, collectionPath);
       const querySnapshot = await getDocs(collectionRef);
       
-      return querySnapshot.docs.map(doc => this.convertFirestoreDoc(doc)) as T[];
+      const results: T[] = [];
+      querySnapshot.forEach(doc => {
+        const data = { id: doc.id, ...doc.data() };
+        results.push(this.convertTimestampsToDates(data) as T);
+      });
+      
+      return results;
     } catch (error) {
       console.error(`Failed to get all documents from ${collectionName}:`, error);
       throw error;
@@ -186,15 +222,25 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getByIndex<T>(collectionName: string, field: string, value: any): Promise<T[]> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const collectionRef = collection(db, collectionPath);
+      const collectionRef = collection(firestore, collectionPath);
       const q = query(collectionRef, where(field, '==', value));
       const querySnapshot = await getDocs(q);
       
-      return querySnapshot.docs.map(doc => this.convertFirestoreDoc(doc)) as T[];
+      const results: T[] = [];
+      querySnapshot.forEach(doc => {
+        const data = { id: doc.id, ...doc.data() };
+        results.push(this.convertTimestampsToDates(data) as T);
+      });
+      
+      return results;
     } catch (error) {
-      console.error(`Failed to query ${collectionName} by ${field}:`, error);
+      console.error(`Failed to query documents from ${collectionName}:`, error);
       throw error;
     }
   }
@@ -202,39 +248,47 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async query<T>(collectionName: string, constraints: QueryConstraint[]): Promise<T[]> {
     await this.init();
     
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      const collectionRef = collection(db, collectionPath);
+      const collectionRef = collection(firestore, collectionPath);
       
-      let q: Query = collectionRef;
+      // Build query constraints
+      const queryConstraints: any[] = [];
       
-      for (const constraint of constraints) {
+      constraints.forEach(constraint => {
         switch (constraint.type) {
           case 'where':
             if (constraint.field && constraint.operator && constraint.value !== undefined) {
-              q = query(q, where(constraint.field, constraint.operator, constraint.value));
+              queryConstraints.push(where(constraint.field, constraint.operator, constraint.value));
             }
             break;
           case 'orderBy':
             if (constraint.field) {
-              q = query(q, orderBy(constraint.field, constraint.direction || 'asc'));
+              queryConstraints.push(orderBy(constraint.field, constraint.direction || 'asc'));
             }
             break;
           case 'limit':
             if (constraint.limitTo) {
-              q = query(q, limit(constraint.limitTo));
-            }
-            break;
-          case 'startAfter':
-            if (constraint.startAfterDoc) {
-              q = query(q, startAfter(constraint.startAfterDoc));
+              queryConstraints.push(limit(constraint.limitTo));
             }
             break;
         }
-      }
+      });
       
+      const q = query(collectionRef, ...queryConstraints);
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => this.convertFirestoreDoc(doc)) as T[];
+      
+      const results: T[] = [];
+      querySnapshot.forEach(doc => {
+        const data = { id: doc.id, ...doc.data() };
+        results.push(this.convertTimestampsToDates(data) as T);
+      });
+      
+      return results;
     } catch (error) {
       console.error(`Failed to execute query on ${collectionName}:`, error);
       throw error;
@@ -242,29 +296,33 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   subscribe<T>(collectionName: string, callback: (data: T[]) => void): () => void {
-    const collectionPath = this.getUserCollection(collectionName);
-    const collectionRef = collection(db, collectionPath);
+    if (!firestore) {
+      console.warn('Firebase Firestore not initialized - cannot subscribe');
+      return () => {};
+    }
     
-    const unsubscribe = onSnapshot(collectionRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => this.convertFirestoreDoc(doc)) as T[];
-      callback(data);
-    }, (error) => {
-      console.error(`Subscription error for ${collectionName}:`, error);
-    });
-    
-    // Store unsubscriber
-    const key = `${this.userId}-${collectionName}`;
-    this.unsubscribers.set(key, unsubscribe);
-    
-    return () => {
-      unsubscribe();
-      this.unsubscribers.delete(key);
-    };
-  }
-
-  unsubscribeAll(): void {
-    this.unsubscribers.forEach(unsubscribe => unsubscribe());
-    this.unsubscribers.clear();
+    try {
+      const collectionPath = this.getUserCollection(collectionName);
+      const collectionRef = collection(firestore, collectionPath);
+      
+      const unsubscribe = onSnapshot(collectionRef, (querySnapshot) => {
+        const results: T[] = [];
+        querySnapshot.forEach(doc => {
+          const data = { id: doc.id, ...doc.data() };
+          results.push(this.convertTimestampsToDates(data) as T);
+        });
+        callback(results);
+      });
+      
+      // Store unsubscriber
+      const key = `${this.userId}-${collectionName}`;
+      this.unsubscribers.set(key, unsubscribe);
+      
+      return unsubscribe;
+    } catch (error) {
+      console.error(`Failed to subscribe to ${collectionName}:`, error);
+      return () => {};
+    }
   }
 
   isOnline(): boolean {
@@ -272,94 +330,69 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   async enableOffline(): Promise<void> {
+    if (!firestore) return;
     try {
-      await disableNetwork(db);
-      console.log('Firebase offline mode enabled');
+      await disableNetwork(firestore);
     } catch (error) {
       console.error('Failed to enable offline mode:', error);
-      throw error;
     }
   }
 
   async enableOnline(): Promise<void> {
+    if (!firestore) return;
     try {
-      await enableNetwork(db);
-      console.log('Firebase online mode enabled');
+      await enableNetwork(firestore);
     } catch (error) {
       console.error('Failed to enable online mode:', error);
-      throw error;
     }
   }
 
-  private convertFirestoreDoc(doc: DocumentSnapshot<DocumentData>): any {
-    const data = doc.data();
-    if (!data) return null;
-    
-    const converted: any = { id: doc.id, ...data };
-    
-    // Convert Firestore Timestamps to JavaScript Dates
-    Object.keys(converted).forEach(key => {
-      if (converted[key] instanceof Timestamp) {
-        converted[key] = (converted[key] as Timestamp).toDate();
+  private convertDatesToTimestamps(data: any): void {
+    Object.keys(data).forEach(key => {
+      if (data[key] instanceof Date) {
+        data[key] = Timestamp.fromDate(data[key]);
+      } else if (data[key] && typeof data[key] === 'object' && !Array.isArray(data[key])) {
+        this.convertDatesToTimestamps(data[key]);
       }
     });
+  }
+
+  private convertTimestampsToDates(data: any): any {
+    if (!data || typeof data !== 'object') return data;
     
+    const converted = { ...data };
+    Object.keys(converted).forEach(key => {
+      if (converted[key] && typeof converted[key] === 'object') {
+        if (converted[key].toDate && typeof converted[key].toDate === 'function') {
+          // It's a Firestore Timestamp
+          converted[key] = converted[key].toDate();
+        } else if (Array.isArray(converted[key])) {
+          // It's an array, convert each item
+          converted[key] = converted[key].map((item: any) => this.convertTimestampsToDates(item));
+        } else {
+          // It's a nested object, recurse
+          converted[key] = this.convertTimestampsToDates(converted[key]);
+        }
+      }
+    });
     return converted;
   }
 
-  // Batch operations
-  async batchWrite(operations: Array<{
-    type: 'create' | 'update' | 'delete';
-    collection: string;
-    id?: string;
-    data?: any;
-  }>): Promise<void> {
-    await this.init();
-    
-    try {
-      const batch = writeBatch(db);
-      
-      for (const operation of operations) {
-        const collectionPath = this.getUserCollection(operation.collection);
-        
-        switch (operation.type) {
-          case 'create':
-            if (operation.data) {
-              const docRef = operation.id 
-                ? doc(db, collectionPath, operation.id)
-                : doc(collection(db, collectionPath));
-              batch.set(docRef, {
-                ...operation.data,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-              });
-            }
-            break;
-          case 'update':
-            if (operation.id && operation.data) {
-              const docRef = doc(db, collectionPath, operation.id);
-              batch.update(docRef, {
-                ...operation.data,
-                updatedAt: serverTimestamp(),
-              });
-            }
-            break;
-          case 'delete':
-            if (operation.id) {
-              const docRef = doc(db, collectionPath, operation.id);
-              batch.delete(docRef);
-            }
-            break;
-        }
-      }
-      
-      await batch.commit();
-      console.log('Batch write completed successfully');
-    } catch (error) {
-      console.error('Batch write failed:', error);
-      throw error;
-    }
+  destroy(): void {
+    // Unsubscribe from all listeners
+    this.unsubscribers.forEach(unsubscribe => unsubscribe());
+    this.unsubscribers.clear();
   }
 }
 
-export const firebaseAdapter = new FirebaseAdapter();
+// Create and export the adapter instance
+// Only create if Firebase is properly initialized
+let firebaseAdapter: FirebaseAdapter | null = null;
+
+if (firestore) {
+  firebaseAdapter = new FirebaseAdapter();
+} else {
+  console.warn('⚠️ Firebase Firestore not initialized - Firebase adapter will not be available');
+}
+
+export { firebaseAdapter };

@@ -577,12 +577,15 @@ class LifeTrackerDB {
 
   constructor() {
     // Determine which adapter to use based on environment and configuration
-    // Only use Firebase if we're in the browser and have proper config
-    this.useFirebase = !!(typeof window !== 'undefined' && 
-                     process.env.NEXT_PUBLIC_USE_FIREBASE === 'true' &&
+    // Only use Firebase if we're in the browser and have proper config AND Firebase is initialized
+    const hasFirebaseConfig = !!(typeof window !== 'undefined' && 
                      process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
                      process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key');
-    this.adapter = this.useFirebase ? firebaseAdapter : new IndexedDBAdapter();
+    
+    this.useFirebase = hasFirebaseConfig && firebaseAdapter !== null;
+    this.adapter = this.useFirebase ? firebaseAdapter! : new IndexedDBAdapter();
+    
+    console.log(`🔌 Database initialized with ${this.useFirebase ? 'Firebase' : 'IndexedDB'} adapter`);
   }
 
   async init(): Promise<void> {
@@ -590,7 +593,7 @@ class LifeTrackerDB {
   }
 
   async switchToFirebase(userId: string): Promise<void> {
-    if (!this.useFirebase) {
+    if (!this.useFirebase && firebaseAdapter) {
       this.adapter = firebaseAdapter;
       this.useFirebase = true;
       
@@ -599,7 +602,9 @@ class LifeTrackerDB {
       }
       
       await this.adapter.init();
-      console.log('Switched to Firebase adapter');
+      console.log('✅ Switched to Firebase adapter');
+    } else if (!firebaseAdapter) {
+      console.warn('⚠️ Cannot switch to Firebase - adapter not initialized');
     }
   }
 

@@ -47,7 +47,10 @@ class AuthManager {
   }
 
   private initAuthStateListener() {
-    if (!auth || typeof auth.onAuthStateChanged !== 'function') return;
+    if (!auth) {
+      console.warn('⚠️ Firebase Auth not initialized - skipping auth state listener');
+      return;
+    }
     
     onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
       const user = firebaseUser ? this.mapFirebaseUser(firebaseUser) : null;
@@ -95,6 +98,10 @@ class AuthManager {
   }
 
   async signInWithEmail(email: string, password: string): Promise<AuthUser> {
+    if (!auth) {
+      throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
+    }
+    
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       return this.mapFirebaseUser(userCredential.user);
@@ -104,6 +111,10 @@ class AuthManager {
   }
 
   async signUpWithEmail(email: string, password: string, displayName?: string): Promise<AuthUser> {
+    if (!auth) {
+      throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
+    }
+    
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
@@ -122,6 +133,10 @@ class AuthManager {
   }
 
   async signInWithGoogle(): Promise<AuthUser> {
+    if (!auth) {
+      throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
+    }
+    
     try {
       const provider = new GoogleAuthProvider();
       // Add scopes for better user info
@@ -136,6 +151,10 @@ class AuthManager {
   }
 
   async signOut(): Promise<void> {
+    if (!auth) {
+      throw new Error('Firebase Auth not initialized. Please check your Firebase configuration.');
+    }
+    
     try {
       await signOut(auth);
       // Switch back to IndexedDB when user signs out

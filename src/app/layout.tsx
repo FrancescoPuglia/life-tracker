@@ -24,9 +24,9 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="theme-color" content="#3b82f6" />
-        <link rel="icon" href="/favicon.ico" />
-        <link rel="apple-touch-icon" href="/icon-192x192.png" />
-        <link rel="manifest" href="/manifest.json" />
+        <link rel="icon" href="./favicon.ico" />
+        <link rel="apple-touch-icon" href="./icon-192x192.png" />
+        <link rel="manifest" href="./manifest.json" />
       </head>
       <body className={`${inter.className} antialiased`}>
         <div id="root" className="min-h-screen bg-gray-50">
