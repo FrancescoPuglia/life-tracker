@@ -640,10 +640,6 @@ class LifeTrackerDB {
     }
   }
 
-  isUsingFirebase(): boolean {
-    return this.useFirebase;
-  }
-
   // Delegate all methods to the current adapter
   async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
     return this.adapter.create(storeName, data);
