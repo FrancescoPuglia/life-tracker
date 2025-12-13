@@ -165,7 +165,18 @@ export default function HomePage() {
         db.getAll<HabitLog>('habitLogs')
       ]);
 
-      setTimeBlocks(allTimeBlocks);
+      // 🔧 FIX: Deserialize dates from IndexedDB (dates are stored as strings)
+      const deserializedTimeBlocks = allTimeBlocks.map(block => ({
+        ...block,
+        startTime: new Date(block.startTime),
+        endTime: new Date(block.endTime),
+        createdAt: new Date(block.createdAt),
+        updatedAt: new Date(block.updatedAt),
+        actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+        actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+      }));
+
+      setTimeBlocks(deserializedTimeBlocks);
       setGoals(allGoals);
       setKeyResults(allKeyResults);
       setProjects(allProjects);
