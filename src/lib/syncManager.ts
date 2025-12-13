@@ -110,7 +110,7 @@ class SyncManager {
 
     try {
       // If we're using IndexedDB, switch to Firebase for sync
-      if (!db.isUsingFirebase()) {
+      if (!db.isUsingFirebase) {
         await db.switchToFirebase(user.uid);
       }
 
