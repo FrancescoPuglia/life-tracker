@@ -246,5 +246,81 @@ export default function GamingEffects({
     <>
       {/* 🏆 ACHIEVEMENT POPUP */}
       {showAchievement && (
-        <div className=\"achievement-popup\">
-          <div className=\"text-6xl mb-4\">{showAchievement.icon}</div>\n          <div className=\"text-2xl font-bold text-yellow-400 mb-2\">\n            ACHIEVEMENT UNLOCKED!\n          </div>\n          <div className=\"text-xl font-bold text-white mb-1\">\n            {showAchievement.title}\n          </div>\n          <div className=\"text-sm text-gray-300 mb-3\">\n            {showAchievement.description}\n          </div>\n          <div className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${\n            showAchievement.rarity === 'legendary' ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black' :\n            showAchievement.rarity === 'epic' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' :\n            showAchievement.rarity === 'rare' ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white' :\n            'bg-gradient-to-r from-gray-400 to-gray-600 text-white'\n          }`}>\n            {showAchievement.rarity.toUpperCase()}\n          </div>\n          <div className=\"text-lg font-bold text-green-400 mt-2\">\n            +{showAchievement.xp} XP\n          </div>\n        </div>\n      )}\n\n      {/* 🎮 COMBO COUNTER */}\n      {comboCount > 1 && (\n        <div className=\"fixed top-20 right-4 z-50\">\n          <div className=\"bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-2 rounded-full font-bold text-lg shadow-lg transform scale-110 animate-pulse\">\n            🔥 {comboCount}x COMBO!\n          </div>\n        </div>\n      )}\n\n      {/* 🏆 FLOATING XP COUNTER */}\n      <div className=\"fixed top-4 right-4 z-50\">\n        <div className=\"bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg\">\n          💎 {xpGained.toLocaleString()} XP\n        </div>\n      </div>\n\n      {/* 🎯 ACTION BUTTONS FOR TESTING */}\n      <div className=\"fixed bottom-4 right-4 z-50 flex flex-col space-y-2\">\n        <button\n          onClick={handleTaskComplete}\n          className=\"btn-gaming px-3 py-2 text-sm\"\n        >\n          🎯 Complete Task\n        </button>\n        <button\n          onClick={() => handleHabitComplete(Math.floor(Math.random() * 50) + 1)}\n          className=\"btn-gaming px-3 py-2 text-sm\"\n        >\n          🔥 Complete Habit\n        </button>\n        <button\n          onClick={() => handleGoalProgress(Math.floor(Math.random() * 100))}\n          className=\"btn-gaming px-3 py-2 text-sm\"\n        >\n          📈 Goal Progress\n        </button>\n        <button\n          onClick={() => audioManager.perfectDay()}\n          className=\"btn-gaming px-3 py-2 text-sm\"\n        >\n          🌟 Perfect Day\n        </button>\n      </div>\n\n      {/* 🎆 CELEBRATION EFFECTS */}\n      <style jsx global>{`\n        .achievement-popup {\n          animation: achievementAppear 3s ease-in-out;\n        }\n      `}</style>\n    </>\n  );\n}
+        <div className="achievement-popup">
+          <div className="text-6xl mb-4">{showAchievement.icon}</div>
+          <div className="text-2xl font-bold text-yellow-400 mb-2">
+            ACHIEVEMENT UNLOCKED!
+          </div>
+          <div className="text-xl font-bold text-white mb-1">
+            {showAchievement.title}
+          </div>
+          <div className="text-sm text-gray-300 mb-3">
+            {showAchievement.description}
+          </div>
+          <div className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+            showAchievement.rarity === 'legendary' ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black' :
+            showAchievement.rarity === 'epic' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' :
+            showAchievement.rarity === 'rare' ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white' :
+            'bg-gradient-to-r from-gray-400 to-gray-600 text-white'
+          }`}>
+            {showAchievement.rarity.toUpperCase()}
+          </div>
+          <div className="text-lg font-bold text-green-400 mt-2">
+            +{showAchievement.xp} XP
+          </div>
+        </div>
+      )}
+
+      {/* 🎮 COMBO COUNTER */}
+      {comboCount > 1 && (
+        <div className="fixed top-20 right-4 z-50">
+          <div className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-2 rounded-full font-bold text-lg shadow-lg transform scale-110 animate-pulse">
+            🔥 {comboCount}x COMBO!
+          </div>
+        </div>
+      )}
+
+      {/* 🏆 FLOATING XP COUNTER */}
+      <div className="fixed top-4 right-4 z-50">
+        <div className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg">
+          💎 {xpGained.toLocaleString()} XP
+        </div>
+      </div>
+
+      {/* 🎯 ACTION BUTTONS FOR TESTING */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col space-y-2">
+        <button
+          onClick={handleTaskComplete}
+          className="btn-gaming px-3 py-2 text-sm"
+        >
+          🎯 Complete Task
+        </button>
+        <button
+          onClick={() => handleHabitComplete(Math.floor(Math.random() * 50) + 1)}
+          className="btn-gaming px-3 py-2 text-sm"
+        >
+          🔥 Complete Habit
+        </button>
+        <button
+          onClick={() => handleGoalProgress(Math.floor(Math.random() * 100))}
+          className="btn-gaming px-3 py-2 text-sm"
+        >
+          📈 Goal Progress
+        </button>
+        <button
+          onClick={() => audioManager.perfectDay()}
+          className="btn-gaming px-3 py-2 text-sm"
+        >
+          🌟 Perfect Day
+        </button>
+      </div>
+
+      {/* 🎆 CELEBRATION EFFECTS */}
+      <style jsx global>{`
+        .achievement-popup {
+          animation: achievementAppear 3s ease-in-out;
+        }
+      `}</style>
+    </>
+  );
+}
