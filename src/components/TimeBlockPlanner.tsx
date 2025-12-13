@@ -220,38 +220,13 @@ export default function TimeBlockPlanner({
     return '⏰';
   };
 
-  // 🔍 PSYCHOPATH DEBUG: Analisi completa di ogni time block ricevuto
-  console.log('🔥 PSYCHOPATH ANALYSIS - TimeBlocks received:', {
-    count: timeBlocks.length,
-    selectedDate: selectedDate.toDateString(),
-    blocks: timeBlocks.map((block, index) => ({
-      index,
-      id: block.id,
-      title: block.title,
-      startTime: block.startTime,
-      startTimeType: typeof block.startTime,
-      startTimeIsDate: block.startTime instanceof Date,
-      startTimeStr: block.startTime?.toString?.(),
-      endTime: block.endTime,
-      endTimeType: typeof block.endTime,
-      canGetHours: typeof block.startTime?.getHours === 'function'
-    }))
-  });
+  // 🔍 DEBUG: Analizza time blocks ricevuti
+  console.log('🔥 TimeBlocks received:', { count: timeBlocks.length, selectedDate: selectedDate.toDateString() });
 
   const filteredBlocks = timeBlocks.filter((block, index) => {
     try {
       const blockDate = new Date(block.startTime);
       const isMatch = blockDate.toDateString() === selectedDate.toDateString();
-      
-      console.log(`🎯 Filter block ${index}:`, {
-        id: block.id,
-        title: block.title,
-        startTime: block.startTime,
-        blockDateStr: blockDate.toDateString(),
-        selectedDateStr: selectedDate.toDateString(),
-        isMatch: isMatch
-      });
-      
       return isMatch;
     } catch (error) {
       console.error(`❌ Filter ERROR for block ${index}:`, error, block);
@@ -398,14 +373,6 @@ export default function TimeBlockPlanner({
             </div>
           </div>
           {filteredBlocks.map((block, renderIndex) => {
-            console.log(`🎨 RENDERING block ${renderIndex}:`, {
-              id: block.id,
-              title: block.title,
-              startTime: block.startTime,
-              position: getPositionFromTime(block.startTime),
-              height: getDurationHeight(block.startTime, block.endTime)
-            });
-            
             return (
             <div
               key={block.id}

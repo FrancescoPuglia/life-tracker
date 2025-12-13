@@ -90,10 +90,29 @@ class IndexedDBAdapter implements DatabaseAdapter {
 
   async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
     const store = await this.getStore(storeName, 'readwrite');
+    
+    // 🔥 PSYCHOPATH FIX: Generate unique ID if not provided
+    if (!data.id) {
+      data.id = `${storeName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    console.log('🔥 PSYCHOPATH: IndexedDB create called with:', {
+      storeName,
+      id: data.id,
+      data: data
+    });
+    
     return new Promise((resolve, reject) => {
-      const request = store.add(data);
-      request.onsuccess = () => resolve(data);
-      request.onerror = () => reject(request.error);
+      // 🔥 PSYCHOPATH FIX: Use PUT instead of ADD to allow overwrites
+      const request = store.put(data);
+      request.onsuccess = () => {
+        console.log('🔥 PSYCHOPATH: IndexedDB create SUCCESS:', data.id);
+        resolve(data);
+      };
+      request.onerror = () => {
+        console.error('🔥 PSYCHOPATH: IndexedDB create ERROR:', request.error);
+        reject(request.error);
+      };
     });
   }
 
