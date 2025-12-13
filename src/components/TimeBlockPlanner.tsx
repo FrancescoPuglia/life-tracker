@@ -358,7 +358,21 @@ export default function TimeBlockPlanner({
                 <div>Total blocks: {timeBlocks.length}</div>
                 <div>Filtered blocks: {filteredBlocks.length}</div>
                 <div>Selected date: {selectedDate.toDateString()}</div>
-                <div className="text-xs mt-2">Check console for detailed analysis</div>
+                
+                {/* 🔥 SHOW ACTUAL TIME BLOCKS DATA */}
+                <div className="mt-3 text-xs">
+                  <div className="font-bold">Raw Time Blocks:</div>
+                  {timeBlocks.slice(0, 3).map((block, i) => (
+                    <div key={i} className="border-t pt-1 mt-1">
+                      <div>Block {i}: {block.title}</div>
+                      <div>StartTime: {block.startTime?.toString()}</div>
+                      <div>Type: {typeof block.startTime}</div>
+                      <div>Date: {block.startTime instanceof Date ? new Date(block.startTime).toDateString() : 'NOT A DATE'}</div>
+                      <div>Match: {block.startTime instanceof Date && new Date(block.startTime).toDateString() === selectedDate.toDateString() ? '✅ YES' : '❌ NO'}</div>
+                    </div>
+                  ))}
+                  {timeBlocks.length > 3 && <div>... and {timeBlocks.length - 3} more</div>}
+                </div>
               </div>
             </div>
           )}
