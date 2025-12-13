@@ -385,7 +385,7 @@ export default function HomePage() {
       setTimeBlocks(updatedBlocks);
       console.log('🔥 PSYCHOPATH: ✅ State updated successfully');
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ PSYCHOPATH: CRITICAL ERROR in handleCreateTimeBlock:', error);
       console.error('❌ PSYCHOPATH: Error details:', {
         name: error?.name,
