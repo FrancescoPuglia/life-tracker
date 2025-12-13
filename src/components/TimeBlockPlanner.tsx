@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { TimeBlock, Task, Project, Goal } from '@/types';
 
 interface TimeBlockPlannerProps {
@@ -371,31 +372,43 @@ export default function TimeBlockPlanner({
         </div>
       )}
 
-      {/* Create Block Modal */}
-      {showCreateModal && (
+      {/* Create Block Modal - Using Portal like OKRManager */}
+      {showCreateModal && typeof window !== 'undefined' && createPortal(
         <div 
-          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 modal-portal p-4"
+          className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
+          style={{ 
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)'
+          }}
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowCreateModal(false);
             }
           }}
         >
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-gray-200">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-gray-900 flex items-center">
-                ⏰ Create Time Block
-              </h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-                aria-label="Close modal"
-              >
-                ×
-              </button>
-            </div>
+          <div 
+            className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+            style={{
+              transform: 'translateZ(0)', // Force hardware acceleration
+              position: 'relative',
+              zIndex: 10000
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-gray-900">⏰ Create Time Block</h3>
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
             
-            <div className="space-y-5">
+              <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
                   🎯 Title
@@ -571,24 +584,28 @@ export default function TimeBlockPlanner({
                   />
                 </div>
               </div>
-            </div>
+              </div>
             
-            <div className="flex justify-end space-x-3 mt-8">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
-              >
-                ❌ Cancel
-              </button>
-              <button
-                onClick={handleCreateBlock}
-                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg transform hover:scale-105"
-              >
-                ✨ Create Block
-              </button>
+              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
+                  type="button"
+                >
+                  ❌ Cancel
+                </button>
+                <button
+                  onClick={handleCreateBlock}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg transform hover:scale-105"
+                  type="button"
+                >
+                  ✨ Create Block
+                </button>
+              </div>
             </div>
           </div>
         </div>
+        , document.body
       )}
     </div>
   );
