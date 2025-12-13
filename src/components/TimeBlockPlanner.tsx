@@ -220,8 +220,6 @@ export default function TimeBlockPlanner({
     return '⏰';
   };
 
-  // 🔍 DEBUG: Analizza time blocks ricevuti
-  console.log('🔥 TimeBlocks received:', { count: timeBlocks.length, selectedDate: selectedDate.toDateString() });
 
   const filteredBlocks = timeBlocks.filter((block, index) => {
     try {
@@ -328,50 +326,24 @@ export default function TimeBlockPlanner({
           {/* Time Blocks */}
           {filteredBlocks.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center z-10">
-              <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-6 py-4 rounded-lg text-sm max-w-lg">
-                <div className="font-bold mb-2">🔍 PSYCHOPATH DEBUG:</div>
-                <div>Total blocks: {timeBlocks.length}</div>
-                <div>Filtered blocks: {filteredBlocks.length}</div>
-                <div>Selected date: {selectedDate.toDateString()}</div>
-                
-                {/* 🔥 SHOW ACTUAL TIME BLOCKS DATA */}
-                <div className="mt-3 text-xs">
-                  <div className="font-bold">Raw Time Blocks:</div>
-                  {timeBlocks.slice(0, 3).map((block, i) => (
-                    <div key={i} className="border-t pt-1 mt-1">
-                      <div>Block {i}: {block.title}</div>
-                      <div>StartTime: {block.startTime?.toString()}</div>
-                      <div>Type: {typeof block.startTime}</div>
-                      <div>Date: {block.startTime instanceof Date ? new Date(block.startTime).toDateString() : 'NOT A DATE'}</div>
-                      <div>Match: {block.startTime instanceof Date && new Date(block.startTime).toDateString() === selectedDate.toDateString() ? '✅ YES' : '❌ NO'}</div>
-                    </div>
-                  ))}
-                  {timeBlocks.length > 3 && <div>... and {timeBlocks.length - 3} more</div>}
-                </div>
+              <div className="glass-card p-8 text-center max-w-md">
+                <div className="text-6xl mb-4">📅</div>
+                <h3 className="text-2xl font-bold neon-text mb-4">
+                  Ready to Plan Your Day?
+                </h3>
+                <p className="text-gray-300 mb-6">
+                  Create your first time block to start organizing your {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}!
+                </p>
+                <button
+                  onClick={() => handleQuickCreateBlock(new Date().getHours())}
+                  className="btn-gaming px-6 py-3"
+                >
+                  ✨ Create Time Block
+                </button>
               </div>
             </div>
           )}
           
-          {/* 🧪 TEST: Force render a test block to see if rendering works */}
-          <div
-            className="absolute left-16 right-4 rounded-xl p-3 cursor-pointer bg-gradient-to-r from-red-500 to-red-600 text-white z-20 border-4 border-yellow-300"
-            style={{
-              top: `${10 * 80}px`, // Hour 10
-              height: `${80}px`,    // 1 hour
-              minHeight: '60px'
-            }}
-          >
-            <div className="flex items-start justify-between h-full">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold truncate mb-1 drop-shadow-sm">
-                  🧪 TEST BLOCK - If you see this, rendering works!
-                </div>
-                <div className="text-xs opacity-90 truncate mb-1 drop-shadow-sm">
-                  Total timeBlocks: {timeBlocks.length} | Filtered: {filteredBlocks.length}
-                </div>
-              </div>
-            </div>
-          </div>
           {filteredBlocks.map((block, renderIndex) => {
             return (
             <div
