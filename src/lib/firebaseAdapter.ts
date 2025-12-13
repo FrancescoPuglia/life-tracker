@@ -159,7 +159,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
         const newData = { ...data, id: docRef.id, ...dataWithTimestamps };
         return this.convertTimestampsToDates(newData) as T;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ PSYCHOPATH: Firebase create FAILED:', {
         collectionName,
         error: error,
