@@ -20,6 +20,8 @@ import DailyMotivation from '@/components/DailyMotivation';
 import BadgeSystem from '@/components/BadgeSystem';
 import AuthModal from '@/components/AuthModal';
 import SyncStatusIndicator from '@/components/SyncStatus';
+import GamingEffects from '@/components/GamingEffects';
+import { audioManager } from '@/lib/audioManager';
 
 export default function HomePage() {
   const auth = useAuth();
@@ -83,6 +85,8 @@ export default function HomePage() {
     const initializeApp = async () => {
       try {
         await db.init();
+        await audioManager.init(); // 🎵 Initialize gaming audio
+        
         if (currentUser) {
           await loadData();
         } else if (!authLoading) {
@@ -385,6 +389,9 @@ export default function HomePage() {
       setTimeBlocks(updatedBlocks);
       console.log('🔥 PSYCHOPATH: ✅ State updated successfully');
       
+      // 🎮 GAMING: Celebrate successful time block creation
+      audioManager.taskCompleted();
+      
     } catch (error: any) {
       console.error('❌ PSYCHOPATH: CRITICAL ERROR in handleCreateTimeBlock:', error);
       console.error('❌ PSYCHOPATH: Error details:', {
@@ -437,6 +444,9 @@ export default function HomePage() {
     try {
       const newHabit = await db.create<Habit>('habits', habitData as Habit);
       setHabits([...habits, newHabit]);
+      
+      // 🎮 GAMING: New habit created sound
+      audioManager.play('achievementUnlock');
     } catch (error) {
       console.error('Failed to create habit:', error);
     }
@@ -633,6 +643,9 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
+      {/* 🎮 GAMING EFFECTS OVERLAY */}
+      <GamingEffects />
+      
       {/* Auth Modal */}
       <AuthModal 
         isOpen={showAuthModal} 
@@ -677,8 +690,12 @@ export default function HomePage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => auth.signOut()}
-                    className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 rounded transition-colors"
+                    onClick={() => {
+                      auth.signOut();
+                      audioManager.buttonFeedback();
+                    }}
+                    onMouseEnter={() => audioManager.buttonHover()}
+                    className="btn-gaming text-xs px-3 py-1 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 rounded-lg transition-all duration-300 border border-red-400 hover:border-red-300 shadow-lg"
                   >
                     Sign Out
                   </button>
@@ -686,8 +703,12 @@ export default function HomePage() {
               </div>
             ) : (
               <button
-                onClick={() => setShowAuthModal(true)}
-                className="btn-futuristic bg-gradient-to-r from-blue-500 to-purple-600 text-sm px-4 py-2"
+                onClick={() => {
+                  setShowAuthModal(true);
+                  audioManager.buttonFeedback();
+                }}
+                onMouseEnter={() => audioManager.buttonHover()}
+                className="btn-gaming bg-gradient-to-r from-blue-500 to-purple-600 text-sm px-6 py-3 shadow-lg border border-blue-400 hover:border-blue-300"
               >
                 Sign In
               </button>
@@ -722,15 +743,19 @@ export default function HomePage() {
                 ].map(({ id, label, icon }) => (
                   <button
                     key={id}
-                    onClick={() => setActiveTab(id as any)}
-                    className={`flex items-center space-x-3 py-4 text-sm font-medium border-b-2 transition-all duration-300 btn-futuristic ${
+                    onClick={() => {
+                      setActiveTab(id as any);
+                      audioManager.buttonFeedback(); // 🔊 Gaming sound
+                    }}
+                    onMouseEnter={() => audioManager.buttonHover()} // 🔊 Hover sound
+                    className={`btn-gaming flex items-center space-x-3 py-4 text-sm font-medium border-b-2 transition-all duration-300 ${
                       activeTab === id
-                        ? 'border-blue-400 text-blue-400 neon-text'
-                        : 'border-transparent text-gray-400 hover:text-white'
+                        ? 'border-cyan-400 text-cyan-400 neon-text bg-gradient-to-r from-cyan-900/20 to-blue-900/20'
+                        : 'border-transparent text-gray-400 hover:text-cyan-300 hover:border-cyan-400/50'
                     }`}
                   >
-                    <span className="text-xl">{icon}</span>
-                    <span className="font-semibold tracking-wider">{label}</span>
+                    <span className="text-xl animate-pulse">{icon}</span>
+                    <span className="font-bold tracking-wider text-shadow-lg">{label}</span>
                   </button>
                 ))}
               </nav>
@@ -846,8 +871,12 @@ export default function HomePage() {
               
               <div className="mt-12">
                 <button
-                  onClick={() => setShowAuthModal(true)}
-                  className="btn-futuristic bg-gradient-to-r from-blue-500 to-purple-600 text-lg px-8 py-4 pulse-glow"
+                  onClick={() => {
+                    setShowAuthModal(true);
+                    audioManager.buttonFeedback();
+                  }}
+                  onMouseEnter={() => audioManager.buttonHover()}
+                  className="btn-gaming bg-gradient-to-r from-blue-500 via-purple-600 to-pink-500 text-lg px-10 py-5 pulse-glow transform hover:scale-105 shadow-2xl border-2 border-cyan-400"
                 >
                   🚀 START YOUR JOURNEY
                 </button>
