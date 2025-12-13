@@ -357,10 +357,43 @@ export default function HomePage() {
   // Time block management
   const handleCreateTimeBlock = async (blockData: Partial<TimeBlock>) => {
     try {
+      console.log('🔥 PSYCHOPATH: Creating time block with data:', blockData);
+      
       const newBlock = await db.create<TimeBlock>('timeBlocks', blockData as TimeBlock);
-      setTimeBlocks([...timeBlocks, newBlock]);
+      console.log('🔥 PSYCHOPATH: Block saved to DB:', newBlock);
+      
+      // 🔧 CRITICAL: Deserialize the new block dates too!
+      const deserializedNewBlock = {
+        ...newBlock,
+        startTime: new Date(newBlock.startTime),
+        endTime: new Date(newBlock.endTime),
+        createdAt: new Date(newBlock.createdAt),
+        updatedAt: new Date(newBlock.updatedAt),
+        actualStartTime: newBlock.actualStartTime ? new Date(newBlock.actualStartTime) : undefined,
+        actualEndTime: newBlock.actualEndTime ? new Date(newBlock.actualEndTime) : undefined,
+      };
+      
+      console.log('🔥 PSYCHOPATH: Deserialized new block:', deserializedNewBlock);
+      
+      const updatedBlocks = [...timeBlocks, deserializedNewBlock];
+      console.log('🔥 PSYCHOPATH: Before setState - current blocks:', timeBlocks.length);
+      console.log('🔥 PSYCHOPATH: After setState - new blocks array:', updatedBlocks.length);
+      
+      setTimeBlocks(updatedBlocks);
+      
+      // Force immediate re-render verification - use the updated array, not state
+      setTimeout(() => {
+        console.log('🔥 PSYCHOPATH: State after timeout (using updatedBlocks):', {
+          updatedBlocksLength: updatedBlocks.length,
+          lastBlockId: updatedBlocks[updatedBlocks.length - 1]?.id,
+          lastBlockTitle: updatedBlocks[updatedBlocks.length - 1]?.title,
+          lastBlockStartTime: updatedBlocks[updatedBlocks.length - 1]?.startTime,
+          lastBlockIsDateObject: updatedBlocks[updatedBlocks.length - 1]?.startTime instanceof Date
+        });
+      }, 100);
+      
     } catch (error) {
-      console.error('Failed to create time block:', error);
+      console.error('❌ PSYCHOPATH: Failed to create time block:', error);
     }
   };
 

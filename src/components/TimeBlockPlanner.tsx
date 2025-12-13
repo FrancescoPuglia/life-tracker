@@ -129,11 +129,24 @@ export default function TimeBlockPlanner({
   };
 
   const handleQuickCreateBlock = (hour: number) => {
+    console.log('🔥 PSYCHOPATH: QuickCreateBlock called with:', {
+      hour,
+      selectedDate: selectedDate.toDateString(),
+      currentHour: new Date().getHours()
+    });
+    
     const startTime = new Date(selectedDate);
     startTime.setHours(hour, 0, 0, 0);
     
     const endTime = new Date(selectedDate);
     endTime.setHours(hour + 1, 0, 0, 0);
+
+    console.log('🔥 PSYCHOPATH: Created times:', {
+      startTime: startTime.toString(),
+      startTimeDate: startTime.toDateString(),
+      endTime: endTime.toString(),
+      endTimeDate: endTime.toDateString()
+    });
 
     const newBlock: Partial<TimeBlock> = {
       startTime,
@@ -145,6 +158,7 @@ export default function TimeBlockPlanner({
       domainId: 'domain-1',
     };
     
+    console.log('🔥 PSYCHOPATH: NewBlockData set to:', newBlock);
     setNewBlockData(newBlock);
     setShowCreateModal(true);
   };
@@ -206,9 +220,49 @@ export default function TimeBlockPlanner({
     return '⏰';
   };
 
-  const filteredBlocks = timeBlocks.filter(block => {
-    const blockDate = new Date(block.startTime);
-    return blockDate.toDateString() === selectedDate.toDateString();
+  // 🔍 PSYCHOPATH DEBUG: Analisi completa di ogni time block ricevuto
+  console.log('🔥 PSYCHOPATH ANALYSIS - TimeBlocks received:', {
+    count: timeBlocks.length,
+    selectedDate: selectedDate.toDateString(),
+    blocks: timeBlocks.map((block, index) => ({
+      index,
+      id: block.id,
+      title: block.title,
+      startTime: block.startTime,
+      startTimeType: typeof block.startTime,
+      startTimeIsDate: block.startTime instanceof Date,
+      startTimeStr: block.startTime?.toString?.(),
+      endTime: block.endTime,
+      endTimeType: typeof block.endTime,
+      canGetHours: typeof block.startTime?.getHours === 'function'
+    }))
+  });
+
+  const filteredBlocks = timeBlocks.filter((block, index) => {
+    try {
+      const blockDate = new Date(block.startTime);
+      const isMatch = blockDate.toDateString() === selectedDate.toDateString();
+      
+      console.log(`🎯 Filter block ${index}:`, {
+        id: block.id,
+        title: block.title,
+        startTime: block.startTime,
+        blockDateStr: blockDate.toDateString(),
+        selectedDateStr: selectedDate.toDateString(),
+        isMatch: isMatch
+      });
+      
+      return isMatch;
+    } catch (error) {
+      console.error(`❌ Filter ERROR for block ${index}:`, error, block);
+      return false;
+    }
+  });
+  
+  console.log('📊 FILTER RESULTS:', {
+    totalBlocks: timeBlocks.length,
+    filteredCount: filteredBlocks.length,
+    filteredBlocks: filteredBlocks.map(b => ({ id: b.id, title: b.title }))
   });
 
   const getPriorityColor = (priority: string) => {
@@ -297,7 +351,48 @@ export default function TimeBlockPlanner({
           ))}
 
           {/* Time Blocks */}
-          {filteredBlocks.map(block => (
+          {filteredBlocks.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center z-10">
+              <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-6 py-4 rounded-lg text-sm max-w-lg">
+                <div className="font-bold mb-2">🔍 PSYCHOPATH DEBUG:</div>
+                <div>Total blocks: {timeBlocks.length}</div>
+                <div>Filtered blocks: {filteredBlocks.length}</div>
+                <div>Selected date: {selectedDate.toDateString()}</div>
+                <div className="text-xs mt-2">Check console for detailed analysis</div>
+              </div>
+            </div>
+          )}
+          
+          {/* 🧪 TEST: Force render a test block to see if rendering works */}
+          <div
+            className="absolute left-16 right-4 rounded-xl p-3 cursor-pointer bg-gradient-to-r from-red-500 to-red-600 text-white z-20 border-4 border-yellow-300"
+            style={{
+              top: `${10 * 80}px`, // Hour 10
+              height: `${80}px`,    // 1 hour
+              minHeight: '60px'
+            }}
+          >
+            <div className="flex items-start justify-between h-full">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold truncate mb-1 drop-shadow-sm">
+                  🧪 TEST BLOCK - If you see this, rendering works!
+                </div>
+                <div className="text-xs opacity-90 truncate mb-1 drop-shadow-sm">
+                  Total timeBlocks: {timeBlocks.length} | Filtered: {filteredBlocks.length}
+                </div>
+              </div>
+            </div>
+          </div>
+          {filteredBlocks.map((block, renderIndex) => {
+            console.log(`🎨 RENDERING block ${renderIndex}:`, {
+              id: block.id,
+              title: block.title,
+              startTime: block.startTime,
+              position: getPositionFromTime(block.startTime),
+              height: getDurationHeight(block.startTime, block.endTime)
+            });
+            
+            return (
             <div
               key={block.id}
               className={`absolute left-16 right-4 rounded-xl p-3 cursor-pointer ${getBlockColor(block)} z-10`}
@@ -326,7 +421,8 @@ export default function TimeBlockPlanner({
                 <div className="text-lg drop-shadow-sm">{getStatusIndicator(block)}</div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {/* Drag Preview */}
           {dragPreview && (
