@@ -592,6 +592,10 @@ class LifeTrackerDB {
     await this.adapter.init();
   }
 
+  get isUsingFirebase(): boolean {
+    return this.useFirebase;
+  }
+
   async switchToFirebase(userId: string): Promise<void> {
     if (!this.useFirebase && firebaseAdapter) {
       this.adapter = firebaseAdapter;

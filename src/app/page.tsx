@@ -358,9 +358,10 @@ export default function HomePage() {
   const handleCreateTimeBlock = async (blockData: Partial<TimeBlock>) => {
     try {
       console.log('🔥 PSYCHOPATH: Creating time block with data:', blockData);
+      console.log('🔥 PSYCHOPATH: Database adapter type:', db.isUsingFirebase ? 'Firebase' : 'IndexedDB');
       
       const newBlock = await db.create<TimeBlock>('timeBlocks', blockData as TimeBlock);
-      console.log('🔥 PSYCHOPATH: Block saved to DB:', newBlock);
+      console.log('🔥 PSYCHOPATH: Block saved to DB successfully:', newBlock);
       
       // 🔧 CRITICAL: Deserialize the new block dates too!
       const deserializedNewBlock = {
@@ -377,23 +378,23 @@ export default function HomePage() {
       
       const updatedBlocks = [...timeBlocks, deserializedNewBlock];
       console.log('🔥 PSYCHOPATH: Before setState - current blocks:', timeBlocks.length);
-      console.log('🔥 PSYCHOPATH: After setState - new blocks array:', updatedBlocks.length);
+      console.log('🔥 PSYCHOPATH: New blocks array length:', updatedBlocks.length);
       
       setTimeBlocks(updatedBlocks);
+      console.log('🔥 PSYCHOPATH: setTimeBlocks called with', updatedBlocks.length, 'blocks');
       
-      // Force immediate re-render verification - use the updated array, not state
+      // Force immediate re-render verification
       setTimeout(() => {
-        console.log('🔥 PSYCHOPATH: State after timeout (using updatedBlocks):', {
-          updatedBlocksLength: updatedBlocks.length,
-          lastBlockId: updatedBlocks[updatedBlocks.length - 1]?.id,
-          lastBlockTitle: updatedBlocks[updatedBlocks.length - 1]?.title,
-          lastBlockStartTime: updatedBlocks[updatedBlocks.length - 1]?.startTime,
-          lastBlockIsDateObject: updatedBlocks[updatedBlocks.length - 1]?.startTime instanceof Date
-        });
+        console.log('🔥 PSYCHOPATH: State verification after timeout');
       }, 100);
       
     } catch (error) {
-      console.error('❌ PSYCHOPATH: Failed to create time block:', error);
+      console.error('❌ PSYCHOPATH: DATABASE ERROR:', error);
+      console.error('❌ PSYCHOPATH: Error details:', {
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name
+      });
     }
   };
 
