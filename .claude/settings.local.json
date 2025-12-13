@@ -27,7 +27,8 @@
       "Bash(npx tsc:*)",
       "Bash(python3:*)",
       "Bash(touch:*)",
-      "Bash(npm run lint:*)"
+      "Bash(npm run lint:*)",
+      "Bash(timeout 30 npm run dev)"
     ],
     "deny": []
   }

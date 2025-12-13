@@ -151,12 +151,14 @@ export default function TimeBlockPlanner({
 
   const handleCreateBlock = () => {
     if (newBlockData.startTime && newBlockData.endTime) {
-      onCreateTimeBlock({
+      const blockToCreate = {
         ...newBlockData,
         id: `block-${Date.now()}`,
         createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      };
+      
+      onCreateTimeBlock(blockToCreate);
       setShowCreateModal(false);
       setNewBlockData({});
     }
@@ -554,7 +556,11 @@ export default function TimeBlockPlanner({
                   </label>
                   <input
                     type="time"
-                    value={newBlockData.startTime?.toTimeString().slice(0, 5) || ''}
+                    value={
+                      newBlockData.startTime 
+                        ? `${String(newBlockData.startTime.getHours()).padStart(2, '0')}:${String(newBlockData.startTime.getMinutes()).padStart(2, '0')}`
+                        : ''
+                    }
                     onChange={(e) => {
                       const [hours, minutes] = e.target.value.split(':');
                       const time = new Date(selectedDate);
@@ -572,7 +578,11 @@ export default function TimeBlockPlanner({
                   </label>
                   <input
                     type="time"
-                    value={newBlockData.endTime?.toTimeString().slice(0, 5) || ''}
+                    value={
+                      newBlockData.endTime 
+                        ? `${String(newBlockData.endTime.getHours()).padStart(2, '0')}:${String(newBlockData.endTime.getMinutes()).padStart(2, '0')}`
+                        : ''
+                    }
                     onChange={(e) => {
                       const [hours, minutes] = e.target.value.split(':');
                       const time = new Date(selectedDate);
