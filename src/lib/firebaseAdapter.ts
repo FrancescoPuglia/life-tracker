@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   addDoc,
+  setDoc,
   getDoc,
   getDocs,
   updateDoc,
@@ -80,26 +81,56 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   setUserId(userId: string): void {
+    console.log('🔥 PSYCHOPATH: setUserId called with:', userId);
     this.userId = userId;
+    console.log('🔥 PSYCHOPATH: userId set to:', this.userId);
   }
 
   private getUserCollection(collectionName: string): string {
+    console.log('🔥 PSYCHOPATH: getUserCollection called with:', {
+      collectionName,
+      userId: this.userId
+    });
+    
     if (!this.userId) {
-      throw new Error('User ID not set. Call setUserId() first.');
+      const error = 'User ID not set. Call setUserId() first.';
+      console.error('❌ PSYCHOPATH: getUserCollection failed:', error);
+      throw new Error(error);
     }
-    return `users/${this.userId}/${collectionName}`;
+    
+    const path = `users/${this.userId}/${collectionName}`;
+    console.log('🔥 PSYCHOPATH: Collection path generated:', path);
+    return path;
   }
 
   async create<T extends { id?: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
+    console.log('🔥 PSYCHOPATH: Firebase create() called with:', {
+      collectionName,
+      userId: this.userId,
+      dataId: data.id,
+      firestore: !!firestore,
+      isInitialized: this.isInitialized
+    });
+    
     if (!firestore || !this.isInitialized) {
-      throw new Error('Firebase Firestore not initialized');
+      const error = 'Firebase Firestore not initialized';
+      console.error('❌ PSYCHOPATH: Firebase create failed:', error);
+      throw new Error(error);
+    }
+    
+    if (!this.userId) {
+      const error = 'Firebase userId not set';
+      console.error('❌ PSYCHOPATH: Firebase create failed:', error);
+      throw new Error(error);
     }
     
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
+      
+      console.log('🔥 PSYCHOPATH: Firebase collection path:', collectionPath);
       
       // Prepare data with timestamps
       const dataWithTimestamps: any = {
@@ -111,19 +142,31 @@ export class FirebaseAdapter implements DatabaseAdapter {
       // Convert date fields to Timestamps
       this.convertDatesToTimestamps(dataWithTimestamps);
       
+      console.log('🔥 PSYCHOPATH: Data prepared for Firebase:', dataWithTimestamps);
+      
       if (data.id) {
-        // Use custom ID
+        // Use custom ID - FIX: Use setDoc instead of updateDoc
         const docRef = doc(collectionRef, data.id);
-        await updateDoc(docRef, dataWithTimestamps);
-        return { ...data, ...dataWithTimestamps };
+        console.log('🔥 PSYCHOPATH: Using setDoc for custom ID:', data.id);
+        await setDoc(docRef, dataWithTimestamps);
+        console.log('🔥 PSYCHOPATH: ✅ setDoc SUCCESS for:', data.id);
+        return this.convertTimestampsToDates({ ...data, ...dataWithTimestamps }) as T;
       } else {
         // Auto-generate ID
+        console.log('🔥 PSYCHOPATH: Using addDoc for auto-generated ID');
         const docRef = await addDoc(collectionRef, dataWithTimestamps);
+        console.log('🔥 PSYCHOPATH: ✅ addDoc SUCCESS with ID:', docRef.id);
         const newData = { ...data, id: docRef.id, ...dataWithTimestamps };
         return this.convertTimestampsToDates(newData) as T;
       }
     } catch (error) {
-      console.error(`Failed to create document in ${collectionName}:`, error);
+      console.error('❌ PSYCHOPATH: Firebase create FAILED:', {
+        collectionName,
+        error: error,
+        errorMessage: error?.message,
+        errorCode: error?.code,
+        errorStack: error?.stack
+      });
       throw error;
     }
   }

@@ -616,11 +616,20 @@ class LifeTrackerDB {
   }
 
   async switchToFirebase(userId: string): Promise<void> {
+    console.log('🔥 PSYCHOPATH: switchToFirebase called with:', {
+      userId,
+      currentUseFirebase: this.useFirebase,
+      firebaseAdapterExists: !!firebaseAdapter,
+      currentAdapterType: this.adapter.constructor.name
+    });
+    
     if (!this.useFirebase && firebaseAdapter) {
+      console.log('🔥 PSYCHOPATH: Switching from IndexedDB to Firebase');
       this.adapter = firebaseAdapter;
       this.useFirebase = true;
       
       if ('setUserId' in this.adapter) {
+        console.log('🔥 PSYCHOPATH: Calling setUserId on adapter');
         (this.adapter as any).setUserId(userId);
       }
       
@@ -628,6 +637,12 @@ class LifeTrackerDB {
       console.log('✅ Switched to Firebase adapter');
     } else if (!firebaseAdapter) {
       console.warn('⚠️ Cannot switch to Firebase - adapter not initialized');
+    } else {
+      console.log('🔥 PSYCHOPATH: Already using Firebase, just setting userId');
+      if ('setUserId' in this.adapter) {
+        console.log('🔥 PSYCHOPATH: Setting userId on existing Firebase adapter');
+        (this.adapter as any).setUserId(userId);
+      }
     }
   }
 
