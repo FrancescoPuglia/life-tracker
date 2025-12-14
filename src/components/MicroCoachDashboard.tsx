@@ -207,10 +207,11 @@ export default function MicroCoachDashboard({
     const energyByDate: Record<string, number[]> = {};
     
     sessions.forEach(session => {
-      if (session.energyLevel !== undefined) {
+      const energyLevel = session.energyLevel || session.energy;
+      if (energyLevel !== undefined) {
         const dateKey = new Date(session.createdAt).toDateString();
         if (!energyByDate[dateKey]) energyByDate[dateKey] = [];
-        energyByDate[dateKey].push(session.energyLevel);
+        energyByDate[dateKey].push(energyLevel);
       }
     });
 
@@ -335,6 +336,7 @@ export default function MicroCoachDashboard({
       case 'low': return 'text-green-400';
       case 'medium': return 'text-yellow-400';
       case 'high': return 'text-red-400';
+      case 'critical': return 'text-red-600';
       default: return 'text-gray-400';
     }
   };

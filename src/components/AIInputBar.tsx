@@ -169,14 +169,14 @@ export default function AIInputBar({
               await onCreateTask({
                 id: `task-ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 title: taskData.title,
-                description: `Created by AI from: "${result.rawInput}"`,
+                description: `Created by AI from: "${result.rawInput}". Context: ${taskData.context?.join(', ') || 'General'}`,
                 estimatedMinutes: taskData.estimatedDuration || 60,
                 priority: taskData.priority,
                 status: 'pending',
                 userId: 'user-1',
+                domainId: 'default',
                 projectId: undefined,
                 goalId: taskData.goalId,
-                tags: taskData.context || [],
                 createdAt: new Date(),
                 updatedAt: new Date(),
                 dueDate: taskData.deadline
@@ -189,6 +189,7 @@ export default function AIInputBar({
               const blockData = item.data as any;
               console.log('🧠 Creating time block:', blockData);
               await onCreateTimeBlock({
+                id: `timeblock-ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 title: `AI Block from: ${result.rawInput.substring(0, 50)}...`,
                 description: `Auto-created from: "${result.rawInput}"`,
                 startTime: blockData.startTime,
@@ -196,7 +197,9 @@ export default function AIInputBar({
                 type: blockData.type || 'work',
                 status: 'planned',
                 userId: 'user-1',
-                domainId: 'domain-1'
+                domainId: 'domain-1',
+                createdAt: new Date(),
+                updatedAt: new Date()
               });
             }
             break;
@@ -209,11 +212,15 @@ export default function AIInputBar({
                 id: `goal-ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 title: goalData.title,
                 description: `AI-generated goal from: "${result.rawInput}"`,
-                category: goalData.category || 'general',
-                priority: goalData.priority,
+                category: goalData.category || 'important_not_urgent',
+                priority: goalData.priority || 'medium',
                 status: 'active',
                 userId: 'user-1',
+                domainId: 'default',
                 targetDate: goalData.deadline || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+                timeAllocationTarget: goalData.estimatedHours || 5,
+                complexity: 'moderate',
+                keyResults: [],
                 createdAt: new Date(),
                 updatedAt: new Date()
               });

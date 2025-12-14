@@ -341,9 +341,10 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
   }
 
   private calculateGoalTimeframe(goal: Goal): number {
-    if (goal.deadline) {
+    const goalDeadline = goal.deadline || goal.targetDate;
+    if (goalDeadline) {
       const now = new Date();
-      const deadline = new Date(goal.deadline);
+      const deadline = new Date(goalDeadline);
       return Math.max(30, Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
     }
     
@@ -451,10 +452,12 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
         description: template.description,
         estimatedDuration: template.estimatedDuration,
         priority: template.priority,
-        status: 'todo',
+        status: 'pending',
         userId: 'user-1',
-        goalIds: [milestone.goalId],
-        tags: [milestone.title.split(' ')[0].toLowerCase()],
+        goalId: milestone.goalId,
+        domainId: 'default',
+        estimatedMinutes: template.estimatedDuration || 60,
+        // tags: [milestone.title.split(' ')[0].toLowerCase()], // TODO: Add tags to Task interface
         createdAt: new Date(),
         updatedAt: new Date(),
         deadline: template.deadline

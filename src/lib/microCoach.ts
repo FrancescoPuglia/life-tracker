@@ -180,7 +180,7 @@ export class UltraSmartMicroCoach implements MicroCoach {
           actionable: true,
           implementationCost: 'high',
           expectedImpact: 'high',
-          urgency: 'critical',
+          urgency: 'high',
           categories: ['goals', 'prioritization']
         });
       }
@@ -195,8 +195,8 @@ export class UltraSmartMicroCoach implements MicroCoach {
           evidence: [`Burnout risk: ${Math.round(currentPerformance.wellbeing.burnoutRisk * 100)}%`],
           actionable: true,
           implementationCost: 'medium',
-          expectedImpact: 'critical',
-          urgency: 'critical',
+          expectedImpact: 'high',
+          urgency: 'high',
           categories: ['wellbeing', 'energy']
         });
       }

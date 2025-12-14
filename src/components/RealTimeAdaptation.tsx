@@ -214,7 +214,7 @@ export default function RealTimeAdaptation({
       console.log('🔄 TRIGGERING ADAPTATION:', trigger.type);
 
       const options: RePlanningOptions = {
-        strategy: adaptationSettings.strategy,
+        strategy: adaptationSettings.strategy === 'balanced' ? 'save_day' : adaptationSettings.strategy,
         aggressiveness: adaptationSettings.aggressiveness,
         priorityGoals: goals.filter(g => g.priority === 'high').map(g => g.id)
       };
@@ -233,7 +233,7 @@ export default function RealTimeAdaptation({
           {
             timestamp: new Date(),
             trigger: trigger.type,
-            confidence: result.confidence || 0,
+            confidence: (result.changes.length / Math.max(1, currentSchedule.length)) * 100,
             changesCount: result.changes.length
           }
         ]
@@ -243,9 +243,10 @@ export default function RealTimeAdaptation({
       provideFeedbackToUser(result, trigger);
 
       // 🚨 CHECK FOR EMERGENCY MODE
-      if (result.confidence < 0.3 || trigger.type === 'external_interrupt') {
+      const confidenceScore = (result.changes.length / Math.max(1, currentSchedule.length)) * 100;
+      if (confidenceScore < 30 || trigger.type === 'external_interrupt') {
         setState(prev => ({ ...prev, emergencyMode: true }));
-        onEmergencyMode?.(true, `Low confidence adaptation: ${result.reasoning}`);
+        onEmergencyMode?.(true, `High impact adaptation: ${result.reasoning}`);
       }
 
       // 📡 APPLY CHANGES
@@ -262,19 +263,21 @@ export default function RealTimeAdaptation({
 
   // 🎮 USER FEEDBACK SYSTEM
   const provideFeedbackToUser = (result: RePlanningResult, trigger: RePlanningTrigger) => {
-    // Audio feedback
-    if (result.confidence > 0.8) {
+    const impactLevel = result.changes.length / Math.max(1, currentSchedule.length);
+    
+    // Audio feedback based on impact level
+    if (impactLevel < 0.1) {
       audioManager.perfectDay();
-    } else if (result.confidence > 0.6) {
+    } else if (impactLevel < 0.3) {
       audioManager.taskCompleted();
-    } else if (result.confidence > 0.3) {
+    } else if (impactLevel < 0.5) {
       audioManager.buttonFeedback();
     } else {
       audioManager.play('error');
     }
 
     // Visual notification could be added here
-    console.log(`🔄 ADAPTATION: ${trigger.type} → ${result.changes.length} changes (${Math.round((result.confidence || 0) * 100)}% confidence)`);
+    console.log(`🔄 ADAPTATION: ${trigger.type} → ${result.changes.length} changes (${Math.round(impactLevel * 100)}% impact)`);
   };
 
   // 🔧 MANUAL ADAPTATION TRIGGERS

@@ -70,13 +70,30 @@ export default function AISystemTest() {
       });
 
       const testInput = "I need to work on my fitness goal for 2 hours tomorrow morning";
-      const result = await aiParser.parseNaturalLanguage(testInput);
+      const result = await aiParser.parse({ 
+        input: testInput, 
+        context: {
+          currentDate: new Date(),
+          activeGoals: [],
+          existingTasks: [],
+          userPreferences: {
+            workingHours: { start: '09:00', end: '17:00' },
+            deepWorkPreferences: { preferredTimes: [], maxBlockDuration: 120, breaksBetween: 15 },
+            energyManagement: { highEnergyTimes: [], lowEnergyTimes: [] },
+            contextSwitching: { minimumBlockDuration: 30, maxTasksPerBlock: 2 },
+            breakPreferences: { shortBreakDuration: 15, longBreakDuration: 30, breakFrequency: 90 }
+          }
+        } 
+      });
 
+      const taskCount = result.parsedItems.filter(item => item.type === 'task').length;
+      const timeBlockCount = result.parsedItems.filter(item => item.type === 'timeblock').length;
+      
       addResult({
         component: 'AI Parser',
         test: 'Natural Language Processing',
-        status: result.tasks.length > 0 ? 'passed' : 'failed',
-        result: `Parsed ${result.tasks.length} tasks, ${result.timeBlocks.length} time blocks`,
+        status: taskCount > 0 || timeBlockCount > 0 ? 'passed' : 'failed',
+        result: `Parsed ${taskCount} tasks, ${timeBlockCount} time blocks (confidence: ${Math.round(result.confidence * 100)}%)`,
         duration: Date.now() - startTime
       });
 
@@ -157,8 +174,30 @@ export default function AISystemTest() {
           { timestamp: new Date(), productivity: 0.6, type: 'review' }
         ],
         completedTasks: [
-          { id: '1', title: 'Complete project', status: 'completed' },
-          { id: '2', title: 'Review code', status: 'completed' }
+          { 
+            id: '1', 
+            title: 'Complete project', 
+            description: 'Test task',
+            status: 'completed' as any,
+            domainId: 'test',
+            userId: 'test',
+            priority: 'medium' as any,
+            estimatedMinutes: 60,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          },
+          { 
+            id: '2', 
+            title: 'Review code',
+            description: 'Test task 2',
+            status: 'completed' as any,
+            domainId: 'test',
+            userId: 'test',
+            priority: 'low' as any,
+            estimatedMinutes: 30,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
         ],
         goalProgress: { 'goal1': 0.7, 'goal2': 0.3 },
         energyLevels: { '2024-01-01': 0.8, '2024-01-02': 0.6 },
@@ -201,14 +240,47 @@ export default function AISystemTest() {
       const mockGoal = {
         id: 'test-goal',
         title: 'Complete Project Alpha',
+        description: 'Test goal for risk assessment',
+        domainId: 'test',
+        userId: 'test',
+        status: 'active' as any,
         targetDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-        status: 'in_progress',
-        priority: 'high'
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        keyResults: [],
+        timeAllocationTarget: 10,
+        priority: 'high' as any,
+        category: 'important_not_urgent' as any,
+        complexity: 'moderate' as any
       };
 
       const mockKeyResults = [
-        { id: 'kr1', goalId: 'test-goal', progress: 30, target: 100 },
-        { id: 'kr2', goalId: 'test-goal', progress: 50, target: 100 }
+        { 
+          id: 'kr1', 
+          goalId: 'test-goal', 
+          title: 'Test KR 1',
+          description: 'Test key result',
+          targetValue: 100,
+          currentValue: 30,
+          unit: 'percent',
+          progress: 30, 
+          status: 'active' as any,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        },
+        { 
+          id: 'kr2', 
+          goalId: 'test-goal', 
+          title: 'Test KR 2',
+          description: 'Test key result 2',
+          targetValue: 100,
+          currentValue: 50,
+          unit: 'percent',
+          progress: 50,
+          status: 'active' as any,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
       ];
 
       const riskAssessment = await riskPredictor.assessGoalRisk(mockGoal, mockKeyResults, []);
@@ -247,16 +319,28 @@ export default function AISystemTest() {
         {
           id: 'task1',
           title: 'Deep work session',
+          description: 'Test task for deep work',
+          domainId: 'test',
+          userId: 'test',
+          status: 'pending' as any,
           estimatedMinutes: 120,
-          priority: 'high',
-          energyLevel: 'high'
+          priority: 'high' as any,
+          energyLevel: 'high',
+          createdAt: new Date(),
+          updatedAt: new Date()
         },
         {
           id: 'task2', 
           title: 'Email processing',
+          description: 'Test task for email',
+          domainId: 'test',
+          userId: 'test',
+          status: 'pending' as any,
           estimatedMinutes: 30,
-          priority: 'low',
-          energyLevel: 'low'
+          priority: 'low' as any,
+          energyLevel: 'low',
+          createdAt: new Date(),
+          updatedAt: new Date()
         }
       ];
 
@@ -318,11 +402,27 @@ export default function AISystemTest() {
       const nlInput = "I need to finish my quarterly report by Friday, it will take about 4 hours";
       
       // 1. Parse natural language
-      const parsedResult = await aiParser.parseNaturalLanguage(nlInput);
+      const parsedResult = await aiParser.parse({ 
+        input: nlInput, 
+        context: {
+          currentDate: new Date(),
+          activeGoals: [],
+          existingTasks: [],
+          userPreferences: {
+            workingHours: { start: '09:00', end: '17:00' },
+            deepWorkPreferences: { preferredTimes: [], maxBlockDuration: 120, breaksBetween: 15 },
+            energyManagement: { highEnergyTimes: [], lowEnergyTimes: [] },
+            contextSwitching: { minimumBlockDuration: 30, maxTasksPerBlock: 2 },
+            breakPreferences: { shortBreakDuration: 15, longBreakDuration: 30, breakFrequency: 90 }
+          }
+        }
+      });
       
       // 2. Index the created data
-      for (const task of parsedResult.tasks) {
-        await secondBrain.indexNewData(task, 'task');
+      for (const item of parsedResult.parsedItems) {
+        if (item.type === 'task') {
+          await secondBrain.indexNewData(item.data, 'task');
+        }
       }
       
       // 3. Query the Second Brain
@@ -330,11 +430,13 @@ export default function AISystemTest() {
         question: 'What tasks do I have related to reports?'
       });
 
+      const taskItems = parsedResult.parsedItems.filter(item => item.type === 'task');
+      
       addResult({
         component: 'System Integration',
         test: 'End-to-End Workflow',
-        status: parsedResult.tasks.length > 0 && queryResult.answer ? 'passed' : 'failed',
-        result: `Created ${parsedResult.tasks.length} tasks, AI responded with ${Math.round(queryResult.confidence * 100)}% confidence`,
+        status: taskItems.length > 0 && queryResult.answer ? 'passed' : 'failed',
+        result: `Created ${taskItems.length} tasks, AI responded with ${Math.round(queryResult.confidence * 100)}% confidence`,
         duration: Date.now() - startTime
       });
 

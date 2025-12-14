@@ -35,6 +35,7 @@ export interface Goal {
   userId: string;
   status: 'active' | 'completed' | 'paused';
   targetDate: Date;
+  deadline?: Date; // Alias for targetDate for AI compatibility
   createdAt: Date;
   updatedAt: Date;
   keyResults: KeyResult[];
@@ -82,13 +83,16 @@ export interface Task {
   description: string;
   projectId?: string;
   goalId?: string;
+  goalIds?: string[]; // For AI multi-goal support
   domainId: string;
   userId: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-  priority: 'low' | 'medium' | 'high';
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'todo';
+  priority: 'low' | 'medium' | 'high' | 'critical';
   estimatedMinutes: number;
+  estimatedDuration?: number; // Alias for estimatedMinutes for AI compatibility
   actualMinutes?: number;
   dueDate?: Date;
+  deadline?: Date; // Alias for dueDate for AI compatibility
   completedAt?: Date;
   ifThenPlan?: string;
   why?: string;
@@ -101,6 +105,7 @@ export interface TimeBlock {
   title: string;
   description?: string;
   taskId?: string;
+  taskIds?: string[]; // For AI multi-task support
   projectId?: string;
   domainId: string;
   userId: string;
@@ -109,7 +114,7 @@ export interface TimeBlock {
   actualStartTime?: Date;
   actualEndTime?: Date;
   status: 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'overrun';
-  type: 'work' | 'break' | 'buffer' | 'travel' | 'meeting' | 'focus' | 'admin';
+  type: 'work' | 'break' | 'buffer' | 'travel' | 'meeting' | 'focus' | 'admin' | 'deep' | 'shallow';
   location?: string;
   notes?: string;
   createdAt: Date;
@@ -139,6 +144,7 @@ export interface Session {
   notes?: string;
   mood?: number;
   energy?: number;
+  energyLevel?: number; // Alias for energy for AI compatibility
   focus?: number;
   createdAt: Date;
   updatedAt: Date;

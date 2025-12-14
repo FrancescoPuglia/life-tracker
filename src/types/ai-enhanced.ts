@@ -235,6 +235,7 @@ export interface RePlanningResult {
   changes: ScheduleChange[];
   alternatives: AlternativeSchedule[];
   reasoning: string;
+  confidence: number;
   impact: {
     goalsAffected: string[];
     deadlinesRisk: string[];
@@ -301,9 +302,9 @@ export interface CoachingInsight {
   message: string;
   evidence: string[];           // data points supporting this insight
   actionable: boolean;
-  implementationCost: 'low' | 'medium' | 'high';
-  expectedImpact: 'low' | 'medium' | 'high';
-  urgency: 'low' | 'medium' | 'high';
+  implementationCost: 'low' | 'medium' | 'high' | 'critical';
+  expectedImpact: 'low' | 'medium' | 'high' | 'critical';
+  urgency: 'low' | 'medium' | 'high' | 'critical';
   categories: string[];
 }
 
@@ -327,14 +328,14 @@ export interface SemanticSearch {
   query: string;
   filters?: {
     dateRange?: { start: Date; end: Date };
-    dataTypes?: ('tasks' | 'goals' | 'sessions' | 'notes' | 'insights')[];
+    dataTypes?: ('tasks' | 'timeblocks' | 'goals' | 'habits' | 'sessions' | 'notes' | 'insights')[];
     relevanceThreshold?: number;
   };
 }
 
 export interface SearchResult {
   id: string;
-  type: 'task' | 'goal' | 'session' | 'note' | 'insight';
+  type: 'task' | 'timeblock' | 'goal' | 'habit' | 'session' | 'note' | 'insight';
   content: string;
   relevanceScore: number;
   context: Record<string, any>;
