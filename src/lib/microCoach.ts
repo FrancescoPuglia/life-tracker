@@ -389,10 +389,10 @@ export class UltraSmartMicroCoach implements MicroCoach {
     // Select the highest priority insight
     const prioritizedInsights = opportunities.sort((a, b) => {
       const urgencyWeight = { critical: 4, high: 3, medium: 2, low: 1 };
-      const impactWeight = { high: 3, medium: 2, low: 1 };
+      const impactWeight = { critical: 4, high: 3, medium: 2, low: 1 };
       
-      const scoreA = urgencyWeight[a.urgency] * 2 + impactWeight[a.expectedImpact];
-      const scoreB = urgencyWeight[b.urgency] * 2 + impactWeight[b.expectedImpact];
+      const scoreA = (urgencyWeight[a.urgency as keyof typeof urgencyWeight] || 1) * 2 + (impactWeight[a.expectedImpact as keyof typeof impactWeight] || 1);
+      const scoreB = (urgencyWeight[b.urgency as keyof typeof urgencyWeight] || 1) * 2 + (impactWeight[b.expectedImpact as keyof typeof impactWeight] || 1);
       
       return scoreB - scoreA;
     });

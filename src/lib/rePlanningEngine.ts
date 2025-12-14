@@ -668,7 +668,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
       changes,
       alternatives: [],
       reasoning: `Compressed remaining schedule to recover ${Math.round(compressionNeeded - remainingCompression)} minutes of missed work`,
-      confidence: 0.7,
       impact: {
         goalsAffected: this.getAffectedGoals(changes),
         deadlinesRisk: [],
@@ -690,7 +689,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
       changes,
       alternatives: [],
       reasoning: `${missedBlocks.length} blocks postponed to tomorrow to maintain schedule quality`,
-      confidence: 0.8,
       impact: {
         goalsAffected: this.getAffectedGoals(changes),
         deadlinesRisk: this.assessDeadlineRisk(changes),
@@ -720,7 +718,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
       changes,
       alternatives: [],
       reasoning: `Simplified remaining blocks to focus on essential outcomes only`,
-      confidence: 0.9,
       impact: {
         goalsAffected: this.getAffectedGoals(changes),
         deadlinesRisk: [],
@@ -772,7 +769,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
         const duration = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
         return total + (duration / (1000 * 60));
       }, 0) - missedWorkTime)} minutes of missed work into remaining schedule`,
-      confidence: 0.6,
       impact: {
         goalsAffected: this.getAffectedGoals(changes),
         deadlinesRisk: [],
@@ -821,7 +817,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
 
   private createLowEnergyVariant(block: TimeBlock): TimeBlock {
     return {
-      confidence: 0.7,
       ...block,
       type: block.type === 'focus' ? 'work' : 'admin',
       description: `${block.description} (Low-energy variant)`
@@ -830,7 +825,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
 
   private createHighEnergyVariant(block: TimeBlock): TimeBlock {
     return {
-      confidence: 0.7,
       ...block,
       type: block.type === 'admin' ? 'work' : 'focus',
       description: `${block.description} (High-energy focus session)`
@@ -876,7 +870,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
     const simplifiedDuration = Math.max(duration * 0.6, 30 * 60 * 1000); // At least 30 minutes
     
     return {
-      confidence: 0.7,
       ...block,
       endTime: new Date(block.startTime.getTime() + simplifiedDuration),
       description: `${block.description} (Simplified - core essentials only)`,
@@ -1017,7 +1010,6 @@ export class UltraSmartRePlanningEngine implements RePlanningEngine {
       })),
       alternatives: [],
       reasoning: 'Critical time shortage detected. All remaining work postponed to maintain well-being.',
-      confidence: 1.0,
       impact: {
         goalsAffected: [],
         deadlinesRisk: ['Some deadlines may need to be renegotiated'],

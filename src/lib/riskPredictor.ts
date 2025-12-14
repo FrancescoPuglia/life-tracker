@@ -93,7 +93,7 @@ export class UltraSmartRiskPredictor implements RiskPredictor {
       const velocityAnalysis = this.analyzeVelocity(goal, keyResults, context);
       
       // 🔍 BOTTLENECK DETECTION
-      const bottlenecks = await this.identifyBottlenecks(goal, keyResults, context);
+      const bottlenecks = await this.identifyBottlenecks(goal, []); // TODO: Pass actual tasks when available
       
       // 🎭 RISK SIMULATION
       const simulations = await this.runRiskSimulations(goal, context, velocityAnalysis);
@@ -102,11 +102,37 @@ export class UltraSmartRiskPredictor implements RiskPredictor {
       const mlRisks = this.detectMLPatterns(goal, context);
       
       // ⚡ COMPREHENSIVE RISK CALCULATION
-      const riskLevel = this.calculateOverallRisk(velocityAnalysis, bottlenecks, simulations, mlRisks);
+      const bottleneckAnalysis = { 
+        timeBottlenecks: bottlenecks.filter(b => b.type === 'velocity').map(b => ({
+          resource: b.description,
+          severity: b.impact === 'high' ? 0.8 : b.impact === 'medium' ? 0.6 : 0.4,
+          impact: [b.description],
+          mitigation: [b.mitigation || 'No mitigation defined']
+        })),
+        skillBottlenecks: bottlenecks.filter(b => b.type === 'dependencies').map(b => ({
+          skill: b.description,
+          gap: b.impact === 'high' ? 0.8 : b.impact === 'medium' ? 0.6 : 0.4,
+          learningTime: 5, // days
+          alternatives: [b.mitigation || 'Find external help']
+        })),
+        dependencyBottlenecks: bottlenecks.filter(b => b.type === 'dependencies').map(b => ({
+          dependency: b.description,
+          blockingTasks: [b.description],
+          criticalPath: b.impact === 'high',
+          riskLevel: b.impact === 'high' ? 0.8 : b.impact === 'medium' ? 0.6 : 0.4
+        })),
+        energyBottlenecks: bottlenecks.filter(b => b.type === 'resource').map(b => ({
+          pattern: b.description,
+          frequency: 0.7,
+          energyImpact: b.impact === 'high' ? 0.8 : b.impact === 'medium' ? 0.6 : 0.4,
+          solutions: [b.mitigation || 'Reschedule to high energy times']
+        }))
+      };
+      const riskLevel = this.calculateOverallRisk(velocityAnalysis, bottleneckAnalysis, simulations, mlRisks);
       
       // 🎯 GENERATE RECOMMENDATIONS
       const recommendations = this.generateSmartRecommendations(
-        goal, velocityAnalysis, bottlenecks, simulations, riskLevel
+        goal, velocityAnalysis, bottleneckAnalysis, simulations, riskLevel
       );
 
       const assessment: GoalRiskAssessment = {
@@ -116,7 +142,7 @@ export class UltraSmartRiskPredictor implements RiskPredictor {
         currentVelocity: velocityAnalysis.current,
         requiredVelocity: velocityAnalysis.required,
         estimatedCompletion: this.calculateEstimatedCompletion(goal, velocityAnalysis),
-        riskFactors: this.consolidateRiskFactors(bottlenecks, simulations, mlRisks),
+        riskFactors: this.consolidateRiskFactors(bottleneckAnalysis, simulations, mlRisks),
         recommendations
       };
 

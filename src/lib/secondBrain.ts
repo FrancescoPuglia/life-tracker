@@ -351,7 +351,7 @@ Based on your data, I've identified ${relevantData.length} significant activitie
 
   private extractEntities(text: string): string[] {
     // Simple entity extraction (in real implementation, would use NER model)
-    const entities = [];
+    const entities: string[] = [];
     const words = text.split(/\s+/);
     
     words.forEach(word => {
@@ -639,7 +639,7 @@ Based on your data, I've identified ${relevantData.length} significant activitie
       }
     }
     
-    if (filters.dataTypes && !filters.dataTypes.includes(item.type)) {
+    if (filters.dataTypes && !filters.dataTypes.includes((item.type.endsWith("s") ? item.type : item.type + "s") as any)) {
       return false;
     }
     
@@ -815,7 +815,7 @@ Based on your data, I've identified ${relevantData.length} significant activitie
 
   private getConnectedConcepts(itemId: string): string[] {
     // Find items connected through knowledge graph
-    const connections = [];
+    const connections: string[] = [];
     const item = this.dataIndex.get(itemId);
     
     if (item) {
