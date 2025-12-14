@@ -24,6 +24,7 @@ import GamingEffects from '@/components/GamingEffects';
 import AIInputBar from '@/components/AIInputBar';
 import SmartScheduler from '@/components/SmartScheduler';
 import RealTimeAdaptation from '@/components/RealTimeAdaptation';
+import MicroCoachDashboard from '@/components/MicroCoachDashboard';
 import { audioManager } from '@/lib/audioManager';
 
 export default function HomePage() {
@@ -66,7 +67,7 @@ export default function HomePage() {
 
   // UI states
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'planner' | 'smart_scheduler' | 'adaptation' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges'>('planner');
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
   const [isLoading, setIsLoading] = useState(true);
@@ -766,6 +767,7 @@ export default function HomePage() {
                   { id: 'planner', label: 'Time Planner', icon: '🚀' },
                   { id: 'smart_scheduler', label: 'Smart Scheduler', icon: '⚡' },
                   { id: 'adaptation', label: 'Real-Time AI', icon: '🔄' },
+                  { id: 'micro_coach', label: 'AI Coach', icon: '🧠' },
                   { id: 'habits', label: 'Habits', icon: '🔥' },
                   { id: 'okr', label: 'Goals & Projects', icon: '🎯' },
                   { id: 'analytics', label: 'Analytics', icon: '📊' },
@@ -845,6 +847,24 @@ export default function HomePage() {
                     console.log('🚨 EMERGENCY MODE:', active, reason);
                     if (active) {
                       audioManager.play('error');
+                    }
+                  }}
+                />
+              )}
+
+              {activeTab === 'micro_coach' && (
+                <MicroCoachDashboard
+                  goals={goals}
+                  keyResults={keyResults}
+                  tasks={tasks}
+                  sessions={[]} // Pass actual sessions here when available
+                  habitLogs={habitLogs}
+                  timeBlocks={timeBlocks}
+                  onInsightAction={(action, insight) => {
+                    console.log('🧠 INSIGHT ACTION:', action, insight.title);
+                    if (action === 'implement') {
+                      audioManager.perfectDay();
+                      // Could show implementation modal or guide
                     }
                   }}
                 />
