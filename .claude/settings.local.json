@@ -29,7 +29,8 @@
       "Bash(touch:*)",
       "Bash(npm run lint:*)",
       "Bash(timeout 30 npm run dev)",
-      "Bash(timeout 60 npm run dev)"
+      "Bash(timeout 60 npm run dev)",
+      "Bash(npm run type-check:*)"
     ],
     "deny": []
   }

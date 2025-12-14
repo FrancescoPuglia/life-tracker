@@ -21,6 +21,8 @@ import BadgeSystem from '@/components/BadgeSystem';
 import AuthModal from '@/components/AuthModal';
 import SyncStatusIndicator from '@/components/SyncStatus';
 import GamingEffects from '@/components/GamingEffects';
+import AIInputBar from '@/components/AIInputBar';
+import SmartScheduler from '@/components/SmartScheduler';
 import { audioManager } from '@/lib/audioManager';
 
 export default function HomePage() {
@@ -63,7 +65,7 @@ export default function HomePage() {
 
   // UI states
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'planner' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'smart_scheduler' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges'>('planner');
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
   const [isLoading, setIsLoading] = useState(true);
@@ -721,6 +723,32 @@ export default function HomePage() {
       <div className="pt-20 pb-8">
         {currentUser ? (
           <div className="max-w-7xl mx-auto px-4 space-y-6">
+            {/* 🧠 AI INPUT BAR - PSYCHOPATH MODE */}
+            <div className="futuristic-card p-6">
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold holographic-text flex items-center space-x-3">
+                  <span>🧠</span>
+                  <span>AI BRAIN</span>
+                  <span className="text-xs bg-gradient-to-r from-green-500 to-blue-500 text-white px-2 py-1 rounded-full animate-pulse">
+                    MODALITÀ PSICOPATICO
+                  </span>
+                </h2>
+                <p className="text-gray-300 text-sm mt-2">
+                  Tell me what you want to do in natural language. I'll create tasks, time blocks, goals, and habits automatically.
+                </p>
+              </div>
+              <AIInputBar
+                onCreateTimeBlock={handleCreateTimeBlock}
+                onCreateTask={handleCreateTask}
+                onCreateGoal={handleCreateGoal}
+                onCreateHabit={handleCreateHabit}
+                goals={goals}
+                existingTasks={tasks}
+                userPreferences={{}}
+                className="w-full"
+              />
+            </div>
+
             {/* KPI Dashboard */}
             <div className="futuristic-card">
               <KPIDashboard 
@@ -735,6 +763,7 @@ export default function HomePage() {
               <nav className="flex space-x-8 px-6">
                 {[
                   { id: 'planner', label: 'Time Planner', icon: '🚀' },
+                  { id: 'smart_scheduler', label: 'Smart Scheduler', icon: '⚡' },
                   { id: 'habits', label: 'Habits', icon: '🔥' },
                   { id: 'okr', label: 'Goals & Projects', icon: '🎯' },
                   { id: 'analytics', label: 'Analytics', icon: '📊' },
@@ -774,6 +803,26 @@ export default function HomePage() {
                   onDeleteTimeBlock={handleDeleteTimeBlock}
                   selectedDate={selectedDate}
                   onDateChange={setSelectedDate}
+                />
+              )}
+
+              {activeTab === 'smart_scheduler' && (
+                <SmartScheduler
+                  tasks={tasks}
+                  existingTimeBlocks={timeBlocks}
+                  goals={goals}
+                  onScheduleGenerated={(schedule) => {
+                    console.log('📅 New schedule generated:', schedule);
+                    // You could update the timeBlocks state here if needed
+                  }}
+                  onTimeBlocksCreated={async (blocks) => {
+                    console.log('⚡ Creating', blocks.length, 'time blocks from smart scheduler');
+                    for (const block of blocks) {
+                      await handleCreateTimeBlock(block);
+                    }
+                    audioManager.perfectDay();
+                  }}
+                  userPreferences={{}}
                 />
               )}
 
