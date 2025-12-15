@@ -181,21 +181,29 @@ export default function TimeBlockPlanner({
   };
 
   const getBlockColor = (block: TimeBlock) => {
-    const baseClasses = 'text-white font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2';
+    const baseClasses = 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2';
     
     switch (block.type) {
       case 'work': 
-        return `${baseClasses} time-block-work text-white`;
+        return `${baseClasses} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-400`;
       case 'break': 
-        return `${baseClasses} time-block-break text-white`;
+        return `${baseClasses} bg-gradient-to-r from-green-500 to-green-600 text-white border-green-400`;
       case 'focus': 
-        return `${baseClasses} time-block-focus text-white animate-pulse-slow`;
+        return `${baseClasses} bg-gradient-to-r from-purple-500 to-purple-600 text-white border-purple-400 animate-pulse-slow`;
+      case 'deep':
+        return `${baseClasses} bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-indigo-500 shadow-lg`;
+      case 'shallow':
+        return `${baseClasses} bg-gradient-to-r from-cyan-500 to-cyan-600 text-white border-cyan-400`;
       case 'meeting': 
-        return `${baseClasses} time-block-meeting text-gray-900 font-black`;
+        return `${baseClasses} bg-gradient-to-r from-orange-500 to-orange-600 text-white border-orange-400`;
       case 'admin': 
-        return `${baseClasses} time-block-admin text-white`;
+        return `${baseClasses} bg-gradient-to-r from-gray-500 to-gray-600 text-white border-gray-400`;
+      case 'buffer':
+        return `${baseClasses} bg-gradient-to-r from-yellow-500 to-yellow-600 text-white border-yellow-400`;
+      case 'travel':
+        return `${baseClasses} bg-gradient-to-r from-teal-500 to-teal-600 text-white border-teal-400`;
       default: 
-        return `${baseClasses} time-block-work text-white`;
+        return `${baseClasses} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-400`;
     }
   };
 
@@ -204,8 +212,12 @@ export default function TimeBlockPlanner({
       case 'work': return '💼';
       case 'break': return '☕';
       case 'focus': return '🎯';
+      case 'deep': return '🧠';
+      case 'shallow': return '💭';
       case 'meeting': return '🤝';
       case 'admin': return '⚙️';
+      case 'buffer': return '⏳';
+      case 'travel': return '🚗';
       default: return '📋';
     }
   };
@@ -360,20 +372,23 @@ export default function TimeBlockPlanner({
             >
               <div className="flex items-start justify-between h-full">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold truncate mb-1 drop-shadow-sm">
+                  {/* 🔥 PSYCHOPATH FIX: Title più grande e prominente */}
+                  <div className="text-lg font-bold truncate mb-2 drop-shadow-sm">
                     {getBlockIcon(block)} {block.title}
                   </div>
+                  {/* 🔥 PSYCHOPATH FIX: Description più piccola e meno prominente */}
                   {block.description && (
-                    <div className="text-xs opacity-90 truncate mb-1 drop-shadow-sm">
+                    <div className="text-xs opacity-75 truncate mb-1 drop-shadow-sm italic">
                       {block.description}
                     </div>
                   )}
-                  <div className="text-xs opacity-80 font-mono drop-shadow-sm">
-                    ⏰ {block.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
+                  {/* Time display più compatto */}
+                  <div className="text-xs opacity-70 font-mono drop-shadow-sm">
+                    {block.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
                     {block.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-                <div className="text-lg drop-shadow-sm">{getStatusIndicator(block)}</div>
+                <div className="text-xl drop-shadow-sm">{getStatusIndicator(block)}</div>
               </div>
             </div>
             );
