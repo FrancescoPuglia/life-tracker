@@ -434,6 +434,11 @@ export default function HomePage() {
       setTimeBlocks(updatedBlocks);
       console.log('🔥 PSYCHOPATH: ✅ State updated successfully');
       
+      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
+      console.log('🔥 PSYCHOPATH: Force reloading data to ensure visibility...');
+      await loadData();
+      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after TimeBlock creation');
+      
       // 🎮 GAMING: Celebrate successful time block creation
       audioManager.taskCompleted();
       
@@ -501,6 +506,10 @@ export default function HomePage() {
       const updatedHabits = [...habits, deserializedHabit];
       console.log('🔥 PSYCHOPATH: Habits count before:', habits.length, 'after:', updatedHabits.length);
       setHabits(updatedHabits);
+      
+      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
+      await loadData();
+      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after Habit creation');
       
       // 🎮 GAMING: New habit created sound
       audioManager.play('achievementUnlock');
@@ -583,6 +592,10 @@ export default function HomePage() {
       const updatedGoals = [...goals, deserializedGoal];
       console.log('🔥 PSYCHOPATH: Goals count before:', goals.length, 'after:', updatedGoals.length);
       setGoals(updatedGoals);
+      
+      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
+      await loadData();
+      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after Goal creation');
     } catch (error) {
       console.error('❌ PSYCHOPATH: Failed to create goal:', error);
     }
