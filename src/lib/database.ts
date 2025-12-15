@@ -144,12 +144,31 @@ class IndexedDBAdapter implements DatabaseAdapter {
   }
 
   async getAll<T>(storeName: string): Promise<T[]> {
-    const store = await this.getStore(storeName);
-    return new Promise((resolve, reject) => {
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    console.log(`🔥 PSYCHOPATH: IndexedDBAdapter.getAll() called for ${storeName}`);
+    
+    try {
+      const store = await this.getStore(storeName);
+      console.log(`🔥 PSYCHOPATH: IndexedDB store obtained for ${storeName}`);
+      
+      return new Promise((resolve, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => {
+          const result = request.result;
+          console.log(`🔥 PSYCHOPATH: IndexedDBAdapter.getAll() SUCCESS for ${storeName}:`, {
+            count: result.length,
+            items: result.length > 0 ? result.map((item: any) => ({ id: item.id, userId: item.userId })) : 'No items'
+          });
+          resolve(result);
+        };
+        request.onerror = () => {
+          console.error(`❌ PSYCHOPATH: IndexedDBAdapter.getAll() ERROR for ${storeName}:`, request.error);
+          reject(request.error);
+        };
+      });
+    } catch (error) {
+      console.error(`❌ PSYCHOPATH: IndexedDBAdapter.getAll() OUTER ERROR for ${storeName}:`, error);
+      throw error;
+    }
   }
 
   async getByIndex<T>(storeName: string, indexName: string, value: any): Promise<T[]> {
@@ -601,10 +620,24 @@ class LifeTrackerDB {
                      process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
                      process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key');
     
+    console.log('🔥 PSYCHOPATH: Database constructor - adapter selection:', {
+      inBrowser: typeof window !== 'undefined',
+      hasApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+      apiKeyValue: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+      apiKeyNotDemo: process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key',
+      hasFirebaseConfig,
+      firebaseAdapterExists: !!firebaseAdapter
+    });
+    
     this.useFirebase = hasFirebaseConfig && firebaseAdapter !== null;
     this.adapter = this.useFirebase ? firebaseAdapter! : new IndexedDBAdapter();
     
     console.log(`🔌 Database initialized with ${this.useFirebase ? 'Firebase' : 'IndexedDB'} adapter`);
+    console.log('🔥 PSYCHOPATH: Final adapter info:', {
+      useFirebase: this.useFirebase,
+      adapterType: this.adapter?.constructor?.name,
+      adapterInstance: !!this.adapter
+    });
   }
 
   async init(): Promise<void> {
@@ -613,6 +646,34 @@ class LifeTrackerDB {
 
   get isUsingFirebase(): boolean {
     return this.useFirebase;
+  }
+
+  getAdapterDebugInfo(): {
+    useFirebase: boolean;
+    adapterType: string;
+    hasAdapter: boolean;
+    adapterMethods: string[];
+    userId?: string;
+    isInitialized?: boolean;
+  } {
+    const debugInfo = {
+      useFirebase: this.useFirebase,
+      adapterType: this.adapter?.constructor?.name || 'Unknown',
+      hasAdapter: !!this.adapter,
+      adapterMethods: this.adapter ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.adapter)) : []
+    };
+
+    // Add Firebase-specific debug info
+    if (this.useFirebase && this.adapter) {
+      if ('userId' in this.adapter) {
+        (debugInfo as any).userId = (this.adapter as any).userId;
+      }
+      if ('isInitialized' in this.adapter) {
+        (debugInfo as any).isInitialized = (this.adapter as any).isInitialized;
+      }
+    }
+
+    return debugInfo;
   }
 
   async switchToFirebase(userId: string): Promise<void> {
@@ -657,7 +718,33 @@ class LifeTrackerDB {
 
   // Delegate all methods to the current adapter
   async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
-    return this.adapter.create(storeName, data);
+    console.log(`🔥 PSYCHOPATH: LifeTrackerDB.create() called for ${storeName}`, {
+      useFirebase: this.useFirebase,
+      adapterType: this.adapter?.constructor?.name,
+      hasAdapter: !!this.adapter,
+      dataId: data.id,
+      dataUserId: (data as any).userId,
+      timestamp: new Date().toISOString()
+    });
+    
+    try {
+      console.log(`🔥 PSYCHOPATH: About to call adapter.create(${storeName}) on ${this.adapter.constructor.name}`);
+      const result = await this.adapter.create(storeName, data);
+      console.log(`🔥 PSYCHOPATH: LifeTrackerDB.create() SUCCESS for ${storeName}:`, {
+        resultId: result.id,
+        resultUserId: (result as any).userId,
+        adapterUsed: this.adapter.constructor.name
+      });
+      return result;
+    } catch (error) {
+      console.error(`❌ PSYCHOPATH: LifeTrackerDB.create() ERROR for ${storeName}:`, {
+        error: error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        adapterType: this.adapter?.constructor?.name,
+        useFirebase: this.useFirebase
+      });
+      throw error;
+    }
   }
 
   async read<T>(storeName: string, id: string): Promise<T | null> {
@@ -673,7 +760,55 @@ class LifeTrackerDB {
   }
 
   async getAll<T>(storeName: string): Promise<T[]> {
-    return this.adapter.getAll(storeName);
+    console.log(`🔥 PSYCHOPATH: LifeTrackerDB.getAll() called for ${storeName}`, {
+      useFirebase: this.useFirebase,
+      adapterType: this.adapter?.constructor?.name,
+      hasAdapter: !!this.adapter,
+      adapterMethods: this.adapter ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.adapter)) : [],
+      timestamp: new Date().toISOString()
+    });
+    
+    // Additional debugging to check adapter state
+    if (this.useFirebase && this.adapter) {
+      console.log(`🔥 PSYCHOPATH: Firebase adapter details:`, {
+        hasGetAllMethod: typeof this.adapter.getAll === 'function',
+        hasInitMethod: typeof this.adapter.init === 'function',
+        adapterStringified: this.adapter.toString ? this.adapter.toString() : 'No toString method'
+      });
+      
+      // Check if Firebase adapter has userId set (if it has setUserId method)
+      if ('getUserId' in this.adapter) {
+        console.log(`🔥 PSYCHOPATH: Firebase adapter userId:`, (this.adapter as any).getUserId());
+      }
+      if ('userId' in this.adapter) {
+        console.log(`🔥 PSYCHOPATH: Firebase adapter userId property:`, (this.adapter as any).userId);
+      }
+    }
+    
+    try {
+      console.log(`🔥 PSYCHOPATH: About to call adapter.getAll(${storeName}) on ${this.adapter.constructor.name}`);
+      const result = await this.adapter.getAll(storeName);
+      console.log(`🔥 PSYCHOPATH: LifeTrackerDB.getAll() result for ${storeName}:`, {
+        count: result.length,
+        items: result.length > 0 ? result.map((item: any) => ({ 
+          id: item.id, 
+          userId: item.userId,
+          type: typeof item,
+          keys: Object.keys(item).slice(0, 5) // Show first 5 keys
+        })) : 'No items returned',
+        firstItem: result.length > 0 ? JSON.stringify(result[0], null, 2) : 'No first item'
+      });
+      return result;
+    } catch (error) {
+      console.error(`❌ PSYCHOPATH: LifeTrackerDB.getAll() ERROR for ${storeName}:`, {
+        error: error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : 'No stack trace',
+        adapterType: this.adapter?.constructor?.name,
+        useFirebase: this.useFirebase
+      });
+      throw error;
+    }
   }
 
   async getByIndex<T>(storeName: string, indexName: string, value: any): Promise<T[]> {

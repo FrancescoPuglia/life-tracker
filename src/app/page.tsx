@@ -158,6 +158,12 @@ export default function HomePage() {
 
   const loadData = async () => {
     try {
+      console.log('🔥 PSYCHOPATH: === STARTING loadData() ===');
+      console.log('🔥 PSYCHOPATH: Database info:', {
+        isUsingFirebase: db.isUsingFirebase,
+        currentUser: currentUser?.uid
+      });
+      
       const [
         allTimeBlocks,
         allGoals,
@@ -175,6 +181,16 @@ export default function HomePage() {
         db.getAll<Habit>('habits'),
         db.getAll<HabitLog>('habitLogs')
       ]);
+      
+      console.log('🔥 PSYCHOPATH: Raw data retrieved from database:', {
+        timeBlocks: allTimeBlocks.length,
+        goals: allGoals.length,
+        keyResults: allKeyResults.length,
+        projects: allProjects.length,
+        tasks: allTasks.length,
+        habits: allHabits.length,
+        habitLogs: allHabitLogs.length
+      });
 
       // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL data by userId
       const currentUserId = currentUser?.uid || 'user-1';

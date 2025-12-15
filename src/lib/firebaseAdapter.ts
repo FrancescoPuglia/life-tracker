@@ -242,24 +242,48 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
     
+    console.log('🔥 PSYCHOPATH: FirebaseAdapter.getAll() called with:', {
+      collectionName,
+      userId: this.userId,
+      firestore: !!firestore,
+      isInitialized: this.isInitialized
+    });
+    
     if (!firestore) {
-      throw new Error('Firebase Firestore not initialized');
+      const error = 'Firebase Firestore not initialized';
+      console.error('❌ PSYCHOPATH: FirebaseAdapter.getAll() ERROR:', error);
+      throw new Error(error);
     }
     
     try {
       const collectionPath = this.getUserCollection(collectionName);
+      console.log('🔥 PSYCHOPATH: Firebase collection path:', collectionPath);
+      
       const collectionRef = collection(firestore, collectionPath);
+      console.log('🔥 PSYCHOPATH: Firebase collection reference created');
+      
       const querySnapshot = await getDocs(collectionRef);
+      console.log('🔥 PSYCHOPATH: Firebase query executed, docs found:', querySnapshot.size);
       
       const results: T[] = [];
       querySnapshot.forEach(doc => {
+        console.log('🔥 PSYCHOPATH: Processing doc:', {
+          id: doc.id,
+          data: doc.data()
+        });
         const data = { id: doc.id, ...doc.data() };
         results.push(this.convertTimestampsToDates(data) as T);
       });
       
+      console.log('🔥 PSYCHOPATH: FirebaseAdapter.getAll() SUCCESS:', {
+        collectionName,
+        totalResults: results.length,
+        results: results.map((item: any) => ({ id: item.id, userId: item.userId }))
+      });
+      
       return results;
     } catch (error) {
-      console.error(`Failed to get all documents from ${collectionName}:`, error);
+      console.error(`❌ PSYCHOPATH: Failed to get all documents from ${collectionName}:`, error);
       throw error;
     }
   }
