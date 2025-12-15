@@ -602,16 +602,34 @@ export default function HomePage() {
   const handleCreateGoal = async (goalData: Partial<Goal>) => {
     try {
       console.log('🔥 PSYCHOPATH: Creating goal:', goalData);
-      const newGoal = await db.create<Goal>('goals', goalData as Goal);
-      console.log('🔥 PSYCHOPATH: Goal created successfully:', newGoal);
       
-      // 🔥 PSICOPATICO DEBUG: Verify userId in created goal
+      // 🔥 PSICOPATICO CRITICAL FIX: Ensure userId is properly set
+      const goalToCreate: Goal = {
+        ...goalData,
+        id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        userId: currentUser?.uid || 'user-1', // 🔥 FORCE userId
+        domainId: goalData.domainId || 'domain-1',
+        status: goalData.status || 'active',
+        targetDate: goalData.targetDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days from now
+        keyResults: [],
+        timeAllocationTarget: goalData.timeAllocationTarget || 0,
+        priority: goalData.priority || 'medium',
+        category: goalData.category || 'important_not_urgent',
+        complexity: goalData.complexity || 'moderate',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as Goal;
+      
       console.log('🔥 PSICOPATICO GOAL CREATION DEBUG:', {
-        createdGoalUserId: newGoal.userId,
+        goalToCreateUserId: goalToCreate.userId,
         expectedUserId: currentUser?.uid || 'user-1',
-        userIdMatch: newGoal.userId === (currentUser?.uid || 'user-1'),
-        goalTitle: newGoal.title
+        userIdMatch: goalToCreate.userId === (currentUser?.uid || 'user-1'),
+        goalTitle: goalToCreate.title,
+        goalToCreate: goalToCreate
       });
+      
+      const newGoal = await db.create<Goal>('goals', goalToCreate);
+      console.log('🔥 PSYCHOPATH: Goal created successfully:', newGoal);
       
       // 🔥 PSYCHOPATH FIX: Deserialize dates
       const deserializedGoal = {
