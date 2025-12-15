@@ -208,6 +208,14 @@ export default function HomePage() {
         currentUserId
       });
 
+      // 🔥 PSICOPATICO DEBUG: Let's see what's in the goals!
+      console.log('🔥 PSICOPATICO GOALS DEBUG:', {
+        allGoalsDetailed: allGoals.map(g => ({ id: g.id, title: g.title, userId: g.userId })),
+        userGoalsDetailed: userGoals.map(g => ({ id: g.id, title: g.title, userId: g.userId })),
+        currentUserIdType: typeof currentUserId,
+        currentUserIdValue: currentUserId
+      });
+
       setTimeBlocks(deserializedTimeBlocks);
       setGoals(userGoals);
       setKeyResults(userKeyResults);
@@ -580,6 +588,14 @@ export default function HomePage() {
       console.log('🔥 PSYCHOPATH: Creating goal:', goalData);
       const newGoal = await db.create<Goal>('goals', goalData as Goal);
       console.log('🔥 PSYCHOPATH: Goal created successfully:', newGoal);
+      
+      // 🔥 PSICOPATICO DEBUG: Verify userId in created goal
+      console.log('🔥 PSICOPATICO GOAL CREATION DEBUG:', {
+        createdGoalUserId: newGoal.userId,
+        expectedUserId: currentUser?.uid || 'user-1',
+        userIdMatch: newGoal.userId === (currentUser?.uid || 'user-1'),
+        goalTitle: newGoal.title
+      });
       
       // 🔥 PSYCHOPATH FIX: Deserialize dates
       const deserializedGoal = {
