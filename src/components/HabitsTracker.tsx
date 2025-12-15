@@ -12,6 +12,7 @@ interface HabitsTrackerProps {
   onUpdateHabit: (id: string, updates: Partial<Habit>) => void;
   onDeleteHabit: (id: string) => void;
   onLogHabit: (habitId: string, completed: boolean, value?: number, notes?: string) => void;
+  currentUserId?: string; // 🔥 CRITICAL FIX
 }
 
 export default function HabitsTracker({
@@ -20,7 +21,8 @@ export default function HabitsTracker({
   onCreateHabit,
   onUpdateHabit,
   onDeleteHabit,
-  onLogHabit
+  onLogHabit,
+  currentUserId // 🔥 CRITICAL FIX
 }: HabitsTrackerProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -124,7 +126,7 @@ export default function HabitsTracker({
       onCreateHabit({
         ...newHabitData,
         id: `habit-${Date.now()}`,
-        userId: 'user-1',
+        userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
         domainId: 'default',
         isActive: true,
         streakCount: 0,

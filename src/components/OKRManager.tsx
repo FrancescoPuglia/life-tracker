@@ -18,6 +18,7 @@ interface OKRManagerProps {
   onUpdateProject: (id: string, updates: Partial<Project>) => void;
   onCreateTask: (task: Partial<Task>) => void;
   onUpdateTask: (id: string, updates: Partial<Task>) => void;
+  currentUserId?: string; // 🔥 CRITICAL FIX
 }
 
 export default function OKRManager({
@@ -32,7 +33,8 @@ export default function OKRManager({
   onCreateProject,
   onUpdateProject,
   onCreateTask,
-  onUpdateTask
+  onUpdateTask,
+  currentUserId // 🔥 CRITICAL FIX
 }: OKRManagerProps) {
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<'goal' | 'keyResult' | 'project' | 'task' | null>(null);
@@ -96,7 +98,7 @@ export default function OKRManager({
     const now = new Date();
     const baseData = {
       id: `${showCreateModal}-${Date.now()}`,
-      userId: 'user-1',
+      userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
       domainId: 'default',
       createdAt: now,
       updatedAt: now,

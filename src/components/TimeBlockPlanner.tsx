@@ -14,6 +14,7 @@ interface TimeBlockPlannerProps {
   onDeleteTimeBlock: (id: string) => void;
   selectedDate: Date;
   onDateChange: (date: Date) => void;
+  currentUserId?: string; // 🔥 CRITICAL FIX
 }
 
 export default function TimeBlockPlanner({
@@ -25,7 +26,8 @@ export default function TimeBlockPlanner({
   onUpdateTimeBlock,
   onDeleteTimeBlock,
   selectedDate,
-  onDateChange
+  onDateChange,
+  currentUserId // 🔥 CRITICAL FIX
 }: TimeBlockPlannerProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number; time: Date } | null>(null);
@@ -115,7 +117,7 @@ export default function TimeBlockPlanner({
         title: 'New Time Block',
         status: 'planned',
         type: 'work',
-        userId: 'user-1', // This should come from auth context
+        userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
         domainId: 'domain-1', // This should be selectable
       };
       
@@ -154,7 +156,7 @@ export default function TimeBlockPlanner({
       title: 'New Time Block',
       status: 'planned',
       type: 'work',
-      userId: 'user-1',
+      userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
       domainId: 'domain-1',
     };
     

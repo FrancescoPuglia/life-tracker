@@ -18,6 +18,7 @@ interface AIInputBarProps {
   existingTasks?: Task[];
   userPreferences?: any;
   className?: string;
+  currentUserId?: string; // 🔥 CRITICAL FIX
 }
 
 interface ProcessingState {
@@ -34,7 +35,8 @@ export default function AIInputBar({
   goals = [],
   existingTasks = [],
   userPreferences = {},
-  className = ''
+  className = '',
+  currentUserId // 🔥 CRITICAL FIX
 }: AIInputBarProps) {
   const [input, setInput] = useState('');
   const [processing, setProcessing] = useState<ProcessingState>({
@@ -173,7 +175,7 @@ export default function AIInputBar({
                 estimatedMinutes: taskData.estimatedDuration || 60,
                 priority: taskData.priority,
                 status: 'pending',
-                userId: 'user-1',
+                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
                 domainId: 'default',
                 projectId: undefined,
                 goalId: taskData.goalId,
@@ -196,7 +198,7 @@ export default function AIInputBar({
                 endTime: blockData.endTime,
                 type: blockData.type || 'work',
                 status: 'planned',
-                userId: 'user-1',
+                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
                 domainId: 'domain-1',
                 createdAt: new Date(),
                 updatedAt: new Date()
@@ -215,7 +217,7 @@ export default function AIInputBar({
                 category: goalData.category || 'important_not_urgent',
                 priority: goalData.priority || 'medium',
                 status: 'active',
-                userId: 'user-1',
+                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
                 domainId: 'default',
                 targetDate: goalData.deadline || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
                 timeAllocationTarget: goalData.estimatedHours || 5,
@@ -239,7 +241,7 @@ export default function AIInputBar({
                 frequency: habitData.frequency || 'daily',
                 targetValue: 1,
                 unit: 'completion',
-                userId: 'user-1',
+                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
                 isActive: true,
                 streakCount: 0,
                 bestStreak: 0,

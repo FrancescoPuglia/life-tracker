@@ -211,7 +211,7 @@ export default function HomePage() {
   const calculateUserStats = async () => {
     try {
       const allSessions = await db.getAll<Session>('sessions');
-      const userSessions = allSessions.filter(s => s.userId === 'user-1');
+      const userSessions = allSessions.filter(s => s.userId === (currentUser?.uid || 'user-1')); // 🔥 FIX: Use real userId
       
       // Calculate max streak from habits (real data)
       const maxStreak = habits.reduce((max, habit) => Math.max(max, habit.streakCount || 0), 0);
@@ -282,7 +282,7 @@ export default function HomePage() {
     try {
       setAnalyticsLoading(true);
       
-      const userId = 'user-1';
+      const userId = currentUser?.uid || 'user-1'; // 🔥 FIX: Use real userId
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
 
       const [
@@ -374,7 +374,7 @@ export default function HomePage() {
       const blockToCreate: TimeBlock = {
         ...blockData,
         id: `timeblock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: blockData.userId || 'user-1',
+        userId: blockData.userId || currentUser?.uid || 'user-1', // 🔥 FIX: Use real userId
         domainId: blockData.domainId || 'domain-1',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -408,7 +408,7 @@ export default function HomePage() {
       const fallbackBlock: TimeBlock = {
         ...blockData,
         id: `fallback-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: blockData.userId || 'user-1',
+        userId: blockData.userId || currentUser?.uid || 'user-1', // 🔥 FIX: Use real userId
         domainId: blockData.domainId || 'domain-1',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -497,7 +497,7 @@ export default function HomePage() {
         const newLog: HabitLog = {
           id: `log-${Date.now()}`,
           habitId,
-          userId: 'user-1',
+          userId: currentUser?.uid || 'user-1', // 🔥 FIX: Use real userId
           date: today,
           completed,
           value,
@@ -625,18 +625,18 @@ export default function HomePage() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="w-20 h-20 mx-auto mb-8">
-            <div className="w-20 h-20 border-4 border-transparent rounded-full animate-spin neon-border"></div>
+            <div className="w-20 h-20 border-4 border-primary-200 rounded-full border-r-primary-600" style={{ animation: 'spin 1s linear infinite' }}></div>
           </div>
-          <h2 className="text-3xl font-bold holographic-text mb-4">LIFE TRACKER</h2>
-          <p className="text-gray-300 text-lg">
+          <h2 className="heading-1 text-neutral-900 mb-4">Life Tracker</h2>
+          <p className="text-body text-lg">
             {authLoading ? 'Checking authentication...' : 'Initializing system...'}
           </p>
           <div className="mt-6 flex justify-center space-x-2">
             {[...Array(3)].map((_, i) => (
               <div 
                 key={i}
-                className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse"
-                style={{ animationDelay: `${i * 0.3}s` }}
+                className="w-3 h-3 rounded-full bg-primary-500"
+                style={{ animation: 'pulse 1.5s ease-in-out infinite', animationDelay: `${i * 0.3}s` }}
               />
             ))}
           </div>
@@ -659,9 +659,9 @@ export default function HomePage() {
       {/* Daily Motivation */}
       {currentUser && <DailyMotivation />}
 
-      {/* NOW Bar - Always visible at top */}
-      <div className="glass-navbar fixed top-0 left-0 right-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
+      {/* NOW Bar - Professional Header */}
+      <div className="card fixed top-0 left-0 right-0 z-40 border-l-0 border-r-0 border-t-0 rounded-none">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           {/* Left side - NOW Bar */}
           <div className="flex-1">
             <NowBar
@@ -682,14 +682,14 @@ export default function HomePage() {
                 
                 {/* User info */}
                 <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+                  <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold">
                     {currentUser.displayName?.[0] || currentUser.email?.[0] || 'U'}
                   </div>
                   <div className="hidden md:block">
-                    <div className="text-sm font-medium text-white">
+                    <div className="text-sm font-medium text-neutral-900">
                       {currentUser.displayName || 'User'}
                     </div>
-                    <div className="text-xs text-gray-400">
+                    <div className="text-xs text-neutral-500">
                       {currentUser.email}
                     </div>
                   </div>
@@ -699,7 +699,7 @@ export default function HomePage() {
                       audioManager.buttonFeedback();
                     }}
                     onMouseEnter={() => audioManager.buttonHover()}
-                    className="btn-gaming text-xs px-3 py-1 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 rounded-lg transition-all duration-300 border border-red-400 hover:border-red-300 shadow-lg"
+                    className="btn btn-outline text-xs px-3 py-1"
                   >
                     Sign Out
                   </button>
@@ -712,7 +712,7 @@ export default function HomePage() {
                   audioManager.buttonFeedback();
                 }}
                 onMouseEnter={() => audioManager.buttonHover()}
-                className="btn-gaming bg-gradient-to-r from-blue-500 to-purple-600 text-sm px-6 py-3 shadow-lg border border-blue-400 hover:border-blue-300"
+                className="btn btn-primary text-sm px-6 py-3"
               >
                 Sign In
               </button>
@@ -721,81 +721,106 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="pt-20 pb-8">
+      {/* Main Content - Professional 2-Column Layout */}
+      <div className="pt-24 pb-8 bg-neutral-50">
         {currentUser ? (
-          <div className="max-w-7xl mx-auto px-4 space-y-6">
-            {/* 🧠 AI INPUT BAR - PSYCHOPATH MODE */}
-            <div className="futuristic-card p-6">
-              <div className="mb-4">
-                <h2 className="text-2xl font-bold holographic-text flex items-center space-x-3">
-                  <span>🧠</span>
-                  <span>AI BRAIN</span>
-                  <span className="text-xs bg-gradient-to-r from-green-500 to-blue-500 text-white px-2 py-1 rounded-full animate-pulse">
-                    MODALITÀ PSICOPATICO
-                  </span>
-                </h2>
-                <p className="text-gray-300 text-sm mt-2">
-                  Tell me what you want to do in natural language. I'll create tasks, time blocks, goals, and habits automatically.
-                </p>
+          <div className="container mx-auto">
+            <div className="grid-responsive gap-6">
+              {/* LEFT SIDEBAR - Control Panel */}
+              <div className="space-y-6">
+                {/* AI Brain - Compact & Clean */}
+                <div className="card card-body">
+                  <div className="mb-4">
+                    <h3 className="heading-3 flex items-center gap-3">
+                      🧠 AI Assistant
+                      <span className="badge badge-primary text-xs">AI</span>
+                    </h3>
+                    <p className="text-small">
+                      Create tasks and blocks with natural language
+                    </p>
+                  </div>
+                  <AIInputBar
+                    onCreateTimeBlock={handleCreateTimeBlock}
+                    onCreateTask={handleCreateTask}
+                    onCreateGoal={handleCreateGoal}
+                    onCreateHabit={handleCreateHabit}
+                    goals={goals}
+                    existingTasks={tasks}
+                    userPreferences={{}}
+                    className="w-full"
+                    currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
+                  />
+                </div>
+
+                {/* KPI Dashboard - Clean Cards */}
+                <div className="card">
+                  <div className="card-header">
+                    <h3 className="heading-3">Today's Progress</h3>
+                  </div>
+                  <div className="card-body">
+                    <KPIDashboard 
+                      kpis={todayKPIs}
+                      onRefresh={loadData}
+                    />
+                  </div>
+                </div>
+
+                {/* Module Navigation - Professional Cards */}
+                <div className="card">
+                  <div className="card-header">
+                    <h3 className="heading-3">Modules</h3>
+                  </div>
+                  <div className="card-body">
+                    <div className="module-grid">
+                      {[
+                        { id: 'planner', label: 'Time Planner', icon: '📅', description: 'Plan and schedule your day' },
+                        { id: 'smart_scheduler', label: 'Auto Scheduler', icon: '⚡', description: 'AI-powered scheduling' },
+                        { id: 'adaptation', label: 'Auto-Replan', icon: '🔄', description: 'Real-time adaptation' },
+                        { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights' },
+                        { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track daily habits' },
+                        { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives' },
+                        { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data' },
+                        { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights' },
+                        { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Track milestones' },
+                      ].map(({ id, label, icon, description }) => (
+                        <div
+                          key={id}
+                          onClick={() => {
+                            setActiveTab(id as any);
+                            audioManager.buttonFeedback();
+                          }}
+                          className={`module-card ${
+                            activeTab === id ? 'active' : ''
+                          }`}
+                        >
+                          <span className="module-icon">{icon}</span>
+                          <h4 className="module-title">{label}</h4>
+                          <p className="module-description">{description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <AIInputBar
-                onCreateTimeBlock={handleCreateTimeBlock}
-                onCreateTask={handleCreateTask}
-                onCreateGoal={handleCreateGoal}
-                onCreateHabit={handleCreateHabit}
-                goals={goals}
-                existingTasks={tasks}
-                userPreferences={{}}
-                className="w-full"
-              />
-            </div>
 
-            {/* KPI Dashboard */}
-            <div className="futuristic-card">
-              <KPIDashboard 
-                kpis={todayKPIs}
-                onRefresh={loadData}
-              />
-            </div>
+              {/* RIGHT MAIN CONTENT - Focus Area */}
+              <div className="card">
+                <div className="card-header">
+                  <h2 className="heading-2">
+                    {activeTab === 'planner' && '📅 Time Planner'}
+                    {activeTab === 'smart_scheduler' && '⚡ Auto Scheduler'}
+                    {activeTab === 'adaptation' && '🔄 Auto Replan'}
+                    {activeTab === 'micro_coach' && '🧠 AI Coach'}
+                    {activeTab === 'habits' && '🔥 Habits Tracker'}
+                    {activeTab === 'okr' && '🎯 Goals & Projects'}
+                    {activeTab === 'analytics' && '📊 Analytics Dashboard'}
+                    {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
+                    {activeTab === 'badges' && '🏆 Achievements'}
+                  </h2>
+                </div>
+                <div className="card-body">
 
-            {/* Navigation Tabs */}
-            <div className="futuristic-card">
-            <div className="border-b border-gray-700">
-              <nav className="flex space-x-8 px-6">
-                {[
-                  { id: 'planner', label: 'Time Planner', icon: '🚀' },
-                  { id: 'smart_scheduler', label: 'Smart Scheduler', icon: '⚡' },
-                  { id: 'adaptation', label: 'Real-Time AI', icon: '🔄' },
-                  { id: 'micro_coach', label: 'AI Coach', icon: '🧠' },
-                  { id: 'habits', label: 'Habits', icon: '🔥' },
-                  { id: 'okr', label: 'Goals & Projects', icon: '🎯' },
-                  { id: 'analytics', label: 'Analytics', icon: '📊' },
-                  { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🧠' },
-                  { id: 'badges', label: 'Badges', icon: '🏆' },
-                ].map(({ id, label, icon }) => (
-                  <button
-                    key={id}
-                    onClick={() => {
-                      setActiveTab(id as any);
-                      audioManager.buttonFeedback(); // 🔊 Gaming sound
-                    }}
-                    onMouseEnter={() => audioManager.buttonHover()} // 🔊 Hover sound
-                    className={`btn-gaming flex items-center space-x-3 py-4 text-sm font-medium border-b-2 transition-all duration-300 ${
-                      activeTab === id
-                        ? 'border-cyan-400 text-cyan-400 neon-text bg-gradient-to-r from-cyan-900/20 to-blue-900/20'
-                        : 'border-transparent text-gray-400 hover:text-cyan-300 hover:border-cyan-400/50'
-                    }`}
-                  >
-                    <span className="text-xl animate-pulse">{icon}</span>
-                    <span className="font-bold tracking-wider text-shadow-lg">{label}</span>
-                  </button>
-                ))}
-              </nav>
-            </div>
-
-            {/* Tab Content */}
-            <div className="p-6">
+                  {/* Module Content */}
               {activeTab === 'planner' && (
                 <TimeBlockPlanner
                   timeBlocks={timeBlocks}
@@ -807,6 +832,7 @@ export default function HomePage() {
                   onDeleteTimeBlock={handleDeleteTimeBlock}
                   selectedDate={selectedDate}
                   onDateChange={setSelectedDate}
+                  currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
                 />
               )}
 
@@ -878,6 +904,7 @@ export default function HomePage() {
                   onUpdateHabit={handleUpdateHabit}
                   onDeleteHabit={handleDeleteHabit}
                   onLogHabit={handleLogHabit}
+                  currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
                 />
               )}
 
@@ -895,6 +922,7 @@ export default function HomePage() {
                   onUpdateProject={handleUpdateProject}
                   onCreateTask={handleCreateTask}
                   onUpdateTask={handleUpdateTask}
+                  currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
                 />
               )}
 
@@ -921,42 +949,43 @@ export default function HomePage() {
                   onBadgeUnlocked={handleBadgeUnlocked}
                 />
               )}
-            </div>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
           // Landing page for non-authenticated users
           <div className="max-w-4xl mx-auto px-4 text-center py-20">
             <div className="space-y-8">
-              <h1 className="text-6xl font-bold holographic-text mb-6">
-                LIFE TRACKER
+              <h1 className="heading-1 text-4xl md:text-6xl text-neutral-900 mb-6">
+                Life Tracker
               </h1>
-              <p className="text-xl text-gray-300 max-w-2xl mx-auto leading-relaxed">
+              <p className="text-xl text-neutral-600 max-w-2xl mx-auto leading-relaxed">
                 Transform your productivity with evidence-based time tracking, habit formation, and goal achievement. 
                 Know every second what to do.
               </p>
               
               <div className="grid md:grid-cols-3 gap-8 mt-16">
-                <div className="glass-card p-8">
+                <div className="card card-body text-center">
                   <div className="text-4xl mb-4">🚀</div>
-                  <h3 className="text-xl font-bold neon-text mb-3">Smart Planning</h3>
-                  <p className="text-gray-300">
+                  <h3 className="heading-3 mb-3">Smart Planning</h3>
+                  <p className="text-body">
                     Drag-and-drop timeboxing with automatic conflict detection and real-time adjustments.
                   </p>
                 </div>
                 
-                <div className="glass-card p-8">
+                <div className="card card-body text-center">
                   <div className="text-4xl mb-4">🔥</div>
-                  <h3 className="text-xl font-bold neon-text mb-3">Habit Mastery</h3>
-                  <p className="text-gray-300">
+                  <h3 className="heading-3 mb-3">Habit Mastery</h3>
+                  <p className="text-body">
                     Build lasting habits with streak tracking, implementation intentions, and smart reminders.
                   </p>
                 </div>
                 
-                <div className="glass-card p-8">
+                <div className="card card-body text-center">
                   <div className="text-4xl mb-4">📊</div>
-                  <h3 className="text-xl font-bold neon-text mb-3">Deep Analytics</h3>
-                  <p className="text-gray-300">
+                  <h3 className="heading-3 mb-3">Deep Analytics</h3>
+                  <p className="text-body">
                     Correlation analysis, performance trends, and actionable insights powered by your data.
                   </p>
                 </div>
@@ -969,11 +998,11 @@ export default function HomePage() {
                     audioManager.buttonFeedback();
                   }}
                   onMouseEnter={() => audioManager.buttonHover()}
-                  className="btn-gaming bg-gradient-to-r from-blue-500 via-purple-600 to-pink-500 text-lg px-10 py-5 pulse-glow transform hover:scale-105 shadow-2xl border-2 border-cyan-400"
+                  className="btn btn-primary text-lg px-10 py-5"
                 >
-                  🚀 START YOUR JOURNEY
+                  🚀 Start Your Journey
                 </button>
-                <p className="text-sm text-gray-400 mt-4">
+                <p className="text-small mt-4">
                   Free to use • Cloud sync with Firebase • Offline capable
                 </p>
               </div>
