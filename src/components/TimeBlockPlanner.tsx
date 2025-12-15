@@ -185,25 +185,25 @@ export default function TimeBlockPlanner({
     
     switch (block.type) {
       case 'work': 
-        return `${baseClasses} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-400`;
+        return `${baseClasses} bg-blue-600 text-white border-blue-400`;
       case 'break': 
-        return `${baseClasses} bg-gradient-to-r from-green-500 to-green-600 text-white border-green-400`;
+        return `${baseClasses} bg-green-600 text-white border-green-400`;
       case 'focus': 
-        return `${baseClasses} bg-gradient-to-r from-purple-500 to-purple-600 text-white border-purple-400 animate-pulse-slow`;
+        return `${baseClasses} bg-purple-600 text-white border-purple-400 animate-pulse-slow`;
       case 'deep':
-        return `${baseClasses} bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-indigo-500 shadow-lg`;
+        return `${baseClasses} bg-indigo-700 text-white border-indigo-500 shadow-lg`;
       case 'shallow':
-        return `${baseClasses} bg-gradient-to-r from-cyan-500 to-cyan-600 text-white border-cyan-400`;
+        return `${baseClasses} bg-cyan-600 text-white border-cyan-400`;
       case 'meeting': 
-        return `${baseClasses} bg-gradient-to-r from-orange-500 to-orange-600 text-white border-orange-400`;
+        return `${baseClasses} bg-orange-600 text-white border-orange-400`;
       case 'admin': 
-        return `${baseClasses} bg-gradient-to-r from-gray-500 to-gray-600 text-white border-gray-400`;
+        return `${baseClasses} bg-gray-600 text-white border-gray-400`;
       case 'buffer':
-        return `${baseClasses} bg-gradient-to-r from-yellow-500 to-yellow-600 text-white border-yellow-400`;
+        return `${baseClasses} bg-yellow-600 text-white border-yellow-400`;
       case 'travel':
-        return `${baseClasses} bg-gradient-to-r from-teal-500 to-teal-600 text-white border-teal-400`;
+        return `${baseClasses} bg-teal-600 text-white border-teal-400`;
       default: 
-        return `${baseClasses} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-400`;
+        return `${baseClasses} bg-blue-600 text-white border-blue-400`;
     }
   };
 

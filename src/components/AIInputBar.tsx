@@ -190,10 +190,34 @@ export default function AIInputBar({
             if (onCreateTimeBlock) {
               const blockData = item.data as any;
               console.log('🧠 Creating time block:', blockData);
+              
+              // 🔥 PSYCHOPATH FIX: Estrai WHAT vs WHY dall'input
+              const input = result.rawInput.toLowerCase();
+              let title = '';
+              let description = '';
+              
+              // Parsing intelligente per separare ATTIVITÀ da SCOPO
+              if (input.includes(' per ') || input.includes(' to ')) {
+                const parts = input.split(/ per | to /);
+                title = parts[0].trim();
+                description = `Per ${parts.slice(1).join(' per ').trim()}`;
+              } else if (input.includes(' allo scopo di ') || input.includes(' with the goal of ')) {
+                const parts = input.split(/ allo scopo di | with the goal of /);
+                title = parts[0].trim();
+                description = `Allo scopo di ${parts.slice(1).join(' allo scopo di ').trim()}`;
+              } else {
+                // Fallback: usa l'input come titolo
+                title = result.rawInput.substring(0, 30).trim();
+                description = blockData.type ? `${blockData.type} focus session` : 'Deep work session';
+              }
+              
+              // Capitalizza la prima lettera del titolo
+              title = title.charAt(0).toUpperCase() + title.slice(1);
+              
               await onCreateTimeBlock({
                 id: `timeblock-ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                title: `AI Block from: ${result.rawInput.substring(0, 50)}...`,
-                description: `Auto-created from: "${result.rawInput}"`,
+                title: title,
+                description: description,
                 startTime: blockData.startTime,
                 endTime: blockData.endTime,
                 type: blockData.type || 'work',
