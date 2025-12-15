@@ -327,20 +327,20 @@ export default function TimeBlockPlanner({
 
           {/* Time Blocks */}
           {filteredBlocks.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center z-10">
-              <div className="glass-card p-8 text-center max-w-md">
-                <div className="text-6xl mb-4">📅</div>
-                <h3 className="text-2xl font-bold neon-text mb-4">
-                  Ready to Plan Your Day?
+            <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+              <div className="card card-body text-center max-w-md pointer-events-auto">
+                <div className="text-4xl mb-4">📅</div>
+                <h3 className="heading-3 mb-3">
+                  No blocks for {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}
                 </h3>
-                <p className="text-gray-300 mb-6">
-                  Create your first time block to start organizing your {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}!
+                <p className="text-body mb-4">
+                  Click "Add Block" or drag on the timeline to create your first time block.
                 </p>
                 <button
                   onClick={() => handleQuickCreateBlock(new Date().getHours())}
-                  className="btn-gaming px-6 py-3"
+                  className="btn btn-primary px-6 py-3"
                 >
-                  ✨ Create Time Block
+                  ✨ Add Block Now
                 </button>
               </div>
             </div>

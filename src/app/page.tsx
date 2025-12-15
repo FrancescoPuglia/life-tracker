@@ -92,6 +92,9 @@ export default function HomePage() {
         await audioManager.init(); // 🎵 Initialize gaming audio
         
         if (currentUser) {
+          // 🔥 PSYCHOPATH CRITICAL FIX: Switch to Firebase for authenticated users
+          console.log('🔥 PSYCHOPATH: Switching to Firebase for user:', currentUser.uid);
+          await db.switchToFirebase(currentUser.uid);
           await loadData();
         } else if (!authLoading) {
           // Show auth modal for anonymous users after auth loading is complete
@@ -173,24 +176,45 @@ export default function HomePage() {
         db.getAll<HabitLog>('habitLogs')
       ]);
 
-      // 🔧 FIX: Deserialize dates from IndexedDB (dates are stored as strings)
-      const deserializedTimeBlocks = allTimeBlocks.map(block => ({
-        ...block,
-        startTime: new Date(block.startTime),
-        endTime: new Date(block.endTime),
-        createdAt: new Date(block.createdAt),
-        updatedAt: new Date(block.updatedAt),
-        actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-        actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-      }));
+      // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL data by userId
+      const currentUserId = currentUser?.uid || 'user-1';
+      
+      // 🔧 FIX: Deserialize dates from IndexedDB (dates are stored as strings) AND FILTER BY USER
+      const deserializedTimeBlocks = allTimeBlocks
+        .filter(block => block.userId === currentUserId) // 🔥 CRITICAL: Filter by user
+        .map(block => ({
+          ...block,
+          startTime: new Date(block.startTime),
+          endTime: new Date(block.endTime),
+          createdAt: new Date(block.createdAt),
+          updatedAt: new Date(block.updatedAt),
+          actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+          actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+        }));
+
+      // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL collections by userId
+      const userGoals = allGoals.filter(item => item.userId === currentUserId);
+      const userKeyResults = allKeyResults.filter(item => item.userId === currentUserId);
+      const userProjects = allProjects.filter(item => item.userId === currentUserId);
+      const userTasks = allTasks.filter(item => item.userId === currentUserId);
+      const userHabits = allHabits.filter(item => item.userId === currentUserId);
+      const userHabitLogs = allHabitLogs.filter(item => item.userId === currentUserId);
+
+      console.log('🔥 PSYCHOPATH: Data loaded and filtered:', {
+        totalTimeBlocks: allTimeBlocks.length,
+        userTimeBlocks: deserializedTimeBlocks.length,
+        totalGoals: allGoals.length,
+        userGoals: userGoals.length,
+        currentUserId
+      });
 
       setTimeBlocks(deserializedTimeBlocks);
-      setGoals(allGoals);
-      setKeyResults(allKeyResults);
-      setProjects(allProjects);
-      setTasks(allTasks);
-      setHabits(allHabits);
-      setHabitLogs(allHabitLogs);
+      setGoals(userGoals);
+      setKeyResults(userKeyResults);
+      setProjects(userProjects);
+      setTasks(userTasks);
+      setHabits(userHabits);
+      setHabitLogs(userHabitLogs);
 
       // Load current session
       if (currentUser) {
@@ -386,9 +410,26 @@ export default function HomePage() {
       const createdBlock = await db.create<TimeBlock>('timeBlocks', blockToCreate);
       console.log('🔥 PSYCHOPATH: ✅ Database create SUCCESS:', createdBlock);
       
+      // 🔥 PSYCHOPATH CRITICAL FIX: Deserialize dates for newly created block
+      const deserializedBlock = {
+        ...createdBlock,
+        startTime: new Date(createdBlock.startTime),
+        endTime: new Date(createdBlock.endTime),
+        createdAt: new Date(createdBlock.createdAt),
+        updatedAt: new Date(createdBlock.updatedAt),
+        actualStartTime: createdBlock.actualStartTime ? new Date(createdBlock.actualStartTime) : undefined,
+        actualEndTime: createdBlock.actualEndTime ? new Date(createdBlock.actualEndTime) : undefined,
+      };
+      
       // Update state with the created block
-      const updatedBlocks = [...timeBlocks, createdBlock];
+      const updatedBlocks = [...timeBlocks, deserializedBlock];
       console.log('🔥 PSYCHOPATH: Updating state. Old count:', timeBlocks.length, 'New count:', updatedBlocks.length);
+      console.log('🔥 PSYCHOPATH: New block dates:', {
+        startTime: deserializedBlock.startTime,
+        endTime: deserializedBlock.endTime,
+        startTimeType: typeof deserializedBlock.startTime,
+        endTimeType: typeof deserializedBlock.endTime
+      });
       
       setTimeBlocks(updatedBlocks);
       console.log('🔥 PSYCHOPATH: ✅ State updated successfully');
@@ -446,8 +487,20 @@ export default function HomePage() {
   // Habit management
   const handleCreateHabit = async (habitData: Partial<Habit>) => {
     try {
+      console.log('🔥 PSYCHOPATH: Creating habit:', habitData);
       const newHabit = await db.create<Habit>('habits', habitData as Habit);
-      setHabits([...habits, newHabit]);
+      console.log('🔥 PSYCHOPATH: Habit created successfully:', newHabit);
+      
+      // 🔥 PSYCHOPATH FIX: Deserialize dates
+      const deserializedHabit = {
+        ...newHabit,
+        createdAt: new Date(newHabit.createdAt),
+        updatedAt: new Date(newHabit.updatedAt)
+      };
+      
+      const updatedHabits = [...habits, deserializedHabit];
+      console.log('🔥 PSYCHOPATH: Habits count before:', habits.length, 'after:', updatedHabits.length);
+      setHabits(updatedHabits);
       
       // 🎮 GAMING: New habit created sound
       audioManager.play('achievementUnlock');
@@ -515,10 +568,23 @@ export default function HomePage() {
   // OKR management functions
   const handleCreateGoal = async (goalData: Partial<Goal>) => {
     try {
+      console.log('🔥 PSYCHOPATH: Creating goal:', goalData);
       const newGoal = await db.create<Goal>('goals', goalData as Goal);
-      setGoals([...goals, newGoal]);
+      console.log('🔥 PSYCHOPATH: Goal created successfully:', newGoal);
+      
+      // 🔥 PSYCHOPATH FIX: Deserialize dates
+      const deserializedGoal = {
+        ...newGoal,
+        targetDate: new Date(newGoal.targetDate),
+        createdAt: new Date(newGoal.createdAt),
+        updatedAt: new Date(newGoal.updatedAt)
+      };
+      
+      const updatedGoals = [...goals, deserializedGoal];
+      console.log('🔥 PSYCHOPATH: Goals count before:', goals.length, 'after:', updatedGoals.length);
+      setGoals(updatedGoals);
     } catch (error) {
-      console.error('Failed to create goal:', error);
+      console.error('❌ PSYCHOPATH: Failed to create goal:', error);
     }
   };
 

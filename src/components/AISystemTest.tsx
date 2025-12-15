@@ -257,7 +257,8 @@ export default function AISystemTest() {
       const mockKeyResults = [
         { 
           id: 'kr1', 
-          goalId: 'test-goal', 
+          goalId: 'test-goal',
+          userId: 'test-user', // 🔥 PSYCHOPATH FIX
           title: 'Test KR 1',
           description: 'Test key result',
           targetValue: 100,
@@ -270,7 +271,8 @@ export default function AISystemTest() {
         },
         { 
           id: 'kr2', 
-          goalId: 'test-goal', 
+          goalId: 'test-goal',
+          userId: 'test-user', // 🔥 PSYCHOPATH FIX
           title: 'Test KR 2',
           description: 'Test key result 2',
           targetValue: 100,

@@ -31,7 +31,10 @@
       "Bash(timeout 30 npm run dev)",
       "Bash(timeout 60 npm run dev)",
       "Bash(npm run type-check:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(rg:*)",
+      "Bash(echo \"EXIT CODE: $?\")"
     ],
     "deny": []
   }

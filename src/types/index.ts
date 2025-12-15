@@ -52,6 +52,7 @@ export interface Goal {
 export interface KeyResult {
   id: string;
   goalId: string;
+  userId: string; // 🔥 PSYCHOPATH FIX: Add missing userId
   title: string;
   description: string;
   targetValue: number;

@@ -708,9 +708,27 @@ export default function OKRManager({
 
       {/* Goals Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {goals.map(goal => (
-          <GoalCard key={goal.id} goal={goal} />
-        ))}
+        {goals.length === 0 ? (
+          <div className="col-span-full">
+            <div className="card card-body text-center py-12">
+              <div className="text-6xl mb-4">🎯</div>
+              <h3 className="heading-2 mb-4">No Goals Yet</h3>
+              <p className="text-body mb-6">
+                Create your first goal to start organizing your objectives and key results.
+              </p>
+              <button
+                onClick={() => setShowCreateModal('goal')}
+                className="btn btn-primary"
+              >
+                🚀 Create First Goal
+              </button>
+            </div>
+          </div>
+        ) : (
+          goals.map(goal => (
+            <GoalCard key={goal.id} goal={goal} />
+          ))
+        )}
       </div>
 
       {/* Selected Goal Details */}
