@@ -798,7 +798,7 @@ class LifeTrackerDB {
         })) : 'No items returned',
         firstItem: result.length > 0 ? JSON.stringify(result[0], null, 2) : 'No first item'
       });
-      return result;
+      return result as T[];
     } catch (error) {
       console.error(`❌ PSYCHOPATH: LifeTrackerDB.getAll() ERROR for ${storeName}:`, {
         error: error,
