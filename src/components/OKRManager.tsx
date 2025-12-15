@@ -39,6 +39,11 @@ export default function OKRManager({
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<'goal' | 'keyResult' | 'project' | 'task' | null>(null);
   const [newItemData, setNewItemData] = useState<any>({});
+  
+  // 🔥 PSICOPATICO ENHANCEMENT: Key Result Editing
+  const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
+  const [showKeyResultModal, setShowKeyResultModal] = useState(false);
+  const [keyResultEditData, setKeyResultEditData] = useState<any>({});
 
   // Refs to maintain focus
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -213,31 +218,100 @@ export default function OKRManager({
     );
   };
 
+  // 🔥 PSICOPATICO ENHANCEMENT: Handle Key Result Update
+  const handleUpdateKeyResultProgress = (keyResult: KeyResult) => {
+    setEditingKeyResult(keyResult);
+    setKeyResultEditData({
+      currentValue: keyResult.currentValue,
+      targetValue: keyResult.targetValue,
+      status: keyResult.status,
+      title: keyResult.title,
+      description: keyResult.description,
+      unit: keyResult.unit
+    });
+    setShowKeyResultModal(true);
+  };
+
+  const saveKeyResultUpdate = () => {
+    if (!editingKeyResult) return;
+    
+    // 🧮 Auto-calculate progress percentage
+    const progress = keyResultEditData.targetValue > 0 
+      ? Math.min(100, Math.max(0, (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100))
+      : 0;
+    
+    // 🎯 Auto-update status based on progress
+    let status = keyResultEditData.status;
+    if (progress >= 100) {
+      status = 'completed';
+    } else if (progress >= 70) {
+      status = 'active';
+    } else if (progress < 30) {
+      status = 'at_risk';
+    }
+    
+    const updates = {
+      ...keyResultEditData,
+      progress: Math.round(progress),
+      status,
+      updatedAt: new Date()
+    };
+    
+    console.log('🔥 PSICOPATICO: Updating Key Result:', {
+      keyResultId: editingKeyResult.id,
+      oldProgress: editingKeyResult.progress,
+      newProgress: progress,
+      oldStatus: editingKeyResult.status,
+      newStatus: status
+    });
+    
+    onUpdateKeyResult(editingKeyResult.id, updates);
+    setShowKeyResultModal(false);
+    setEditingKeyResult(null);
+    setKeyResultEditData({});
+  };
+
   const KeyResultCard = ({ keyResult }: { keyResult: KeyResult }) => (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+    <div 
+      className="bg-gray-50 border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-all cursor-pointer group"
+      onClick={() => handleUpdateKeyResultProgress(keyResult)}
+    >
       <div className="flex items-start justify-between mb-2">
-        <h4 className="font-medium text-gray-900">{keyResult.title}</h4>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(keyResult.status)}`}>
-          {keyResult.status}
-        </span>
+        <h4 className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{keyResult.title}</h4>
+        <div className="flex items-center space-x-2">
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(keyResult.status)}`}>
+            {keyResult.status}
+          </span>
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 text-xs font-bold">
+            ✏️ EDIT
+          </div>
+        </div>
       </div>
       
       <p className="text-sm text-gray-600 mb-3">{keyResult.description}</p>
       
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm text-gray-500">
-          {keyResult.currentValue} / {keyResult.targetValue} {keyResult.unit}
+        <span className="text-sm text-gray-500 font-mono">
+          <span className="font-bold text-blue-600">{keyResult.currentValue}</span> / {keyResult.targetValue} {keyResult.unit}
         </span>
-        <span className="text-sm font-medium text-blue-600">
+        <span className="text-lg font-bold text-blue-600">
           {Math.round(keyResult.progress)}%
         </span>
       </div>
       
-      <div className="w-full bg-gray-200 rounded-full h-1.5">
+      <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
         <div
-          className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-          style={{ width: `${keyResult.progress}%` }}
+          className={`h-2 rounded-full transition-all duration-500 ${
+            keyResult.progress >= 100 ? 'bg-green-500' :
+            keyResult.progress >= 70 ? 'bg-blue-500' :
+            keyResult.progress >= 30 ? 'bg-yellow-500' : 'bg-red-500'
+          }`}
+          style={{ width: `${Math.min(100, keyResult.progress)}%` }}
         />
+      </div>
+      
+      <div className="text-xs text-center text-gray-500 group-hover:text-blue-600 transition-colors">
+        Click to update progress
       </div>
     </div>
   );
@@ -827,8 +901,199 @@ export default function OKRManager({
         </div>
       )}
 
-      {/* Modal will be rendered via portal */}
+      {/* Modals */}
       <CreateModal />
+      <KeyResultEditModal />
     </div>
   );
+
+  // 🔥 PSICOPATICO MODAL: Key Result Editor
+  const KeyResultEditModal = () => {
+    if (!showKeyResultModal || !editingKeyResult) return null;
+    if (typeof window === 'undefined') return null;
+
+    const modalContent = (
+      <div 
+        className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
+        style={{ 
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)'
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowKeyResultModal(false);
+            setEditingKeyResult(null);
+            setKeyResultEditData({});
+          }
+        }}
+      >
+        <div 
+          className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+          style={{
+            transform: 'translateZ(0)',
+            position: 'relative',
+            zIndex: 10000
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl font-bold text-gray-900 flex items-center">
+                🎯 Update Key Result
+              </h3>
+              <button
+                onClick={() => {
+                  setShowKeyResultModal(false);
+                  setEditingKeyResult(null);
+                  setKeyResultEditData({});
+                }}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none transition-colors"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            
+            {/* Key Result Info */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <h4 className="font-bold text-blue-900 mb-2">{editingKeyResult.title}</h4>
+              <p className="text-blue-700 text-sm">{editingKeyResult.description}</p>
+            </div>
+
+            <div className="space-y-6">
+              {/* Progress Input Section */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Current Value</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={keyResultEditData.currentValue || 0}
+                    onChange={(e) => setKeyResultEditData({
+                      ...keyResultEditData, 
+                      currentValue: parseFloat(e.target.value) || 0
+                    })}
+                    className="w-full px-4 py-3 text-lg font-bold border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
+                    style={{
+                      color: '#1e40af',
+                      backgroundColor: '#eff6ff',
+                      fontSize: '18px'
+                    }}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Target Value</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={keyResultEditData.targetValue || 0}
+                    onChange={(e) => setKeyResultEditData({
+                      ...keyResultEditData, 
+                      targetValue: parseFloat(e.target.value) || 0
+                    })}
+                    className="w-full px-4 py-3 text-lg font-bold border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
+                    style={{
+                      color: '#374151',
+                      backgroundColor: '#f9fafb',
+                      fontSize: '18px'
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Unit Display */}
+              <div className="text-center">
+                <span className="inline-block px-4 py-2 bg-gray-100 rounded-full text-gray-700 font-medium">
+                  Unit: {keyResultEditData.unit || 'units'}
+                </span>
+              </div>
+
+              {/* Progress Preview */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h5 className="font-bold text-gray-900">Progress Preview</h5>
+                  <span className="text-2xl font-bold text-blue-600">
+                    {keyResultEditData.targetValue > 0 
+                      ? Math.round(Math.min(100, Math.max(0, (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100)))
+                      : 0}%
+                  </span>
+                </div>
+                
+                <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
+                  <div
+                    className="bg-blue-500 h-3 rounded-full transition-all duration-300"
+                    style={{ 
+                      width: `${keyResultEditData.targetValue > 0 
+                        ? Math.min(100, Math.max(0, (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100))
+                        : 0}%` 
+                    }}
+                  />
+                </div>
+                
+                <div className="text-center text-sm text-gray-600">
+                  {keyResultEditData.currentValue || 0} / {keyResultEditData.targetValue || 0} {keyResultEditData.unit || 'units'}
+                </div>
+              </div>
+
+              {/* Status Override (Optional) */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Status (Auto-calculated)</label>
+                <select
+                  value={(() => {
+                    const progress = keyResultEditData.targetValue > 0 
+                      ? (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100
+                      : 0;
+                    if (progress >= 100) return 'completed';
+                    if (progress >= 70) return 'active';
+                    if (progress < 30) return 'at_risk';
+                    return 'active';
+                  })()}
+                  onChange={(e) => setKeyResultEditData({...keyResultEditData, status: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  style={{
+                    color: '#111827',
+                    backgroundColor: '#ffffff'
+                  }}
+                >
+                  <option value="active">🟡 Active</option>
+                  <option value="completed">🟢 Completed</option>
+                  <option value="at_risk">🔴 At Risk</option>
+                </select>
+              </div>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowKeyResultModal(false);
+                  setEditingKeyResult(null);
+                  setKeyResultEditData({});
+                }}
+                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveKeyResultUpdate}
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-bold text-lg flex items-center space-x-2"
+                type="button"
+              >
+                <span>🚀</span>
+                <span>Update Progress</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    return createPortal(modalContent, document.body);
+  };
 }

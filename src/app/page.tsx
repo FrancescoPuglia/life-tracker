@@ -666,23 +666,66 @@ export default function HomePage() {
 
   const handleCreateKeyResult = async (keyResultData: Partial<KeyResult>) => {
     try {
-      const newKeyResult = await db.create<KeyResult>('keyResults', keyResultData as KeyResult);
-      setKeyResults([...keyResults, newKeyResult]);
+      console.log('🔥 PSYCHOPATH: Creating key result:', keyResultData);
+      
+      // 🔥 PSICOPATICO CRITICAL FIX: Ensure KeyResult has all required fields
+      const keyResultToCreate: KeyResult = {
+        ...keyResultData,
+        id: `keyresult-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        userId: currentUser?.uid || 'user-1', // 🔥 FORCE userId
+        goalId: keyResultData.goalId || '',
+        currentValue: keyResultData.currentValue || 0,
+        progress: 0, // Start at 0%
+        status: keyResultData.status || 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as KeyResult;
+      
+      const newKeyResult = await db.create<KeyResult>('keyResults', keyResultToCreate);
+      console.log('🔥 PSYCHOPATH: Key Result created successfully:', newKeyResult);
+      
+      const updatedKeyResults = [...keyResults, newKeyResult];
+      setKeyResults(updatedKeyResults);
+      
+      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
+      await loadData();
+      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after Key Result creation');
     } catch (error) {
-      console.error('Failed to create key result:', error);
+      console.error('❌ PSYCHOPATH: Failed to create key result:', error);
     }
   };
 
   const handleUpdateKeyResult = async (id: string, updates: Partial<KeyResult>) => {
     try {
+      console.log('🔥 PSYCHOPATH: Updating key result:', { id, updates });
+      
       const existingKR = keyResults.find(kr => kr.id === id);
       if (existingKR) {
         const updatedKR = { ...existingKR, ...updates, updatedAt: new Date() };
         await db.update('keyResults', updatedKR);
-        setKeyResults(keyResults.map(kr => kr.id === id ? updatedKR : kr));
+        
+        const updatedKeyResults = keyResults.map(kr => kr.id === id ? updatedKR : kr);
+        setKeyResults(updatedKeyResults);
+        
+        console.log('🔥 PSYCHOPATH: Key Result updated successfully:', {
+          oldProgress: existingKR.progress,
+          newProgress: updatedKR.progress,
+          oldStatus: existingKR.status,
+          newStatus: updatedKR.status
+        });
+        
+        // 🎮 GAMING: Play progress sound based on achievement
+        if (updatedKR.progress >= 100 && existingKR.progress < 100) {
+          audioManager.perfectDay(); // Goal completed!
+        } else if (updatedKR.progress > existingKR.progress) {
+          audioManager.taskCompleted(); // Progress made!
+        }
+        
+        // 🔥 PSYCHOPATH FIX: Force reload to sync all data and update Goal percentages
+        await loadData();
       }
     } catch (error) {
-      console.error('Failed to update key result:', error);
+      console.error('❌ PSYCHOPATH: Failed to update key result:', error);
     }
   };
 
