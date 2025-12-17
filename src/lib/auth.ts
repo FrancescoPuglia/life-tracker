@@ -42,6 +42,16 @@ class AuthManager {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      // Load persisted user from localStorage
+      const persistedUser = localStorage.getItem('authUser');
+      if (persistedUser) {
+        try {
+          this.currentUser = JSON.parse(persistedUser);
+        } catch (error) {
+          console.warn('Failed to parse persisted auth user:', error);
+          localStorage.removeItem('authUser');
+        }
+      }
       this.initAuthStateListener();
     }
   }
@@ -54,14 +64,24 @@ class AuthManager {
     
     onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
       const user = firebaseUser ? this.mapFirebaseUser(firebaseUser) : null;
+      
+      // If Firebase says null but we have persisted user, don't update (token refresh in progress)
+      if (!user && this.currentUser) {
+        console.log('⏳ Auth state null but persisted user exists - skipping update');
+        return;
+      }
+      
       this.currentUser = user;
       
-      // Switch database to Firebase when user logs in
+      // Persist user to localStorage
       if (user) {
-        db.switchToFirebase(user.uid).catch(error => {
-          console.error('Failed to switch to Firebase:', error);
-        });
+        localStorage.setItem('authUser', JSON.stringify(user));
+      } else {
+        localStorage.removeItem('authUser');
       }
+      
+      // ⚠️ FIX: NON chiamare switchToFirebase qui - sarà gestito da page.tsx useEffect
+      // Questo elimina race condition e garantisce che loadData() venga chiamato dopo switchToFirebase
       
       // Notify all listeners
       this.listeners.forEach(listener => listener(user));

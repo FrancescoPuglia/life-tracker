@@ -131,20 +131,44 @@ export class SessionManager {
     });
   }
 
-  async startSession(taskId?: string, projectId?: string, domainId: string = 'default'): Promise<Session> {
+  // 🚀 ENHANCED: Support TimeBlock integration
+  async startSession(
+    taskId?: string, 
+    timeBlockId?: string, 
+    domainId: string = 'default',
+    userId: string = 'user-1'
+  ): Promise<Session> {
     if (this.currentSession && this.currentSession.status === 'active') {
       throw new Error('A session is already active. Stop or pause the current session first.');
     }
 
+    // 🎯 INTELLIGENCE: Auto-detect domain from timeblock
+    if (timeBlockId) {
+      const timeBlocks = await db.getAll<TimeBlock>('timeBlocks');
+      const timeBlock = timeBlocks.find(tb => tb.id === timeBlockId);
+      if (timeBlock) {
+        domainId = timeBlock.domainId;
+        
+        // 🚀 UPDATE: Mark timeblock as in progress
+        await db.update('timeBlocks', {
+          ...timeBlock,
+          status: 'in_progress',
+          actualStartTime: new Date(),
+          updatedAt: new Date()
+        });
+      }
+    }
+
     const session: Session = {
-      id: `session-${Date.now()}`,
+      id: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timeBlockId, // 🚀 NEW: Link to timeblock
       taskId,
-      projectId,
+      projectId: undefined, // Will be set from timeblock if available
       domainId,
-      userId: 'user-1', // This should come from auth context
+      userId,
       startTime: new Date(),
       status: 'active',
-      tags: [],
+      tags: timeBlockId ? ['timeblock-session'] : [],
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -152,6 +176,7 @@ export class SessionManager {
     this.currentSession = session;
     await db.create('sessions', session);
     
+    console.log(`🚀 SESSION: Started${timeBlockId ? ` for TimeBlock ${timeBlockId}` : ''}`);
     this.lastActivity = new Date();
     return session;
   }
@@ -197,6 +222,7 @@ export class SessionManager {
     return resumedSession;
   }
 
+  // 🚀 ENHANCED: Update linked TimeBlock on completion
   async stopSession(notes?: string): Promise<Session | null> {
     if (!this.currentSession) {
       throw new Error('No session to stop.');
@@ -214,9 +240,33 @@ export class SessionManager {
 
     await this.updateSession(this.currentSession);
     
+    // 🎯 INTELLIGENCE: Complete linked TimeBlock
+    if (this.currentSession.timeBlockId) {
+      const timeBlocks = await db.getAll<TimeBlock>('timeBlocks');
+      const timeBlock = timeBlocks.find(tb => tb.id === this.currentSession!.timeBlockId);
+      
+      if (timeBlock) {
+        const actualDurationMin = duration / 60; // Convert to minutes
+        const plannedDurationMin = (timeBlock.endTime.getTime() - timeBlock.startTime.getTime()) / (1000 * 60);
+        
+        const status = actualDurationMin >= plannedDurationMin * 0.8 ? 'completed' : 'overrun';
+        
+        await db.update('timeBlocks', {
+          ...timeBlock,
+          status,
+          actualEndTime: now,
+          actualStartTime: timeBlock.actualStartTime || this.currentSession!.startTime,
+          updatedAt: now
+        });
+        
+        console.log(`🎯 TIMEBLOCK: ${status} - ${actualDurationMin.toFixed(1)}min (planned: ${plannedDurationMin.toFixed(1)}min)`);
+      }
+    }
+    
     const completedSession = this.currentSession;
     this.currentSession = null;
     
+    console.log(`🚀 SESSION: Completed - ${(duration/60).toFixed(1)} minutes`);
     return completedSession;
   }
 

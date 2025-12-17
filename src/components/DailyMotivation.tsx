@@ -156,10 +156,10 @@ export default function DailyMotivation() {
 
           {/* Quote */}
           <div className="glass-card p-8 mb-8 neon-border">
-            <blockquote className="text-3xl font-medium italic text-white mb-4 leading-relaxed">
+            <blockquote className="text-3xl font-medium italic text-neutral-900 mb-4 leading-relaxed">
               "{currentQuote.text}"
             </blockquote>
-            <cite className="text-xl text-gray-300 font-semibold">
+            <cite className="text-xl text-neutral-700 font-semibold">
               — {currentQuote.author}
             </cite>
           </div>

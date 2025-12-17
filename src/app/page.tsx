@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Session, TimeBlock, KPI, Goal, KeyResult, Project, Task, 
   Habit, HabitLog, AnalyticsData 
@@ -71,6 +71,12 @@ export default function HomePage() {
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
   const [isLoading, setIsLoading] = useState(true);
+  const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
+  const adapterInfo = db.getAdapterDebugInfo();
+  const [dbReadyForUser, setDbReadyForUser] = useState(false); // ⚠️ FIX: Flag per garantire che DB sia pronto per l'utente
+  const isReady = true; // ⚠️ TEMP: Disabled Firebase switching for testing - use IndexedDB only
+  const lastLoadedUserId = useRef<string | null>(null);
+  const hasInitialized = useRef(false);
 
   const sessionManager = SessionManager.getInstance();
 
@@ -84,33 +90,53 @@ export default function HomePage() {
     return unsubscribe;
   }, [auth]);
 
-  // Initialize database and load data
+  // Initialize database and load data after auth state is known and only in browser
   useEffect(() => {
+    if (authLoading || typeof window === 'undefined') return;
+    
+    // ⚠️ FIX: Mutex per evitare race condition - solo una init alla volta
+    if (hasInitialized.current) {
+      console.log('⏸️ Init già in corso, skipping...');
+      return;
+    }
+    
     const initializeApp = async () => {
       try {
+        console.log('🚀 INIT START', {
+          authLoading,
+          currentUserId: currentUser?.uid,
+          timestamp: new Date().toISOString()
+        });
+        
         await db.init();
         await audioManager.init(); // 🎵 Initialize gaming audio
+
+        // ⚠️ TEMP: Disabled Firebase switching - always use IndexedDB
+        console.log('⏳ User authenticated, but using IndexedDB only');
+        lastLoadedUserId.current = null;
+        setShowAuthModal(false);
+        // ⚠️ TEMP: Load from IndexedDB only
+        await loadData();
+        setIsLoading(false);
+        return;
         
-        if (currentUser) {
-          // 🔥 PSYCHOPATH CRITICAL FIX: Switch to Firebase for authenticated users
-          console.log('🔥 PSYCHOPATH: Switching to Firebase for user:', currentUser.uid);
-          await db.switchToFirebase(currentUser.uid);
-          await loadData();
-        } else if (!authLoading) {
-          // Show auth modal for anonymous users after auth loading is complete
-          setShowAuthModal(true);
-        }
-        setIsLoading(false);
+        console.log('✅ INIT COMPLETE', {
+          adapter: db.getAdapterDebugInfo(),
+          timeBlocksCount: timeBlocks.length,
+          goalsCount: goals.length
+        });
       } catch (error) {
-        console.error('Failed to initialize app:', error);
+        console.error('❌ Failed to initialize app:', error);
+        // ⚠️ FIX: Mostra errore ma NON svuotare state
+        // L'utente può ancora vedere dati esistenti
+      } finally {
         setIsLoading(false);
+        hasInitialized.current = true;
       }
     };
 
-    if (!authLoading) {
-      initializeApp();
-    }
-  }, [currentUser, authLoading]);
+    initializeApp();
+  }, [currentUser?.uid, authLoading]);
 
   // Update KPIs periodically
   useEffect(() => {
@@ -157,11 +183,55 @@ export default function HomePage() {
   }, [timeBlocks]);
 
   const loadData = async () => {
+    if (typeof window === 'undefined') {
+      console.warn('Skipping loadData on server environment');
+      return;
+    }
+    
+    // ⚠️ FIX: CRITICAL - Verifica che adapter sia pronto prima di procedere
+    const adapterInfo = db.getAdapterDebugInfo();
+    const currentUserId = currentUser?.uid;
+    
+    // Se user loggato ma adapter non è Firebase o userId non settato, NON procedere
+    if (currentUserId) {
+      // ⚠️ TEMP: Disabled Firebase check - always load from IndexedDB
+      /*
+      if (!db.isUsingFirebase) {
+        console.warn('⚠️ loadData() SKIPPED: User logged in but adapter is not Firebase', {
+          adapterType: adapterInfo.adapterType,
+          useFirebase: db.isUsingFirebase
+        });
+        return; // ⚠️ NON sovrascrivere state con []
+      }
+      */
+      
+      // ⚠️ TEMP: Disabled userId mismatch check for IndexedDB
+      /*
+      if (adapterInfo.userId !== currentUserId) {
+        console.warn('⚠️ loadData() SKIPPED: Adapter userId mismatch', {
+          adapterUserId: adapterInfo.userId,
+          currentUserId
+        });
+        return; // ⚠️ NON sovrascrivere state con []
+      }
+      */
+    }
+    
     try {
+      // ⚠️ FIX: Logging chirurgico per debug adapter e userId
+      console.log('📊 loadData() START', {
+        adapterType: adapterInfo.adapterType,
+        useFirebase: db.isUsingFirebase,
+        adapterUserId: adapterInfo.userId,
+        currentUserId: currentUserId,
+        adapterInitialized: adapterInfo.isInitialized,
+        timestamp: new Date().toISOString()
+      });
+      
       console.log('🔥 PSYCHOPATH: === STARTING loadData() ===');
       console.log('🔥 PSYCHOPATH: Database info:', {
         isUsingFirebase: db.isUsingFirebase,
-        currentUser: currentUser?.uid
+        currentUser: currentUserId
       });
       
       const [
@@ -182,6 +252,19 @@ export default function HomePage() {
         db.getAll<HabitLog>('habitLogs')
       ]);
       
+      // ⚠️ FIX: Logging chirurgico per verificare dati recuperati
+      console.log('📊 loadData() RETRIEVED', {
+        adapterUsed: adapterInfo.adapterType,
+        totalTimeBlocks: allTimeBlocks.length,
+        totalGoals: allGoals.length,
+        totalKeyResults: allKeyResults.length,
+        totalProjects: allProjects.length,
+        totalTasks: allTasks.length,
+        totalHabits: allHabits.length,
+        totalHabitLogs: allHabitLogs.length,
+        timestamp: new Date().toISOString()
+      });
+      
       console.log('🔥 PSYCHOPATH: Raw data retrieved from database:', {
         timeBlocks: allTimeBlocks.length,
         goals: allGoals.length,
@@ -193,11 +276,11 @@ export default function HomePage() {
       });
 
       // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL data by userId
-      const currentUserId = currentUser?.uid || 'user-1';
+      const filterUserId = currentUserId || 'user-1';
       
       // 🔧 FIX: Deserialize dates from IndexedDB (dates are stored as strings) AND FILTER BY USER
       const deserializedTimeBlocks = allTimeBlocks
-        .filter(block => block.userId === currentUserId) // 🔥 CRITICAL: Filter by user
+        .filter(block => block.userId === filterUserId) // 🔥 CRITICAL: Filter by user
         .map(block => ({
           ...block,
           startTime: new Date(block.startTime),
@@ -208,13 +291,15 @@ export default function HomePage() {
           actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
         }));
 
+      console.log('🔥 Loaded timeBlocks for user', filterUserId, ':', deserializedTimeBlocks.map(b => ({id: b.id, userId: b.userId})));
+
       // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL collections by userId
-      const userGoals = allGoals.filter(item => item.userId === currentUserId);
-      const userKeyResults = allKeyResults.filter(item => item.userId === currentUserId);
-      const userProjects = allProjects.filter(item => item.userId === currentUserId);
-      const userTasks = allTasks.filter(item => item.userId === currentUserId);
-      const userHabits = allHabits.filter(item => item.userId === currentUserId);
-      const userHabitLogs = allHabitLogs.filter(item => item.userId === currentUserId);
+      const userGoals = allGoals.filter(item => item.userId === filterUserId);
+      const userKeyResults = allKeyResults.filter(item => item.userId === filterUserId);
+      const userProjects = allProjects.filter(item => item.userId === filterUserId);
+      const userTasks = allTasks.filter(item => item.userId === filterUserId);
+      const userHabits = allHabits.filter(item => item.userId === filterUserId);
+      const userHabitLogs = allHabitLogs.filter(item => item.userId === filterUserId);
 
       console.log('🔥 PSYCHOPATH: Data loaded and filtered:', {
         totalTimeBlocks: allTimeBlocks.length,
@@ -241,18 +326,100 @@ export default function HomePage() {
       setHabitLogs(userHabitLogs);
 
       // Load current session
-      if (currentUser) {
-        const activeSessions = await db.getActiveSessions(currentUser.uid);
-        if (activeSessions.length > 0) {
-          setCurrentSession(activeSessions[0]);
+      // ⚠️ FIX: CRITICAL - Verifica che adapter sia pronto prima di chiamare getActiveSessions
+      if (currentUser && db.isUsingFirebase) {
+        const adapterInfo = db.getAdapterDebugInfo();
+        if (adapterInfo.userId === currentUser.uid) {
+          try {
+            const activeSessions = await db.getActiveSessions(currentUser.uid);
+            if (activeSessions.length > 0) {
+              setCurrentSession(activeSessions[0]);
+            }
+          } catch (error) {
+            console.warn('⚠️ Failed to load active sessions:', error);
+            // Non bloccare il resto del caricamento
+          }
         }
+      }
 
-        // Load analytics data and user stats
+      // Load analytics data and user stats
+      if (currentUser) {
         await loadAnalyticsData();
         await calculateUserStats();
       }
     } catch (error) {
       console.error('Failed to load data:', error);
+    }
+  };
+
+  const migrateLocalDataToFirebase = async (localData: {
+    timeBlocks: TimeBlock[];
+    goals: Goal[];
+    projects: Project[];
+    tasks: Task[];
+    habits: Habit[];
+    habitLogs: HabitLog[];
+  }) => {
+    if (!currentUser?.uid || !db.isUsingFirebase) return;
+    
+    try {
+      console.log('🔄 Migrating local data to Firebase...', {
+        timeBlocks: localData.timeBlocks.length,
+        goals: localData.goals.length,
+        projects: localData.projects.length
+      });
+      
+      // Migrate timeBlocks
+      for (const block of localData.timeBlocks) {
+        if (!timeBlocks.find(b => b.id === block.id)) {
+          await db.create('timeBlocks', block);
+          setTimeBlocks(prev => [...prev, block]);
+        }
+      }
+      
+      // Migrate goals
+      for (const goal of localData.goals) {
+        if (!goals.find(g => g.id === goal.id)) {
+          await db.create('goals', goal);
+          setGoals(prev => [...prev, goal]);
+        }
+      }
+      
+      // Migrate projects
+      for (const project of localData.projects) {
+        if (!projects.find(p => p.id === project.id)) {
+          await db.create('projects', project);
+          setProjects(prev => [...prev, project]);
+        }
+      }
+      
+      // Migrate tasks
+      for (const task of localData.tasks) {
+        if (!tasks.find(t => t.id === task.id)) {
+          await db.create('tasks', task);
+          setTasks(prev => [...prev, task]);
+        }
+      }
+      
+      // Migrate habits
+      for (const habit of localData.habits) {
+        if (!habits.find(h => h.id === habit.id)) {
+          await db.create('habits', habit);
+          setHabits(prev => [...prev, habit]);
+        }
+      }
+      
+      // Migrate habitLogs
+      for (const log of localData.habitLogs) {
+        if (!habitLogs.find(l => l.id === log.id)) {
+          await db.create('habitLogs', log);
+          setHabitLogs(prev => [...prev, log]);
+        }
+      }
+      
+      console.log('✅ Migration completed');
+    } catch (error) {
+      console.error('❌ Migration failed:', error);
     }
   };
 
@@ -382,12 +549,32 @@ export default function HomePage() {
   };
 
   // Session management functions
-  const handleStartSession = async (taskId?: string) => {
+  // 🚀 ENHANCED: Session management with TimeBlock integration
+  const handleStartSession = async (taskId?: string, timeBlockId?: string) => {
     try {
-      const session = await sessionManager.startSession(taskId, undefined, 'default');
+      const session = await sessionManager.startSession(
+        taskId, 
+        timeBlockId, 
+        'default',
+        currentUser?.uid || 'user-1'
+      );
       setCurrentSession(session);
+      
+      // 🎮 GAMING: Session start sound
+      audioManager.buttonFeedback();
+      
+      console.log(`🚀 SESSION: Started${timeBlockId ? ' from TimeBlock' : ''}`);
     } catch (error) {
       console.error('Failed to start session:', error);
+    }
+  };
+  
+  // 🚀 NEW: Start session directly from TimeBlock
+  const handleStartTimeBlockSession = async (timeBlockId: string) => {
+    try {
+      await handleStartSession(undefined, timeBlockId);
+    } catch (error) {
+      console.error('Failed to start timeblock session:', error);
     }
   };
 
@@ -402,9 +589,15 @@ export default function HomePage() {
 
   const handleStopSession = async () => {
     try {
-      await sessionManager.stopSession();
+      const completedSession = await sessionManager.stopSession();
       setCurrentSession(null);
-      await loadData(); // Refresh data after stopping session
+      
+      // 🚀 PERFORMANCE: Direct state update instead of full reload
+      if (completedSession) {
+        // Update KPIs immediately with new session data
+        const updatedKPIs = await db.calculateTodayKPIs(currentUser?.uid || 'user-1');
+        setTodayKPIs(updatedKPIs);
+      }
     } catch (error) {
       console.error('Failed to stop session:', error);
     }
@@ -412,26 +605,51 @@ export default function HomePage() {
 
   // Time block management
   const handleCreateTimeBlock = async (blockData: Partial<TimeBlock>) => {
+    // ⚠️ TEMP: Disabled Firebase switching - use IndexedDB only
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔥 DEV LOG: Add TimeBlock clicked', {
+        adapter: db.getAdapterDebugInfo(),
+        useFirebase: db.isUsingFirebase,
+        userId: currentUser?.uid,
+        blockData
+      });
+    }
+    
     console.log('🔥 PSYCHOPATH: === STARTING handleCreateTimeBlock ===');
     console.log('🔥 PSYCHOPATH: Input data:', blockData);
+    setTimeBlockError(null);
+    let blockToCreate: TimeBlock | null = null;
     
     try {
       console.log('🔥 PSYCHOPATH: Database adapter type:', db.isUsingFirebase ? 'Firebase' : 'IndexedDB');
+      const adapterInfo = db.getAdapterDebugInfo();
+
+      const startTime = blockData.startTime ? new Date(blockData.startTime) : new Date();
+      const endTime = blockData.endTime ? new Date(blockData.endTime) : new Date(startTime.getTime() + 60 * 60 * 1000);
+      const createdAt = blockData.createdAt ? new Date(blockData.createdAt) : new Date();
+      const updatedAt = blockData.updatedAt ? new Date(blockData.updatedAt) : new Date();
+      const userId = currentUser?.uid; // No fallback in Firebase mode
       
       // 🔥 PSYCHOPATH FIX: Ensure proper data structure with unique ID
-      const blockToCreate: TimeBlock = {
+      blockToCreate = {
         ...blockData,
         id: `timeblock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: blockData.userId || currentUser?.uid || 'user-1', // 🔥 FIX: Use real userId
+        userId, // 🔥 FIX: Use real userId
         domainId: blockData.domainId || 'domain-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        startTime,
+        endTime,
+        createdAt,
+        updatedAt,
       } as TimeBlock;
+      const optimisticBlock = blockToCreate as TimeBlock;
       
-      console.log('🔥 PSYCHOPATH: About to create block with:', blockToCreate);
+      console.log('🔥 PSYCHOPATH: About to create block with:', optimisticBlock);
+      // Optimistic UI update
+      setTimeBlocks(prev => [...prev, optimisticBlock]);
       
       // 🔥 ACTUAL DATABASE CALL WITH PROPER ERROR HANDLING
-      const createdBlock = await db.create<TimeBlock>('timeBlocks', blockToCreate);
+      const createdBlock = await db.create<TimeBlock>('timeBlocks', optimisticBlock);
       console.log('🔥 PSYCHOPATH: ✅ Database create SUCCESS:', createdBlock);
       
       // 🔥 PSYCHOPATH CRITICAL FIX: Deserialize dates for newly created block
@@ -446,25 +664,30 @@ export default function HomePage() {
       };
       
       // Update state with the created block
-      const updatedBlocks = [...timeBlocks, deserializedBlock];
-      console.log('🔥 PSYCHOPATH: Updating state. Old count:', timeBlocks.length, 'New count:', updatedBlocks.length);
+      setTimeBlocks(prev => prev.map(block => block.id === optimisticBlock.id ? deserializedBlock : block));
+      console.log('🔥 PSYCHOPATH: Updating state. Old count:', timeBlocks.length, 'New count:', timeBlocks.length);
       console.log('🔥 PSYCHOPATH: New block dates:', {
         startTime: deserializedBlock.startTime,
         endTime: deserializedBlock.endTime,
         startTimeType: typeof deserializedBlock.startTime,
         endTimeType: typeof deserializedBlock.endTime
       });
-      
-      setTimeBlocks(updatedBlocks);
       console.log('🔥 PSYCHOPATH: ✅ State updated successfully');
       
-      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
-      console.log('🔥 PSYCHOPATH: Force reloading data to ensure visibility...');
-      await loadData();
-      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after TimeBlock creation');
+      // 🚀 PERFORMANCE: Direct state update - NO MORE FORCE RELOAD!
+      console.log('🚀 PERFORMANCE: TimeBlock created, updating state directly');
       
       // 🎮 GAMING: Celebrate successful time block creation
       audioManager.taskCompleted();
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔥 DEV LOG: Add TimeBlock SUCCESS', {
+          adapter: db.getAdapterDebugInfo(),
+          useFirebase: db.isUsingFirebase,
+          userId: currentUser?.uid,
+          createdBlock: deserializedBlock
+        });
+      }
       
     } catch (error: any) {
       console.error('❌ PSYCHOPATH: CRITICAL ERROR in handleCreateTimeBlock:', error);
@@ -473,19 +696,18 @@ export default function HomePage() {
         message: error?.message,
         stack: error?.stack
       });
+      const tempId = blockToCreate ? blockToCreate.id : null;
+      setTimeBlocks(prev => tempId ? prev.filter(block => block.id !== tempId) : prev);
+      setTimeBlockError(error?.message || 'Unable to save the time block. Please try again or check your connection.');
       
-      // 🔥 FALLBACK: Add to state even if DB fails
-      const fallbackBlock: TimeBlock = {
-        ...blockData,
-        id: `fallback-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: blockData.userId || currentUser?.uid || 'user-1', // 🔥 FIX: Use real userId
-        domainId: blockData.domainId || 'domain-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as TimeBlock;
-      
-      console.log('🔥 PSYCHOPATH: Using fallback mode, adding to state:', fallbackBlock);
-      setTimeBlocks([...timeBlocks, fallbackBlock]);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔥 DEV LOG: Add TimeBlock FAILED', {
+          adapter: db.getAdapterDebugInfo(),
+          useFirebase: db.isUsingFirebase,
+          userId: currentUser?.uid,
+          error: error?.message
+        });
+      }
     }
     
     console.log('🔥 PSYCHOPATH: === ENDING handleCreateTimeBlock ===');
@@ -531,9 +753,8 @@ export default function HomePage() {
       console.log('🔥 PSYCHOPATH: Habits count before:', habits.length, 'after:', updatedHabits.length);
       setHabits(updatedHabits);
       
-      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
-      await loadData();
-      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after Habit creation');
+      // 🚀 PERFORMANCE: State already updated above - no reload needed
+      console.log('🚀 PERFORMANCE: Habit created and state updated efficiently');
       
       // 🎮 GAMING: New habit created sound
       audioManager.play('achievementUnlock');
@@ -600,6 +821,17 @@ export default function HomePage() {
 
   // OKR management functions
   const handleCreateGoal = async (goalData: Partial<Goal>) => {
+    // ⚠️ TEMP: Disabled Firebase switching - use IndexedDB only
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔥 DEV LOG: Add Goal clicked', {
+        adapter: db.getAdapterDebugInfo(),
+        useFirebase: db.isUsingFirebase,
+        userId: currentUser?.uid,
+        goalData
+      });
+    }
+    
     try {
       console.log('🔥 PSYCHOPATH: Creating goal:', goalData);
       
@@ -607,7 +839,7 @@ export default function HomePage() {
       const goalToCreate: Goal = {
         ...goalData,
         id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: currentUser?.uid || 'user-1', // 🔥 FORCE userId
+        userId: currentUser?.uid, // No fallback in Firebase mode
         domainId: goalData.domainId || 'domain-1',
         status: goalData.status || 'active',
         targetDate: goalData.targetDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days from now
@@ -639,15 +871,40 @@ export default function HomePage() {
         updatedAt: new Date(newGoal.updatedAt)
       };
       
-      const updatedGoals = [...goals, deserializedGoal];
-      console.log('🔥 PSYCHOPATH: Goals count before:', goals.length, 'after:', updatedGoals.length);
-      setGoals(updatedGoals);
+      // ⚠️ FIX: CRITICAL - Usa functional update per evitare state stale
+      setGoals(prevGoals => {
+        // Verifica che goal non esista già (evita duplicati)
+        if (prevGoals.find(g => g.id === deserializedGoal.id)) {
+          console.warn('⚠️ Goal already exists in state, updating instead');
+          return prevGoals.map(g => g.id === deserializedGoal.id ? deserializedGoal : g);
+        }
+        const updatedGoals = [...prevGoals, deserializedGoal];
+        console.log('🔥 PSYCHOPATH: Goals count before:', prevGoals.length, 'after:', updatedGoals.length);
+        return updatedGoals;
+      });
       
-      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
-      await loadData();
-      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after Goal creation');
-    } catch (error) {
+      // 🚀 PERFORMANCE: State already updated above - no reload needed
+      console.log('🚀 PERFORMANCE: Goal created and state updated efficiently');
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔥 DEV LOG: Add Goal SUCCESS', {
+          adapter: db.getAdapterDebugInfo(),
+          useFirebase: db.isUsingFirebase,
+          userId: currentUser?.uid,
+          createdGoal: deserializedGoal
+        });
+      }
+    } catch (error: any) {
       console.error('❌ PSYCHOPATH: Failed to create goal:', error);
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔥 DEV LOG: Add Goal FAILED', {
+          adapter: db.getAdapterDebugInfo(),
+          useFirebase: db.isUsingFirebase,
+          userId: currentUser?.uid,
+          error: error?.message
+        });
+      }
     }
   };
 
@@ -687,9 +944,8 @@ export default function HomePage() {
       const updatedKeyResults = [...keyResults, newKeyResult];
       setKeyResults(updatedKeyResults);
       
-      // 🔥 PSYCHOPATH EMERGENCY FIX: Force reload data to sync database layers
-      await loadData();
-      console.log('🔥 PSYCHOPATH: ✅ Data reloaded after Key Result creation');
+      // 🚀 PERFORMANCE: State already updated above - no reload needed
+      console.log('🚀 PERFORMANCE: KeyResult created and state updated efficiently');
     } catch (error) {
       console.error('❌ PSYCHOPATH: Failed to create key result:', error);
     }
@@ -721,8 +977,8 @@ export default function HomePage() {
           audioManager.taskCompleted(); // Progress made!
         }
         
-        // 🔥 PSYCHOPATH FIX: Force reload to sync all data and update Goal percentages
-        await loadData();
+        // 🚀 PERFORMANCE: Goal percentages will auto-update on next render
+        // No need to reload - React state management handles this efficiently
       }
     } catch (error) {
       console.error('❌ PSYCHOPATH: Failed to update key result:', error);
@@ -730,11 +986,40 @@ export default function HomePage() {
   };
 
   const handleCreateProject = async (projectData: Partial<Project>) => {
+    // ⚠️ TEMP: Disabled Firebase switching - use IndexedDB only
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔥 DEV LOG: Add Project clicked', {
+        adapter: db.getAdapterDebugInfo(),
+        useFirebase: db.isUsingFirebase,
+        userId: currentUser?.uid,
+        projectData
+      });
+    }
+    
     try {
       const newProject = await db.create<Project>('projects', projectData as Project);
       setProjects([...projects, newProject]);
-    } catch (error) {
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔥 DEV LOG: Add Project SUCCESS', {
+          adapter: db.getAdapterDebugInfo(),
+          useFirebase: db.isUsingFirebase,
+          userId: currentUser?.uid,
+          createdProject: newProject
+        });
+      }
+    } catch (error: any) {
       console.error('Failed to create project:', error);
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔥 DEV LOG: Add Project FAILED', {
+          adapter: db.getAdapterDebugInfo(),
+          useFirebase: db.isUsingFirebase,
+          userId: currentUser?.uid,
+          error: error?.message
+        });
+      }
     }
   };
 
@@ -994,18 +1279,31 @@ export default function HomePage() {
 
                   {/* Module Content */}
               {activeTab === 'planner' && (
-                <TimeBlockPlanner
-                  timeBlocks={timeBlocks}
-                  tasks={tasks}
-                  projects={projects}
-                  goals={goals}
-                  onCreateTimeBlock={handleCreateTimeBlock}
-                  onUpdateTimeBlock={handleUpdateTimeBlock}
-                  onDeleteTimeBlock={handleDeleteTimeBlock}
-                  selectedDate={selectedDate}
-                  onDateChange={setSelectedDate}
-                  currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
-                />
+                <>
+                  {timeBlockError && (
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {timeBlockError}
+                    </div>
+                  )}
+                  {process.env.NODE_ENV !== 'production' && (
+                    <div className="mb-3 text-xs text-gray-500">
+                      Adapter: {adapterInfo.adapterType} | Mode: {adapterInfo.useFirebase ? 'Firebase' : 'IndexedDB'} | Adapter user: {(adapterInfo as any).userId || 'n/a'} | Active user: {currentUser?.uid || 'anon'} | Store: timeBlocks
+                    </div>
+                  )}
+                  <TimeBlockPlanner
+                    timeBlocks={timeBlocks}
+                    tasks={tasks}
+                    projects={projects}
+                    goals={goals}
+                    onCreateTimeBlock={handleCreateTimeBlock}
+                    onUpdateTimeBlock={handleUpdateTimeBlock}
+                    onDeleteTimeBlock={handleDeleteTimeBlock}
+                    selectedDate={selectedDate}
+                    onDateChange={setSelectedDate}
+                    currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
+                    isReady={isReady}
+                  />
+                </>
               )}
 
               {activeTab === 'smart_scheduler' && (
@@ -1095,6 +1393,7 @@ export default function HomePage() {
                   onCreateTask={handleCreateTask}
                   onUpdateTask={handleUpdateTask}
                   currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
+                  isReady={isReady}
                 />
               )}
 

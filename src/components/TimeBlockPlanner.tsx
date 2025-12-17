@@ -15,6 +15,7 @@ interface TimeBlockPlannerProps {
   selectedDate: Date;
   onDateChange: (date: Date) => void;
   currentUserId?: string; // 🔥 CRITICAL FIX
+  isReady?: boolean; // Disable buttons until Firebase is ready
 }
 
 export default function TimeBlockPlanner({
@@ -27,7 +28,8 @@ export default function TimeBlockPlanner({
   onDeleteTimeBlock,
   selectedDate,
   onDateChange,
-  currentUserId // 🔥 CRITICAL FIX
+  currentUserId, // 🔥 CRITICAL FIX
+  isReady = false
 }: TimeBlockPlannerProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number; time: Date } | null>(null);
@@ -276,7 +278,12 @@ export default function TimeBlockPlanner({
         <div className="flex items-center space-x-2">
           <button
             onClick={() => handleQuickCreateBlock(new Date().getHours())}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+            disabled={!isReady}
+            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+              isReady 
+                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+            }`}
           >
             + Add Block
           </button>
@@ -329,8 +336,13 @@ export default function TimeBlockPlanner({
               </div>
               <button
                 onClick={() => handleQuickCreateBlock(hour)}
-                className="absolute right-4 top-1 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-500 text-white w-6 h-6 rounded-full text-xs flex items-center justify-center hover:bg-blue-600"
-                title={`Add block at ${formatTime(hour)}`}
+                disabled={!isReady}
+                className={`absolute right-4 top-1 transition-opacity w-6 h-6 rounded-full text-xs flex items-center justify-center ${
+                  isReady
+                    ? 'opacity-0 group-hover:opacity-100 bg-blue-500 text-white hover:bg-blue-600'
+                    : 'opacity-50 bg-gray-400 text-gray-200 cursor-not-allowed'
+                }`}
+                title={isReady ? `Add block at ${formatTime(hour)}` : 'Please log in first'}
               >
                 +
               </button>
@@ -350,7 +362,12 @@ export default function TimeBlockPlanner({
                 </p>
                 <button
                   onClick={() => handleQuickCreateBlock(new Date().getHours())}
-                  className="btn btn-primary px-6 py-3"
+                  disabled={!isReady}
+                  className={`px-6 py-3 ${
+                    isReady 
+                      ? 'btn btn-primary' 
+                      : 'bg-gray-400 text-gray-200 cursor-not-allowed px-6 py-3 rounded-lg'
+                  }`}
                 >
                   ✨ Add Block Now
                 </button>

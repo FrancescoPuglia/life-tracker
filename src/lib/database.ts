@@ -4,6 +4,49 @@ import {
   Insight, Achievement, KPI, DashboardState 
 } from '@/types';
 import { DatabaseAdapter, firebaseAdapter } from './firebaseAdapter';
+import { firebaseConfig } from '@/config/firebaseConfig';
+
+// No-op in-memory adapter for non-browser/server contexts
+class MemoryAdapter implements DatabaseAdapter {
+  private store: Record<string, any[]> = {};
+
+  async init(): Promise<void> { return; }
+  async create<T extends { id?: string }>(collection: string, data: T): Promise<T> {
+    if (!this.store[collection]) this.store[collection] = [];
+    if (!data.id) data.id = `${collection}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.store[collection].push(data);
+    return data;
+  }
+  async read<T>(collection: string, id: string): Promise<T | null> {
+    const items = this.store[collection] || [];
+    return (items.find((item) => item.id === id) as T) || null;
+  }
+  async update<T extends { id: string }>(collection: string, data: T): Promise<T> {
+    const items = this.store[collection] || [];
+    const idx = items.findIndex((item) => item.id === data.id);
+    if (idx >= 0) items[idx] = data;
+    return data;
+  }
+  async delete(collection: string, id: string): Promise<void> {
+    const items = this.store[collection] || [];
+    this.store[collection] = items.filter((item) => item.id !== id);
+  }
+  async getAll<T>(collection: string): Promise<T[]> {
+    return (this.store[collection] || []) as T[];
+  }
+  async getByIndex<T>(_collection: string, _field: string, _value: any): Promise<T[]> {
+    return [];
+  }
+  async query<T>(_collection: string, _constraints: any[]): Promise<T[]> {
+    return [];
+  }
+  subscribe<T>(_collection: string, _callback: (data: T[]) => void): () => void {
+    return () => {};
+  }
+  isOnline(): boolean { return false; }
+  async enableOffline(): Promise<void> { return; }
+  async enableOnline(): Promise<void> { return; }
+}
 
 // IndexedDB Adapter (existing implementation)
 class IndexedDBAdapter implements DatabaseAdapter {
@@ -342,8 +385,8 @@ class IndexedDBAdapter implements DatabaseAdapter {
         return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
       }, 0);
 
-      // Calculate actual hours
-      const actualMinutes = dayTimeBlocks.reduce((total, block) => {
+      // 🚀 ENHANCED: Calculate actual hours from Sessions + TimeBlocks
+      let actualMinutes = dayTimeBlocks.reduce((total, block) => {
         if (block.actualStartTime && block.actualEndTime) {
           const actualStart = new Date(block.actualStartTime);
           const actualEnd = new Date(block.actualEndTime);
@@ -351,6 +394,26 @@ class IndexedDBAdapter implements DatabaseAdapter {
         }
         return total;
       }, 0);
+      
+      // 🎯 INTELLIGENCE: Also include session data for more accurate tracking
+      const allSessions = await this.getAll<Session>('sessions');
+      const daySessions = allSessions.filter(session => 
+        session.userId === userId &&
+        new Date(session.startTime) >= dayStart &&
+        new Date(session.startTime) <= dayEnd &&
+        session.status === 'completed' &&
+        session.duration
+      );
+      
+      // Use session data if more accurate than timeblock data
+      const sessionMinutes = daySessions.reduce((total, session) => {
+        return total + (session.duration || 0) / 60; // Convert seconds to minutes
+      }, 0);
+      
+      // Use the higher value (more accurate tracking)
+      if (sessionMinutes > actualMinutes) {
+        actualMinutes = sessionMinutes;
+      }
 
       const plannedHours = plannedMinutes / 60;
       const actualHours = actualMinutes / 60;
@@ -612,35 +675,53 @@ class IndexedDBAdapter implements DatabaseAdapter {
 class LifeTrackerDB {
   private adapter: DatabaseAdapter;
   private useFirebase: boolean;
+  private lastUserId: string | null = null;
+  private _activeUserId: string | null = null; // ⚠️ FIX: Traccia userId attivo per garantire invarianti
 
   constructor() {
-    // Determine which adapter to use based on environment and configuration
-    // Only use Firebase if we're in the browser and have proper config AND Firebase is initialized
-    const hasFirebaseConfig = !!(typeof window !== 'undefined' && 
-                     process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
-                     process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key');
-    
-    console.log('🔥 PSYCHOPATH: Database constructor - adapter selection:', {
-      inBrowser: typeof window !== 'undefined',
-      hasApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-      apiKeyValue: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-      apiKeyNotDemo: process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== 'demo-api-key',
-      hasFirebaseConfig,
-      firebaseAdapterExists: !!firebaseAdapter
+    this.useFirebase = false;
+    this.adapter = new MemoryAdapter(); // Placeholder until client configures
+    // ⚠️ FIX: NON chiamare configureAdapter() qui - sarà chiamato lazy in init() o switchToFirebase()
+    // Questo evita race condition quando Firebase non è ancora inizializzato
+  }
+
+  private configureAdapter() {
+    const inBrowser = typeof window !== 'undefined';
+
+    console.log('🔥 PSYCHOPATH: Database adapter selection:', {
+      inBrowser,
+      hasApiKey: !!firebaseConfig?.apiKey,
+      firebaseAdapterExists: !!firebaseAdapter,
+      activeUserId: this._activeUserId
     });
-    
-    this.useFirebase = hasFirebaseConfig && firebaseAdapter !== null;
-    this.adapter = this.useFirebase ? firebaseAdapter! : new IndexedDBAdapter();
-    
-    console.log(`🔌 Database initialized with ${this.useFirebase ? 'Firebase' : 'IndexedDB'} adapter`);
+
+    if (!inBrowser) {
+      console.warn('⚠️ Database initialized in non-browser context; using in-memory adapter.');
+      this.useFirebase = false;
+      this.adapter = new MemoryAdapter();
+      return;
+    }
+
+    // ⚠️ FIX: CRITICAL - NON selezionare FirebaseAdapter di default
+    // Default: IndexedDBAdapter finché non abbiamo activeUserId e switchToFirebase() è chiamato
+    // Questo garantisce INVARIANTE A: se useFirebase === true allora userId è settato
+    this.useFirebase = false;
+    this.adapter = new IndexedDBAdapter();
+
+    console.log(`🔌 Database initialized with IndexedDB adapter (default)`);
     console.log('🔥 PSYCHOPATH: Final adapter info:', {
       useFirebase: this.useFirebase,
       adapterType: this.adapter?.constructor?.name,
-      adapterInstance: !!this.adapter
+      adapterInstance: !!this.adapter,
+      activeUserId: this._activeUserId
     });
   }
 
   async init(): Promise<void> {
+    // ⚠️ FIX: Se siamo in browser e adapter è MemoryAdapter, riconfigura lazy
+    if (typeof window !== 'undefined' && this.adapter instanceof MemoryAdapter) {
+      this.configureAdapter();
+    }
     await this.adapter.init();
   }
 
@@ -681,30 +762,77 @@ class LifeTrackerDB {
       userId,
       currentUseFirebase: this.useFirebase,
       firebaseAdapterExists: !!firebaseAdapter,
-      currentAdapterType: this.adapter.constructor.name
+      currentAdapterType: this.adapter.constructor.name,
+      activeUserId: this._activeUserId
     });
     
-    if (!this.useFirebase && firebaseAdapter) {
-      console.log('🔥 PSYCHOPATH: Switching from IndexedDB to Firebase');
-      this.adapter = firebaseAdapter;
-      this.useFirebase = true;
-      
-      if ('setUserId' in this.adapter) {
-        console.log('🔥 PSYCHOPATH: Calling setUserId on adapter');
-        (this.adapter as any).setUserId(userId);
-      }
-      
-      await this.adapter.init();
-      console.log('✅ Switched to Firebase adapter');
-    } else if (!firebaseAdapter) {
-      console.warn('⚠️ Cannot switch to Firebase - adapter not initialized');
-    } else {
-      console.log('🔥 PSYCHOPATH: Already using Firebase, just setting userId');
-      if ('setUserId' in this.adapter) {
-        console.log('🔥 PSYCHOPATH: Setting userId on existing Firebase adapter');
-        (this.adapter as any).setUserId(userId);
-      }
+    if (!firebaseAdapter) {
+      throw new Error('Cannot switch to Firebase - adapter not initialized');
     }
+    
+    // ⚠️ FIX: CRITICAL - Operazione atomica per garantire INVARIANTE A
+    // 1. Set activeUserId PRIMA di tutto
+    this._activeUserId = userId;
+    this.lastUserId = userId;
+    
+    // 2. Set adapter = firebaseAdapter
+    this.adapter = firebaseAdapter;
+    
+    // 3. Chiamare adapter.setUserId(userId) SINCRONO (deve essere fatto prima di init)
+    if ('setUserId' in this.adapter) {
+      console.log('🔥 PSYCHOPATH: Calling setUserId on adapter (ATOMIC)');
+      (this.adapter as any).setUserId(userId);
+    } else {
+      throw new Error('FirebaseAdapter does not have setUserId method');
+    }
+    
+    // 4. await adapter.init()
+    await this.adapter.init();
+    
+    // 5. Set useFirebase = true SOLO dopo che tutto è pronto
+    this.useFirebase = true;
+    
+    console.log('✅ Switched to Firebase adapter (ATOMIC)', {
+      userId,
+      useFirebase: this.useFirebase,
+      adapterType: this.adapter.constructor.name
+    });
+    
+    // ⚠️ FIX: INVARIANT CHECK - Verifica che tutto sia corretto
+    this.checkInvariants(userId);
+  }
+  
+  // ⚠️ FIX: INVARIANT CHECK - Verifica invarianti A e B
+  private checkInvariants(expectedUserId: string): void {
+    const adapterInfo = this.getAdapterDebugInfo();
+    const adapterUserId = adapterInfo.userId;
+    
+    console.log('🔍 INVARIANT CHECK', {
+      currentUserId: expectedUserId,
+      dbIsUsingFirebase: this.isUsingFirebase,
+      dbActiveUserId: this._activeUserId,
+      firebaseAdapterUserId: adapterUserId,
+      invariantA: this.isUsingFirebase ? (adapterUserId === expectedUserId) : 'N/A (not using Firebase)',
+      invariantB: this.isUsingFirebase ? (!!adapterUserId) : 'N/A (not using Firebase)'
+    });
+    
+    // INVARIANTE A: Se useFirebase === true allora adapter userId deve essere settato e uguale a currentUser.uid
+    if (this.isUsingFirebase && adapterUserId !== expectedUserId) {
+      const error = `INVARIANT A VIOLATED: useFirebase=${this.isUsingFirebase}, expectedUserId=${expectedUserId}, actualUserId=${adapterUserId}`;
+      console.error('❌', error);
+      throw new Error(error);
+    }
+    
+    // INVARIANTE B: Nessuna chiamata a db.create/getAll/update/delete deve raggiungere FirebaseAdapter senza userId
+    if (this.isUsingFirebase && !adapterUserId) {
+      const error = `INVARIANT B VIOLATED: useFirebase=${this.isUsingFirebase}, adapterUserId is null`;
+      console.error('❌', error);
+      throw new Error(error);
+    }
+  }
+  
+  get activeUserId(): string | null {
+    return this._activeUserId;
   }
 
   async switchToIndexedDB(): Promise<void> {
@@ -718,12 +846,23 @@ class LifeTrackerDB {
 
   // Delegate all methods to the current adapter
   async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
+    // ⚠️ FIX: INVARIANT CHECK B - Verifica che adapter sia pronto prima di operazioni
+    if (this.isUsingFirebase) {
+      const adapterInfo = this.getAdapterDebugInfo();
+      if (!adapterInfo.userId || adapterInfo.userId !== this._activeUserId) {
+        const error = `INVARIANT B VIOLATED: Cannot create - Firebase adapter userId not set or mismatch. activeUserId=${this._activeUserId}, adapterUserId=${adapterInfo.userId}`;
+        console.error('❌', error);
+        throw new Error(error);
+      }
+    }
+    
     console.log(`🔥 PSYCHOPATH: LifeTrackerDB.create() called for ${storeName}`, {
       useFirebase: this.useFirebase,
       adapterType: this.adapter?.constructor?.name,
       hasAdapter: !!this.adapter,
       dataId: data.id,
       dataUserId: (data as any).userId,
+      activeUserId: this._activeUserId,
       timestamp: new Date().toISOString()
     });
     
@@ -760,10 +899,21 @@ class LifeTrackerDB {
   }
 
   async getAll<T>(storeName: string): Promise<T[]> {
+    // ⚠️ FIX: INVARIANT CHECK B - Verifica che adapter sia pronto prima di operazioni
+    if (this.isUsingFirebase) {
+      const adapterInfo = this.getAdapterDebugInfo();
+      if (!adapterInfo.userId || adapterInfo.userId !== this._activeUserId) {
+        const error = `INVARIANT B VIOLATED: Cannot getAll - Firebase adapter userId not set or mismatch. activeUserId=${this._activeUserId}, adapterUserId=${adapterInfo.userId}`;
+        console.error('❌', error);
+        throw new Error(error);
+      }
+    }
+    
     console.log(`🔥 PSYCHOPATH: LifeTrackerDB.getAll() called for ${storeName}`, {
       useFirebase: this.useFirebase,
       adapterType: this.adapter?.constructor?.name,
       hasAdapter: !!this.adapter,
+      activeUserId: this._activeUserId,
       adapterMethods: this.adapter ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.adapter)) : [],
       timestamp: new Date().toISOString()
     });
@@ -961,8 +1111,8 @@ class LifeTrackerDB {
         return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
       }, 0);
 
-      // Calculate actual hours
-      const actualMinutes = dayTimeBlocks.reduce((total, block) => {
+      // 🚀 ENHANCED: Calculate actual hours from Sessions + TimeBlocks
+      let actualMinutes = dayTimeBlocks.reduce((total, block) => {
         if (block.actualStartTime && block.actualEndTime) {
           const actualStart = new Date(block.actualStartTime);
           const actualEnd = new Date(block.actualEndTime);
@@ -970,6 +1120,26 @@ class LifeTrackerDB {
         }
         return total;
       }, 0);
+      
+      // 🎯 INTELLIGENCE: Also include session data for more accurate tracking
+      const allSessions = await this.getAll<Session>('sessions');
+      const daySessions = allSessions.filter(session => 
+        session.userId === userId &&
+        new Date(session.startTime) >= dayStart &&
+        new Date(session.startTime) <= dayEnd &&
+        session.status === 'completed' &&
+        session.duration
+      );
+      
+      // Use session data if more accurate than timeblock data
+      const sessionMinutes = daySessions.reduce((total, session) => {
+        return total + (session.duration || 0) / 60; // Convert seconds to minutes
+      }, 0);
+      
+      // Use the higher value (more accurate tracking)
+      if (sessionMinutes > actualMinutes) {
+        actualMinutes = sessionMinutes;
+      }
 
       const plannedHours = plannedMinutes / 60;
       const actualHours = actualMinutes / 60;

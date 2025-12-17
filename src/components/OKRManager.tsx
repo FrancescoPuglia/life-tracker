@@ -19,6 +19,7 @@ interface OKRManagerProps {
   onCreateTask: (task: Partial<Task>) => void;
   onUpdateTask: (id: string, updates: Partial<Task>) => void;
   currentUserId?: string; // 🔥 CRITICAL FIX
+  isReady?: boolean; // Disable buttons until Firebase is ready
 }
 
 export default function OKRManager({
@@ -34,7 +35,8 @@ export default function OKRManager({
   onUpdateProject,
   onCreateTask,
   onUpdateTask,
-  currentUserId // 🔥 CRITICAL FIX
+  currentUserId, // 🔥 CRITICAL FIX
+  isReady = false
 }: OKRManagerProps) {
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<'goal' | 'keyResult' | 'project' | 'task' | null>(null);
@@ -766,149 +768,8 @@ export default function OKRManager({
     return createPortal(modalContent, document.body);
   };
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">OKR Management</h2>
-        <button
-          onClick={() => setShowCreateModal('goal')}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Goal</span>
-        </button>
-      </div>
-
-      {/* Goals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {goals.length === 0 ? (
-          <div className="col-span-full">
-            <div className="card card-body text-center py-12">
-              <div className="text-6xl mb-4">🎯</div>
-              <h3 className="heading-2 mb-4">No Goals Yet</h3>
-              <p className="text-body mb-6">
-                Create your first goal to start organizing your objectives and key results.
-              </p>
-              <button
-                onClick={() => setShowCreateModal('goal')}
-                className="btn btn-primary"
-              >
-                🚀 Create First Goal
-              </button>
-            </div>
-          </div>
-        ) : (
-          goals.map(goal => (
-            <GoalCard key={goal.id} goal={goal} />
-          ))
-        )}
-      </div>
-
-      {/* Selected Goal Details */}
-      {selectedGoal && (
-        <div className="bg-gray-50 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
-              <div className="mt-2 flex flex-wrap gap-3 text-sm">
-                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(selectedGoal.priority)}`}>
-                  {selectedGoal.priority} priority
-                </span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700">
-                  {selectedGoal.complexity} complexity
-                </span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
-                  {selectedGoal.category.replace('_', ' & ').replace('urgent', 'Urgent').replace('important', 'Important').replace('not', 'Not')}
-                </span>
-                {selectedGoal.timeAllocationTarget > 0 && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                    {selectedGoal.timeAllocationTarget}hrs/week target
-                  </span>
-                )}
-                {selectedGoal.estimatedHours && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700">
-                    ~{selectedGoal.estimatedHours}hrs total
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setShowCreateModal('keyResult')}
-                className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Key Result</span>
-              </button>
-              <button
-                onClick={() => setShowCreateModal('project')}
-                className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Project</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Key Results */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                <Target className="w-4 h-4 mr-2" />
-                Key Results
-              </h4>
-              <div className="space-y-3">
-                {getGoalKeyResults(selectedGoal.id).map(kr => (
-                  <KeyResultCard key={kr.id} keyResult={kr} />
-                ))}
-              </div>
-            </div>
-
-            {/* Projects */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                <TrendingUp className="w-4 h-4 mr-2" />
-                Projects
-              </h4>
-              <div className="space-y-3">
-                {getGoalProjects(selectedGoal.id).map(project => (
-                  <div key={project.id}>
-                    <ProjectCard project={project} />
-                    
-                    {/* Project Tasks */}
-                    <div className="mt-2 ml-4 space-y-2">
-                      {getProjectTasks(project.id).slice(0, 3).map(task => (
-                        <TaskCard key={task.id} task={task} />
-                      ))}
-                      {getProjectTasks(project.id).length > 3 && (
-                        <div className="text-xs text-gray-500 text-center py-1">
-                          +{getProjectTasks(project.id).length - 3} more tasks
-                        </div>
-                      )}
-                      <button
-                        onClick={() => setShowCreateModal('task')}
-                        className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
-                      >
-                        + Add Task
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modals */}
-      <CreateModal />
-      <KeyResultEditModal />
-    </div>
-  );
-
   // 🔥 PSICOPATICO MODAL: Key Result Editor
-  const KeyResultEditModal = () => {
+  function KeyResultEditModal() {
     if (!showKeyResultModal || !editingKeyResult) return null;
     if (typeof window === 'undefined') return null;
 
@@ -1095,5 +956,152 @@ export default function OKRManager({
     );
 
     return createPortal(modalContent, document.body);
-  };
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-gray-900">OKR Management</h2>
+        <button
+          onClick={() => setShowCreateModal('goal')}
+          disabled={!isReady}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-lg ${
+            isReady 
+              ? 'bg-blue-600 text-white hover:bg-blue-700' 
+              : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+          }`}
+        >
+          <Plus className="w-4 h-4" />
+          <span>New Goal</span>
+        </button>
+      </div>
+
+      {/* Goals Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {goals.length === 0 ? (
+          <div className="col-span-full">
+            <div className="card card-body text-center py-12">
+              <div className="text-6xl mb-4">🎯</div>
+              <h3 className="heading-2 mb-4">No Goals Yet</h3>
+              <p className="text-body mb-6">
+                Create your first goal to start organizing your objectives and key results.
+              </p>
+              <button
+                onClick={() => setShowCreateModal('goal')}
+                className="btn btn-primary"
+              >
+                🚀 Create First Goal
+              </button>
+            </div>
+          </div>
+        ) : (
+          goals.map(goal => (
+            <GoalCard key={goal.id} goal={goal} />
+          ))
+        )}
+      </div>
+
+      {/* Selected Goal Details */}
+      {selectedGoal && (
+        <div className="bg-gray-50 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
+              <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(selectedGoal.priority)}`}>
+                  {selectedGoal.priority} priority
+                </span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700">
+                  {selectedGoal.complexity} complexity
+                </span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
+                  {selectedGoal.category.replace('_', ' & ').replace('urgent', 'Urgent').replace('important', 'Important').replace('not', 'Not')}
+                </span>
+                {selectedGoal.timeAllocationTarget > 0 && (
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
+                    {selectedGoal.timeAllocationTarget}hrs/week target
+                  </span>
+                )}
+                {selectedGoal.estimatedHours && (
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700">
+                    ~{selectedGoal.estimatedHours}hrs total
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setShowCreateModal('keyResult')}
+                className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Key Result</span>
+              </button>
+              <button
+                onClick={() => setShowCreateModal('project')}
+                className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Project</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Key Results */}
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
+                <Target className="w-4 h-4 mr-2" />
+                Key Results
+              </h4>
+              <div className="space-y-3">
+                {getGoalKeyResults(selectedGoal.id).map(kr => (
+                  <KeyResultCard key={kr.id} keyResult={kr} />
+                ))}
+              </div>
+            </div>
+
+            {/* Projects */}
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
+                <TrendingUp className="w-4 h-4 mr-2" />
+                Projects
+              </h4>
+              <div className="space-y-3">
+                {getGoalProjects(selectedGoal.id).map(project => (
+                  <div key={project.id}>
+                    <ProjectCard project={project} />
+                    
+                    {/* Project Tasks */}
+                    <div className="mt-2 ml-4 space-y-2">
+                      {getProjectTasks(project.id).slice(0, 3).map(task => (
+                        <TaskCard key={task.id} task={task} />
+                      ))}
+                      {getProjectTasks(project.id).length > 3 && (
+                        <div className="text-xs text-gray-500 text-center py-1">
+                          +{getProjectTasks(project.id).length - 3} more tasks
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setShowCreateModal('task')}
+                        className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
+                      >
+                        + Add Task
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modals */}
+      <CreateModal />
+      <KeyResultEditModal />
+    </div>
+  );
+
 }
