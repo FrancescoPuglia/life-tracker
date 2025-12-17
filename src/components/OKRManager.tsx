@@ -769,7 +769,7 @@ export default function OKRManager({
   };
 
   // 🔥 PSICOPATICO MODAL: Key Result Editor
-  function KeyResultEditModal() {
+  const KeyResultEditModal = () => {
     if (!showKeyResultModal || !editingKeyResult) return null;
     if (typeof window === 'undefined') return null;
 
