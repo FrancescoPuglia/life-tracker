@@ -119,21 +119,21 @@ export default function OKRManager({
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'badge-success';
-      case 'active': return 'badge-primary';
-      case 'at_risk': return 'badge badge-error';
-      case 'paused': return 'badge-warning';
-      default: return 'badge';
+      case 'completed': return 'text-green-600 bg-green-50';
+      case 'active': return 'text-blue-600 bg-blue-50';
+      case 'at_risk': return 'text-red-600 bg-red-50';
+      case 'paused': return 'text-yellow-600 bg-yellow-50';
+      default: return 'text-gray-600 bg-gray-50';
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'critical': return 'badge border border-error-200 text-error-800 bg-error-100';
-      case 'high': return 'badge text-error-600 bg-error-50';
-      case 'medium': return 'badge-warning';
-      case 'low': return 'badge-success';
-      default: return 'badge';
+      case 'critical': return 'text-red-800 bg-red-100 border border-red-200';
+      case 'high': return 'text-red-600 bg-red-50';
+      case 'medium': return 'text-yellow-600 bg-yellow-50';
+      case 'low': return 'text-green-600 bg-green-50';
+      default: return 'text-gray-600 bg-gray-50';
     }
   };
 
@@ -226,24 +226,24 @@ export default function OKRManager({
     
     return (
       <div 
-        className={`card card-body cursor-pointer transition-all ${
-          selectedGoal?.id === goal.id ? 'border-primary-500 shadow-lg bg-primary-50' : 'hover:border-neutral-300'
+        className={`bg-white border-2 rounded-lg p-6 cursor-pointer transition-all ${
+          selectedGoal?.id === goal.id ? 'border-blue-500 shadow-md' : 'border-gray-200 hover:border-gray-300'
         }`}
         onClick={() => setSelectedGoal(selectedGoal?.id === goal.id ? null : goal)}
       >
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
-            <h3 className="heading-3">{goal.title}</h3>
-            <p className="text-body mb-3">{goal.description}</p>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{goal.title}</h3>
+            <p className="text-gray-600 text-sm mb-3">{goal.description}</p>
             
             <div className="flex items-center space-x-4 text-sm">
-              <span className={`badge ${getStatusColor(goal.status)}`}>
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(goal.status)}`}>
                 {goal.status}
               </span>
-              <span className={`badge ${getPriorityColor(goal.priority)}`}>
+              <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(goal.priority)}`}>
                 {goal.priority}
               </span>
-              <span className="text-small flex items-center">
+              <span className="text-gray-500 flex items-center">
                 <Calendar className="w-4 h-4 mr-1" />
                 {goal.targetDate.toLocaleDateString()}
               </span>
@@ -251,12 +251,12 @@ export default function OKRManager({
             
             <div className="mt-2 space-y-1">
               {goal.timeAllocationTarget > 0 && (
-                <div className="text-xs text-primary-600 flex items-center">
+                <div className="text-xs text-blue-600 flex items-center">
                   <Clock className="w-3 h-3 mr-1" />
                   Target: {goal.timeAllocationTarget}hrs/week
                 </div>
               )}
-              <div className="text-xs text-success-600 flex items-center">
+              <div className="text-xs text-green-600 flex items-center">
                 <Target className="w-3 h-3 mr-1" />
                 Planned: {calculateGoalPlannedHours(goal.id).toFixed(1)}hrs
               </div>
@@ -264,21 +264,21 @@ export default function OKRManager({
           </div>
           
           <div className="text-right">
-            <div className="kpi-value text-primary-600">{Math.round(progress)}%</div>
-            <div className="kpi-label">Progress</div>
+            <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
+            <div className="text-xs text-gray-500">Progress</div>
           </div>
         </div>
 
         {/* Progress Bar */}
-        <div className="w-full bg-neutral-200 rounded-full h-2 mb-4">
+        <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
           <div
-            className="bg-primary-500 h-2 rounded-full transition-all"
+            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
 
         {/* Key Results & Projects Summary */}
-        <div className="flex items-center justify-between text-small">
+        <div className="flex items-center justify-between text-sm text-gray-600">
           <span>{goalKeyResults.length} Key Results</span>
           <span>{goalProjects.length} Projects</span>
         </div>
@@ -341,44 +341,44 @@ export default function OKRManager({
 
   const KeyResultCard = ({ keyResult }: { keyResult: KeyResult }) => (
     <div 
-      className="card card-body cursor-pointer group hover:border-primary-300"
+      className="bg-gray-50 border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-all cursor-pointer group"
       onClick={() => handleUpdateKeyResultProgress(keyResult)}
     >
       <div className="flex items-start justify-between mb-2">
-        <h4 className="heading-3 group-hover:text-primary-600 transition-colors">{keyResult.title}</h4>
+        <h4 className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{keyResult.title}</h4>
         <div className="flex items-center space-x-2">
-          <span className={getStatusColor(keyResult.status)}>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(keyResult.status)}`}>
             {keyResult.status}
           </span>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity text-primary-500 text-xs font-bold">
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 text-xs font-bold">
             ✏️ EDIT
           </div>
         </div>
       </div>
       
-      <p className="text-body mb-3">{keyResult.description}</p>
+      <p className="text-sm text-gray-600 mb-3">{keyResult.description}</p>
       
       <div className="flex items-center justify-between mb-2">
-        <span className="text-small font-mono">
-          <span className="font-bold text-primary-600">{keyResult.currentValue}</span> / {keyResult.targetValue} {keyResult.unit}
+        <span className="text-sm text-gray-500 font-mono">
+          <span className="font-bold text-blue-600">{keyResult.currentValue}</span> / {keyResult.targetValue} {keyResult.unit}
         </span>
-        <span className="text-lg font-bold text-primary-600">
+        <span className="text-lg font-bold text-blue-600">
           {Math.round(keyResult.progress)}%
         </span>
       </div>
       
-      <div className="w-full bg-neutral-200 rounded-full h-2 mb-2">
+      <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
         <div
-          className={`h-2 rounded-full transition-all ${
-            keyResult.progress >= 100 ? 'bg-success-500' :
-            keyResult.progress >= 70 ? 'bg-primary-500' :
-            keyResult.progress >= 30 ? 'bg-warning-500' : 'bg-error-500'
+          className={`h-2 rounded-full transition-all duration-500 ${
+            keyResult.progress >= 100 ? 'bg-green-500' :
+            keyResult.progress >= 70 ? 'bg-blue-500' :
+            keyResult.progress >= 30 ? 'bg-yellow-500' : 'bg-red-500'
           }`}
           style={{ width: `${Math.min(100, keyResult.progress)}%` }}
         />
       </div>
       
-      <div className="text-xs text-center text-small group-hover:text-primary-600 transition-colors">
+      <div className="text-xs text-center text-gray-500 group-hover:text-blue-600 transition-colors">
         Click to update progress
       </div>
     </div>
@@ -390,14 +390,14 @@ export default function OKRManager({
     const progress = projectTasks.length > 0 ? (completedTasks / projectTasks.length) * 100 : 0;
     
     return (
-      <div className="card card-body">
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex items-start justify-between mb-2">
-          <h4 className="heading-3">{project.name}</h4>
+          <h4 className="font-medium text-gray-900">{project.name}</h4>
           <div className="flex items-center space-x-2">
-            <span className={getPriorityColor(project.priority)}>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
               {project.priority}
             </span>
-            <span className={getStatusColor(project.status)}>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
               {project.status}
             </span>
             {onDeleteProject && (
@@ -417,13 +417,13 @@ export default function OKRManager({
           </div>
         </div>
         
-        <p className="text-body mb-3">{project.description}</p>
+        <p className="text-sm text-gray-600 mb-3">{project.description}</p>
         
         <div className="flex items-center justify-between mb-2">
-          <span className="text-small">
+          <span className="text-sm text-gray-500">
             {completedTasks} / {projectTasks.length} tasks completed
           </span>
-          <span className="text-small font-medium text-success-600">
+          <span className="text-sm font-medium text-green-600">
             {Math.round(progress)}%
           </span>
         </div>

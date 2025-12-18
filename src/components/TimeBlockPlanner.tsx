@@ -2,18 +2,16 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { TimeBlock, Task, Project, Goal, BlockType } from '@/types';
+import { TimeBlock, Task, Project, Goal } from '@/types';
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
-  blockTypes: BlockType[];
   tasks: Task[];
   projects: Project[];
   goals: Goal[];
   onCreateTimeBlock: (block: Partial<TimeBlock>) => void;
   onUpdateTimeBlock: (id: string, updates: Partial<TimeBlock>) => void;
   onDeleteTimeBlock: (id: string) => void;
-  onCreateBlockType: (blockType: Partial<BlockType>) => Promise<BlockType>;
   selectedDate: Date;
   onDateChange: (date: Date) => void;
   currentUserId?: string; // 🔥 CRITICAL FIX
@@ -22,14 +20,12 @@ interface TimeBlockPlannerProps {
 
 export default function TimeBlockPlanner({
   timeBlocks,
-  blockTypes,
   tasks,
   projects,
   goals,
   onCreateTimeBlock,
   onUpdateTimeBlock,
   onDeleteTimeBlock,
-  onCreateBlockType,
   selectedDate,
   onDateChange,
   currentUserId, // 🔥 CRITICAL FIX
@@ -41,8 +37,6 @@ export default function TimeBlockPlanner({
   const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newBlockData, setNewBlockData] = useState<Partial<TimeBlock>>({});
-  const [showCreateTypeModal, setShowCreateTypeModal] = useState(false);
-  const [newTypeData, setNewTypeData] = useState<Partial<BlockType>>({});
   const plannerRef = useRef<HTMLDivElement>(null);
 
   const HOUR_HEIGHT = 80;
@@ -198,15 +192,8 @@ export default function TimeBlockPlanner({
     }
   };
 
-  // Get default color for a type (check custom blockTypes first, then fallback)
+  // Get default color for a type
   const getDefaultColorForType = (type: string): string => {
-    // First try to find in custom blockTypes by name
-    const customBlockType = blockTypes.find(bt => bt.name.toLowerCase() === type.toLowerCase());
-    if (customBlockType) {
-      return customBlockType.color;
-    }
-    
-    // Fallback to hardcoded colors for backward compatibility
     switch (type) {
       case 'work': return '#2563eb'; // blue-600
       case 'break': return '#16a34a'; // green-600
@@ -224,20 +211,11 @@ export default function TimeBlockPlanner({
   const getBlockColor = (block: TimeBlock) => {
     const baseClasses = 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2';
     
-    // Priority 1: Use custom color if available
+    // Use custom color if available, otherwise use default type color
     if (block.color) {
       return `${baseClasses} text-white border-opacity-60`;
     }
     
-    // Priority 2: Use blockType color if blockTypeId is set
-    if (block.blockTypeId) {
-      const blockType = blockTypes.find(bt => bt.id === block.blockTypeId);
-      if (blockType) {
-        return `${baseClasses} text-white border-opacity-60`;
-      }
-    }
-    
-    // Priority 3: Fallback to hardcoded type colors (backward compatibility)
     switch (block.type) {
       case 'work': 
         return `${baseClasses} bg-blue-600 text-white border-blue-400`;
@@ -261,18 +239,8 @@ export default function TimeBlockPlanner({
         return `${baseClasses} bg-blue-600 text-white border-blue-400`;
     }
   };
-  
-  // Get icon for a block (prioritize blockType icon)
-  const getBlockIcon = (block: TimeBlock): string => {
-    // Priority 1: Use blockType icon if available
-    if (block.blockTypeId) {
-      const blockType = blockTypes.find(bt => bt.id === block.blockTypeId);
-      if (blockType?.icon) {
-        return blockType.icon;
-      }
-    }
-    
-    // Priority 2: Fallback to type-based icons
+
+  const getBlockIcon = (block: TimeBlock) => {
     switch (block.type) {
       case 'work': return '💼';
       case 'break': return '☕';
@@ -575,34 +543,20 @@ export default function TimeBlockPlanner({
               </div>
               
               <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center justify-between">
-                  <span>🏷️ Type</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateTypeModal(true)}
-                    className="text-xs text-blue-600 hover:text-blue-800 underline"
-                  >
-                    + Create new type
-                  </button>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  🏷️ Type
                 </label>
                 <select
-                  value={newBlockData.blockTypeId || ''}
-                  onChange={(e) => {
-                    setNewBlockData({ 
-                      ...newBlockData, 
-                      blockTypeId: e.target.value || undefined
-                      // Remove type assignment to avoid TypeScript error
-                    });
-                  }}
+                  value={newBlockData.type || 'work'}
+                  onChange={(e) => setNewBlockData({ ...newBlockData, type: e.target.value as any })}
                   className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
                   style={{ color: '#111827', backgroundColor: '#ffffff' }}
                 >
-                  <option value="">Select a type...</option>
-                  {blockTypes.map(blockType => (
-                    <option key={blockType.id} value={blockType.id}>
-                      {blockType.icon} {blockType.name}
-                    </option>
-                  ))}
+                  <option value="work">💼 Work - Blue Power</option>
+                  <option value="focus">🎯 Deep Focus - Purple Excellence</option>
+                  <option value="meeting">🤝 Meeting - Golden Hour</option>
+                  <option value="break">☕ Break - Emerald Zen</option>
+                  <option value="admin">⚙️ Admin - Steel Gray</option>
                 </select>
                 
                 {/* Custom Color Picker */}
@@ -613,23 +567,13 @@ export default function TimeBlockPlanner({
                   <div className="flex items-center space-x-3">
                     <input
                       type="color"
-                      value={newBlockData.color || (
-                        newBlockData.blockTypeId 
-                          ? blockTypes.find(bt => bt.id === newBlockData.blockTypeId)?.color || '#3b82f6'
-                          : getDefaultColorForType(newBlockData.type || 'work')
-                      )}
+                      value={newBlockData.color || getDefaultColorForType(newBlockData.type || 'work')}
                       onChange={(e) => setNewBlockData({ ...newBlockData, color: e.target.value })}
                       className="w-16 h-12 rounded-lg border-2 border-gray-300 cursor-pointer"
                       title="Choose custom color"
                     />
                     <div className="flex-1">
-                      <div className="text-xs text-gray-600 mb-1">
-                        Selected: {newBlockData.color || (
-                          newBlockData.blockTypeId 
-                            ? blockTypes.find(bt => bt.id === newBlockData.blockTypeId)?.color || '#3b82f6'
-                            : getDefaultColorForType(newBlockData.type || 'work')
-                        )}
-                      </div>
+                      <div className="text-xs text-gray-600 mb-1">Selected: {newBlockData.color || getDefaultColorForType(newBlockData.type || 'work')}</div>
                       <button
                         type="button"
                         onClick={() => setNewBlockData({ ...newBlockData, color: undefined })}
@@ -644,24 +588,13 @@ export default function TimeBlockPlanner({
                 {/* Color Preview */}
                 <div className="mt-3">
                   <div 
-                    className="h-12 rounded-lg flex items-center justify-center text-sm font-bold text-white border-2 transition-all duration-200"
-                    style={{
-                      backgroundColor: newBlockData.color || (
-                        newBlockData.blockTypeId 
-                          ? blockTypes.find(bt => bt.id === newBlockData.blockTypeId)?.color || '#3b82f6'
-                          : getDefaultColorForType(newBlockData.type || 'work')
-                      ),
-                      borderColor: (newBlockData.color || (
-                        newBlockData.blockTypeId 
-                          ? blockTypes.find(bt => bt.id === newBlockData.blockTypeId)?.color || '#3b82f6'
-                          : getDefaultColorForType(newBlockData.type || 'work')
-                      )) + '80' // Add transparency to border
-                    }}
+                    className={`h-12 rounded-lg flex items-center justify-center text-sm font-bold text-white border-2 transition-all duration-200 ${!newBlockData.color ? getBlockColor({ type: newBlockData.type || 'work' } as TimeBlock) : ''}`}
+                    style={newBlockData.color ? {
+                      backgroundColor: newBlockData.color,
+                      borderColor: newBlockData.color + '80' // Add transparency to border
+                    } : {}}
                   >
-                    {newBlockData.blockTypeId 
-                      ? blockTypes.find(bt => bt.id === newBlockData.blockTypeId)?.icon || '📋'
-                      : getBlockIcon({ type: newBlockData.type || 'work' } as TimeBlock)
-                    } 
+                    {getBlockIcon({ type: newBlockData.type || 'work' } as TimeBlock)} 
                     {newBlockData.color ? 'Custom Color Preview' : 'Type Color Preview'}
                   </div>
                 </div>
@@ -883,162 +816,6 @@ export default function TimeBlockPlanner({
                   type="button"
                 >
                   ✨ Create Block
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-        , document.body
-      )}
-      
-      {/* Create New Block Type Modal */}
-      {showCreateTypeModal && typeof window !== 'undefined' && createPortal(
-        <div 
-          className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
-          style={{ 
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setShowCreateTypeModal(false);
-              setNewTypeData({});
-            }
-          }}
-        >
-          <div 
-            className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
-            style={{
-              transform: 'translateZ(0)',
-              position: 'relative',
-              zIndex: 10000
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-900">🏷️ Create New Block Type</h3>
-                <button
-                  onClick={() => {
-                    setShowCreateTypeModal(false);
-                    setNewTypeData({});
-                  }}
-                  className="text-gray-400 hover:text-gray-600 text-xl leading-none"
-                  type="button"
-                >
-                  ×
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    🎯 Name
-                  </label>
-                  <input
-                    type="text"
-                    value={newTypeData.name || ''}
-                    onChange={(e) => setNewTypeData({ ...newTypeData, name: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                    placeholder="e.g., Scacchi, Sport, Studio"
-                    autoFocus
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    🎨 Color
-                  </label>
-                  <div className="flex items-center space-x-3">
-                    <input
-                      type="color"
-                      value={newTypeData.color || '#3b82f6'}
-                      onChange={(e) => setNewTypeData({ ...newTypeData, color: e.target.value })}
-                      className="w-16 h-12 rounded-lg border-2 border-gray-300 cursor-pointer"
-                    />
-                    <span className="text-sm text-gray-600">{newTypeData.color || '#3b82f6'}</span>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    😎 Icon (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={newTypeData.icon || ''}
-                    onChange={(e) => setNewTypeData({ ...newTypeData, icon: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                    placeholder="e.g., ♠️, ⚽, 📚"
-                    maxLength={2}
-                  />
-                </div>
-                
-                {/* Preview */}
-                {newTypeData.name && (
-                  <div className="mt-4">
-                    <label className="block text-sm font-semibold text-gray-800 mb-2">
-                      👀 Preview
-                    </label>
-                    <div 
-                      className="h-12 rounded-lg flex items-center justify-center text-sm font-bold text-white border-2 transition-all duration-200"
-                      style={{
-                        backgroundColor: newTypeData.color || '#3b82f6',
-                        borderColor: (newTypeData.color || '#3b82f6') + '80'
-                      }}
-                    >
-                      {newTypeData.icon} {newTypeData.name}
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
-                <button
-                  onClick={() => {
-                    setShowCreateTypeModal(false);
-                    setNewTypeData({});
-                  }}
-                  className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium"
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!newTypeData.name?.trim()) {
-                      alert('Please enter a name for the block type');
-                      return;
-                    }
-                    
-                    try {
-                      const createdBlockType = await onCreateBlockType({
-                        ...newTypeData,
-                        name: newTypeData.name.trim(),
-                        color: newTypeData.color || '#3b82f6',
-                        icon: newTypeData.icon || '📋'
-                      });
-                      
-                      // Select the newly created block type
-                      setNewBlockData({ 
-                        ...newBlockData, 
-                        blockTypeId: createdBlockType.id
-                        // Remove type assignment to avoid TypeScript error
-                      });
-                      
-                      setShowCreateTypeModal(false);
-                      setNewTypeData({});
-                    } catch (error) {
-                      console.error('Failed to create block type:', error);
-                      alert('Failed to create block type. Please try again.');
-                    }
-                  }}
-                  disabled={!newTypeData.name?.trim()}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  type="button"
-                >
-                  ✨ Create Type
                 </button>
               </div>
             </div>

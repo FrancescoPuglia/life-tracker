@@ -1,5 +1,5 @@
 import { 
-  User, Domain, Goal, KeyResult, Project, Task, TimeBlock, BlockType, Session, 
+  User, Domain, Goal, KeyResult, Project, Task, TimeBlock, Session, 
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
   Insight, Achievement, KPI, DashboardState 
 } from '@/types';
@@ -74,7 +74,7 @@ class IndexedDBAdapter implements DatabaseAdapter {
         // Create object stores
         const stores = [
           'users', 'domains', 'goals', 'keyResults', 'projects', 'tasks',
-          'timeBlocks', 'blockTypes', 'sessions', 'habits', 'habitLogs', 'metrics',
+          'timeBlocks', 'sessions', 'habits', 'habitLogs', 'metrics',
           'calendarEvents', 'deadlines', 'journalEntries', 'insights', 'achievements'
         ];
 
@@ -93,10 +93,6 @@ class IndexedDBAdapter implements DatabaseAdapter {
                 store.createIndex('userId', 'userId');
                 store.createIndex('startTime', 'startTime');
                 store.createIndex('status', 'status');
-                break;
-              case 'blockTypes':
-                store.createIndex('userId', 'userId');
-                store.createIndex('name', 'name');
                 break;
               case 'tasks':
                 store.createIndex('userId', 'userId');
