@@ -113,13 +113,18 @@ export default function TimeBlockPlanner({
     const startTime = dragStart.time;
     
     if (Math.abs(endTime.getTime() - startTime.getTime()) > 15 * 60 * 1000) { // Minimum 15 minutes
+      if (!currentUserId) {
+        console.error('Cannot create time block: userId not available');
+        return;
+      }
+
       const newBlock: Partial<TimeBlock> = {
         startTime: startTime < endTime ? startTime : endTime,
         endTime: startTime < endTime ? endTime : startTime,
         title: 'New Time Block',
         status: 'planned',
         type: 'work',
-        userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+        userId: currentUserId,
         domainId: 'domain-1', // This should be selectable
       };
       
@@ -133,6 +138,11 @@ export default function TimeBlockPlanner({
   };
 
   const handleQuickCreateBlock = (hour: number) => {
+    if (!currentUserId) {
+      console.error('Cannot create time block: userId not available');
+      return;
+    }
+
     console.log('🔥 PSYCHOPATH: QuickCreateBlock called with:', {
       hour,
       selectedDate: selectedDate.toDateString(),
@@ -158,7 +168,7 @@ export default function TimeBlockPlanner({
       title: 'New Time Block',
       status: 'planned',
       type: 'work',
-      userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+      userId: currentUserId,
       domainId: 'domain-1',
     };
     
@@ -182,8 +192,29 @@ export default function TimeBlockPlanner({
     }
   };
 
+  // Get default color for a type
+  const getDefaultColorForType = (type: string): string => {
+    switch (type) {
+      case 'work': return '#2563eb'; // blue-600
+      case 'break': return '#16a34a'; // green-600
+      case 'focus': return '#9333ea'; // purple-600
+      case 'deep': return '#4338ca'; // indigo-700
+      case 'shallow': return '#0891b2'; // cyan-600
+      case 'meeting': return '#ea580c'; // orange-600
+      case 'admin': return '#4b5563'; // gray-600
+      case 'buffer': return '#ca8a04'; // yellow-600
+      case 'travel': return '#0d9488'; // teal-600
+      default: return '#3b82f6'; // blue-500
+    }
+  };
+  
   const getBlockColor = (block: TimeBlock) => {
     const baseClasses = 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2';
+    
+    // Use custom color if available, otherwise use default type color
+    if (block.color) {
+      return `${baseClasses} text-white border-opacity-60`;
+    }
     
     switch (block.type) {
       case 'work': 
@@ -369,27 +400,31 @@ export default function TimeBlockPlanner({
                       : 'bg-gray-400 text-gray-200 cursor-not-allowed px-6 py-3 rounded-lg'
                   }`}
                 >
-                  ✨ Add Block Now
+                  Add Block
                 </button>
               </div>
             </div>
           )}
-          
-          {filteredBlocks.map((block, renderIndex) => {
-            return (
+
+          {/* Render existing blocks */}
+          {filteredBlocks.map((block) => (
             <div
               key={block.id}
-              className={`absolute left-16 right-4 rounded-xl p-3 cursor-pointer ${getBlockColor(block)} z-10`}
+              className={`absolute left-16 right-4 ${block.color ? 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2 text-white' : getBlockColor(block)} border-2 border-white rounded-xl shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 z-10`}
               style={{
                 top: `${getPositionFromTime(block.startTime)}px`,
                 height: `${getDurationHeight(block.startTime, block.endTime)}px`,
-                minHeight: '60px'
+                minHeight: '60px',
+                // Use custom color if available
+                ...(block.color ? {
+                  backgroundColor: block.color,
+                  borderColor: block.color + '80' // Add transparency to border
+                } : {})
               }}
               onClick={() => setSelectedBlock(block)}
             >
-              <div className="flex items-start justify-between h-full">
+              <div className="flex items-start justify-between h-full p-3">
                 <div className="flex-1 min-w-0">
-                  {/* 🔥 PSYCHOPATH FIX: Title più grande e prominente */}
                   <div className="text-lg font-bold truncate mb-2 drop-shadow-sm">
                     {getBlockIcon(block)} {block.title}
                   </div>
@@ -408,8 +443,7 @@ export default function TimeBlockPlanner({
                 <div className="text-xl drop-shadow-sm">{getStatusIndicator(block)}</div>
               </div>
             </div>
-            );
-          })}
+          ))}
 
           {/* Drag Preview */}
           {dragPreview && (
@@ -525,10 +559,43 @@ export default function TimeBlockPlanner({
                   <option value="admin">⚙️ Admin - Steel Gray</option>
                 </select>
                 
+                {/* Custom Color Picker */}
+                <div className="mt-3">
+                  <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                    🎨 Custom Color (Optional)
+                  </label>
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="color"
+                      value={newBlockData.color || getDefaultColorForType(newBlockData.type || 'work')}
+                      onChange={(e) => setNewBlockData({ ...newBlockData, color: e.target.value })}
+                      className="w-16 h-12 rounded-lg border-2 border-gray-300 cursor-pointer"
+                      title="Choose custom color"
+                    />
+                    <div className="flex-1">
+                      <div className="text-xs text-gray-600 mb-1">Selected: {newBlockData.color || getDefaultColorForType(newBlockData.type || 'work')}</div>
+                      <button
+                        type="button"
+                        onClick={() => setNewBlockData({ ...newBlockData, color: undefined })}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline"
+                      >
+                        🗑️ Reset to type default
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                
                 {/* Color Preview */}
                 <div className="mt-3">
-                  <div className={`h-8 rounded-lg flex items-center justify-center text-sm font-bold ${getBlockColor({ type: newBlockData.type || 'work' } as TimeBlock)}`}>
-                    {getBlockIcon({ type: newBlockData.type || 'work' } as TimeBlock)} Preview Color
+                  <div 
+                    className={`h-12 rounded-lg flex items-center justify-center text-sm font-bold text-white border-2 transition-all duration-200 ${!newBlockData.color ? getBlockColor({ type: newBlockData.type || 'work' } as TimeBlock) : ''}`}
+                    style={newBlockData.color ? {
+                      backgroundColor: newBlockData.color,
+                      borderColor: newBlockData.color + '80' // Add transparency to border
+                    } : {}}
+                  >
+                    {getBlockIcon({ type: newBlockData.type || 'work' } as TimeBlock)} 
+                    {newBlockData.color ? 'Custom Color Preview' : 'Type Color Preview'}
                   </div>
                 </div>
               </div>
@@ -630,6 +697,62 @@ export default function TimeBlockPlanner({
                     </div>
                   </div>
                 )}
+              </div>
+              
+              {/* PROJECT SELECTION */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  📁 Connect to Project
+                </label>
+                <select
+                  value={newBlockData.projectId || ''}
+                  onChange={(e) => {
+                    const project = projects.find(p => p.id === e.target.value);
+                    setNewBlockData({
+                      ...newBlockData,
+                      projectId: e.target.value || undefined,
+                      goalId: project?.goalId || newBlockData.goalId
+                    });
+                  }}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                >
+                  <option value="">🆕 No project selected</option>
+                  {projects.filter(p => p.status === 'active').map(project => (
+                    <option key={project.id} value={project.id}>
+                      {project.name} ({project.priority})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* TASK SELECTION */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-2 flex items-center">
+                  ✅ Connect to Task
+                </label>
+                <select
+                  value={newBlockData.taskId || ''}
+                  onChange={(e) => {
+                    const task = tasks.find(t => t.id === e.target.value);
+                    setNewBlockData({
+                      ...newBlockData,
+                      taskId: e.target.value || undefined,
+                      projectId: task?.projectId || newBlockData.projectId,
+                      goalId: task?.goalId || newBlockData.goalId
+                    });
+                  }}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
+                >
+                  <option value="">🆕 No task selected</option>
+                  {tasks
+                    .filter(t => !newBlockData.projectId || t.projectId === newBlockData.projectId)
+                    .filter(t => t.status !== 'completed' && t.status !== 'cancelled')
+                    .map(task => (
+                    <option key={task.id} value={task.id}>
+                      {task.title} ({task.estimatedMinutes}min, {task.priority})
+                    </option>
+                  ))}
+                </select>
               </div>
               
               <div className="grid grid-cols-2 gap-4">

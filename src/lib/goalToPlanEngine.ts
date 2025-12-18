@@ -15,6 +15,7 @@ interface DecompositionStrategy {
 
 export class SmartGoalToPlanEngine implements GoalToPlanEngine {
   private strategies: DecompositionStrategy[];
+  private currentGoal: Goal | null = null;
 
   constructor() {
     this.strategies = [
@@ -29,6 +30,7 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
   // 🎯 MAIN DECOMPOSITION METHOD
   async decompose(goal: Goal, keyResults: KeyResult[]): Promise<GoalDecomposition> {
     console.log('🎯 GOAL DECOMPOSITION: Starting for goal:', goal.title);
+    this.currentGoal = goal;
 
     try {
       // Generate milestones using best strategy
@@ -440,6 +442,9 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
   }
 
   private generateTasksForMilestone(milestone: Milestone): Task[] {
+    if (!this.currentGoal) {
+      throw new Error('No current goal set for task generation');
+    }
     const tasks: Task[] = [];
     const taskTemplates = this.getTaskTemplatesForMilestone(milestone);
     
@@ -453,7 +458,7 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
         estimatedDuration: template.estimatedDuration,
         priority: template.priority,
         status: 'pending',
-        userId: 'user-1',
+        userId: this.currentGoal.userId,
         goalId: milestone.goalId,
         domainId: 'default',
         estimatedMinutes: template.estimatedDuration || 60,
@@ -528,7 +533,7 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
       endTime,
       type: 'work',
       status: 'planned',
-      userId: 'user-1',
+      userId: goal.userId,
       domainId: 'domain-1',
       taskIds: [task.id],
       goalIds: [goal.id],

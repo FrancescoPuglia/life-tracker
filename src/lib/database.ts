@@ -269,25 +269,7 @@ class IndexedDBAdapter implements DatabaseAdapter {
     return this.getByIndex<Session>('sessions', 'status', 'active');
   }
 
-  async getTodayTimeBlocks(userId: string): Promise<TimeBlock[]> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const store = await this.getStore('timeBlocks');
-    const index = store.index('startTime');
-    
-    return new Promise((resolve, reject) => {
-      const range = IDBKeyRange.bound(today, tomorrow, false, true);
-      const request = index.getAll(range);
-      request.onsuccess = () => {
-        const blocks = request.result.filter((block: TimeBlock) => block.userId === userId);
-        resolve(blocks);
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
+  // REMOVED: getTodayTimeBlocks - now handled by LifeTrackerDB class
 
   async getActiveHabits(userId: string): Promise<Habit[]> {
     const habits = await this.getByIndex<Habit>('habits', 'userId', userId);
@@ -320,7 +302,12 @@ class IndexedDBAdapter implements DatabaseAdapter {
     );
 
     // Get today's time blocks
-    const timeBlocks = await this.getTodayTimeBlocks(userId);
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    const timeBlocks = allTimeBlocks.filter(block => 
+      block.userId === userId && 
+      new Date(block.startTime) >= today && 
+      new Date(block.startTime) < tomorrow
+    );
     
     // Calculate focus minutes
     const focusMinutes = todaySessions
@@ -992,27 +979,27 @@ class LifeTrackerDB {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    if (this.useFirebase) {
-      // Use Firebase query
-      return (this.adapter as any).query('timeBlocks', [
-        { type: 'where', field: 'startTime', operator: '>=', value: today },
-        { type: 'where', field: 'startTime', operator: '<', value: tomorrow }
-      ]);
-    } else {
-      // Fallback to IndexedDB implementation
-      const store = await (this.adapter as any).getStore('timeBlocks');
-      const index = store.index('startTime');
+    // Adapter-agnostic fallback: get all timeBlocks and filter in JS
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    
+    // Filter for today's blocks and matching userId
+    const todayBlocks = allTimeBlocks.filter(block => {
+      if (block.userId !== userId) return false;
       
-      return new Promise((resolve, reject) => {
-        const range = IDBKeyRange.bound(today, tomorrow, false, true);
-        const request = index.getAll(range);
-        request.onsuccess = () => {
-          const blocks = request.result.filter((block: TimeBlock) => block.userId === userId);
-          resolve(blocks);
-        };
-        request.onerror = () => reject(request.error);
-      });
-    }
+      const startTime = this.toDateSafe(block.startTime);
+      if (!startTime) return false;
+      return startTime >= today && startTime < tomorrow;
+    });
+
+    return todayBlocks;
+  }
+
+  // Helper to safely convert various date formats to Date
+  private toDateSafe(value: any): Date | undefined {
+    if (value instanceof Date) return value;
+    if (value && typeof value.toDate === 'function') return value.toDate();
+    if (typeof value === 'string' || typeof value === 'number') return new Date(value);
+    return undefined;
   }
 
   async getActiveHabits(userId: string): Promise<Habit[]> {
@@ -1046,7 +1033,12 @@ class LifeTrackerDB {
     );
 
     // Get today's time blocks
-    const timeBlocks = await this.getTodayTimeBlocks(userId);
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    const timeBlocks = allTimeBlocks.filter(block => 
+      block.userId === userId && 
+      new Date(block.startTime) >= today && 
+      new Date(block.startTime) < tomorrow
+    );
     
     // Calculate focus minutes
     const focusMinutes = todaySessions

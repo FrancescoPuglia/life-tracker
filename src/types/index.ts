@@ -74,6 +74,8 @@ export interface Project {
   status: 'active' | 'completed' | 'paused';
   priority: 'low' | 'medium' | 'high';
   dueDate?: Date;
+  weeklyHoursTarget?: number;
+  totalHoursTarget?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -108,6 +110,7 @@ export interface TimeBlock {
   taskId?: string;
   taskIds?: string[]; // For AI multi-task support
   projectId?: string;
+  goalId?: string;
   domainId: string;
   userId: string;
   startTime: Date;
@@ -116,6 +119,7 @@ export interface TimeBlock {
   actualEndTime?: Date;
   status: 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'overrun';
   type: 'work' | 'break' | 'buffer' | 'travel' | 'meeting' | 'focus' | 'admin' | 'deep' | 'shallow';
+  color?: string; // Custom hex color override (e.g., #3b82f6)
   location?: string;
   notes?: string;
   createdAt: Date;

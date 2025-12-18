@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Session, TimeBlock, KPI, Goal, KeyResult, Project, Task, 
   Habit, HabitLog, AnalyticsData 
@@ -30,7 +30,7 @@ import { audioManager } from '@/lib/audioManager';
 export default function HomePage() {
   const auth = useAuth();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [currentTimeBlock, setCurrentTimeBlock] = useState<TimeBlock | null>(null);
@@ -73,70 +73,236 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
   const adapterInfo = db.getAdapterDebugInfo();
-  const [dbReadyForUser, setDbReadyForUser] = useState(false); // ⚠️ FIX: Flag per garantire che DB sia pronto per l'utente
-  const isReady = true; // ⚠️ TEMP: Disabled Firebase switching for testing - use IndexedDB only
   const lastLoadedUserId = useRef<string | null>(null);
   const hasInitialized = useRef(false);
 
   const sessionManager = SessionManager.getInstance();
 
-  // Initialize auth state listener
+  // 🔥 FIX: Effective userId for both logged and guest users
+  const effectiveUserId = useMemo(() => {
+    if (currentUser?.uid) return currentUser.uid;
+    // For guest users, use a persistent ID from localStorage
+    if (typeof window !== 'undefined') {
+      let guestId = localStorage.getItem('lifeTracker_guestId');
+      if (!guestId) {
+        guestId = `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('lifeTracker_guestId', guestId);
+      }
+      return guestId;
+    }
+    return 'guest-temp'; // Fallback for SSR
+  }, [currentUser?.uid]);
+
+  // Initialize auth state listener - DETERMINISTIC GATE
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChange((user) => {
       setCurrentUser(user);
-      setAuthLoading(false);
+      setAuthReady(true); // Auth is definitively ready after first callback
     });
 
     return unsubscribe;
   }, [auth]);
 
-  // Initialize database and load data after auth state is known and only in browser
+  // DETERMINISTIC INIT: Only run after auth is definitively ready
   useEffect(() => {
-    if (authLoading || typeof window === 'undefined') return;
-    
-    // ⚠️ FIX: Mutex per evitare race condition - solo una init alla volta
-    if (hasInitialized.current) {
-      console.log('⏸️ Init già in corso, skipping...');
-      return;
-    }
-    
-    const initializeApp = async () => {
-      try {
-        console.log('🚀 INIT START', {
-          authLoading,
-          currentUserId: currentUser?.uid,
-          timestamp: new Date().toISOString()
-        });
-        
-        await db.init();
-        await audioManager.init(); // 🎵 Initialize gaming audio
+    if (!authReady || typeof window === 'undefined') return;
 
-        // ⚠️ TEMP: Disabled Firebase switching - always use IndexedDB
-        console.log('⏳ User authenticated, but using IndexedDB only');
-        lastLoadedUserId.current = null;
-        setShowAuthModal(false);
-        // ⚠️ TEMP: Load from IndexedDB only
-        await loadData();
-        setIsLoading(false);
-        return;
-        
-        console.log('✅ INIT COMPLETE', {
-          adapter: db.getAdapterDebugInfo(),
-          timeBlocksCount: timeBlocks.length,
-          goalsCount: goals.length
-        });
+    const run = async () => {
+      setIsLoading(true);
+      try {
+        await db.init(); // Configure adapter -> IndexedDB default in browser
+        await audioManager.init();
+
+        if (currentUser?.uid) {
+          // LOGGED IN MODE: Use Firebase
+          const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
+          await ensureFirestorePersistence(firestore); // Must run before any Firestore ops
+          await db.switchToFirebase(currentUser.uid);   // Atomic switch to Firebase
+          await loadDataLogged(); // Load user-scoped data from Firebase
+        } else {
+          // GUEST MODE: Use IndexedDB for local persistence
+          await loadDataGuest(); // Load guest data from IndexedDB
+          setShowAuthModal(true);
+        }
       } catch (error) {
-        console.error('❌ Failed to initialize app:', error);
-        // ⚠️ FIX: Mostra errore ma NON svuotare state
-        // L'utente può ancora vedere dati esistenti
+        console.error('INIT_ERROR', error);
       } finally {
         setIsLoading(false);
-        hasInitialized.current = true;
       }
     };
 
-    initializeApp();
-  }, [currentUser?.uid, authLoading]);
+    run();
+  }, [authReady, currentUser?.uid]);
+
+  // LOGGED IN: Load data from Firebase (user-scoped by adapter)
+  const loadDataLogged = async () => {
+    console.log('📊 loadDataLogged() START - Firebase mode');
+    
+    const [
+      allTimeBlocks, allGoals, allKeyResults, allProjects, 
+      allTasks, allHabits, allHabitLogs
+    ] = await Promise.all([
+      db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<Goal>('goals'),
+      db.getAll<KeyResult>('keyResults'),
+      db.getAll<Project>('projects'),
+      db.getAll<Task>('tasks'),
+      db.getAll<Habit>('habits'),
+      db.getAll<HabitLog>('habitLogs')
+    ]);
+
+    // Firebase adapter is user-scoped, no need to filter by userId
+    const deserializedTimeBlocks = allTimeBlocks.map(block => ({
+      ...block,
+      startTime: new Date(block.startTime),
+      endTime: new Date(block.endTime),
+      createdAt: new Date(block.createdAt),
+      updatedAt: new Date(block.updatedAt),
+      actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+      actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+    }));
+
+    // Deserialize dates for all collections
+    const deserializedGoals = allGoals.map(goal => ({
+      ...goal,
+      targetDate: new Date(goal.targetDate),
+      createdAt: new Date(goal.createdAt),
+      updatedAt: new Date(goal.updatedAt)
+    }));
+
+    const deserializedKeyResults = allKeyResults.map(kr => ({
+      ...kr,
+      createdAt: new Date(kr.createdAt),
+      updatedAt: new Date(kr.updatedAt)
+    }));
+
+    const deserializedProjects = allProjects.map(project => ({
+      ...project,
+      dueDate: project.dueDate ? new Date(project.dueDate) : undefined,
+      createdAt: new Date(project.createdAt),
+      updatedAt: new Date(project.updatedAt)
+    }));
+
+    const deserializedTasks = allTasks.map(task => ({
+      ...task,
+      dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+      deadline: task.deadline ? new Date(task.deadline) : undefined,
+      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+      createdAt: new Date(task.createdAt),
+      updatedAt: new Date(task.updatedAt)
+    }));
+
+    const deserializedHabits = allHabits.map(habit => ({
+      ...habit,
+      createdAt: new Date(habit.createdAt),
+      updatedAt: new Date(habit.updatedAt)
+    }));
+
+    const deserializedHabitLogs = allHabitLogs.map(log => ({
+      ...log,
+      date: new Date(log.date),
+      createdAt: new Date(log.createdAt)
+    }));
+
+    setTimeBlocks(deserializedTimeBlocks);
+    setGoals(deserializedGoals);
+    setKeyResults(deserializedKeyResults);
+    setProjects(deserializedProjects);
+    setTasks(deserializedTasks);
+    setHabits(deserializedHabits);
+    setHabitLogs(deserializedHabitLogs);
+
+    console.log('📊 loadDataLogged() COMPLETE', {
+      timeBlocks: deserializedTimeBlocks.length,
+      goals: deserializedGoals.length,
+      adapter: db.getAdapterDebugInfo()
+    });
+  };
+
+  // GUEST MODE: Load data from IndexedDB (no userId filtering)
+  const loadDataGuest = async () => {
+    console.log('📊 loadDataGuest() START - IndexedDB mode');
+    
+    const [
+      allTimeBlocks, allGoals, allKeyResults, allProjects, 
+      allTasks, allHabits, allHabitLogs
+    ] = await Promise.all([
+      db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<Goal>('goals'),
+      db.getAll<KeyResult>('keyResults'),
+      db.getAll<Project>('projects'),
+      db.getAll<Task>('tasks'),
+      db.getAll<Habit>('habits'),
+      db.getAll<HabitLog>('habitLogs')
+    ]);
+
+    // Guest mode: no userId filtering, all data is "guest" data
+    const deserializedTimeBlocks = allTimeBlocks.map(block => ({
+      ...block,
+      startTime: new Date(block.startTime),
+      endTime: new Date(block.endTime),
+      createdAt: new Date(block.createdAt),
+      updatedAt: new Date(block.updatedAt),
+      actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+      actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+    }));
+
+    // Deserialize dates for all collections
+    const deserializedGoals = allGoals.map(goal => ({
+      ...goal,
+      targetDate: new Date(goal.targetDate),
+      createdAt: new Date(goal.createdAt),
+      updatedAt: new Date(goal.updatedAt)
+    }));
+
+    const deserializedKeyResults = allKeyResults.map(kr => ({
+      ...kr,
+      createdAt: new Date(kr.createdAt),
+      updatedAt: new Date(kr.updatedAt)
+    }));
+
+    const deserializedProjects = allProjects.map(project => ({
+      ...project,
+      dueDate: project.dueDate ? new Date(project.dueDate) : undefined,
+      createdAt: new Date(project.createdAt),
+      updatedAt: new Date(project.updatedAt)
+    }));
+
+    const deserializedTasks = allTasks.map(task => ({
+      ...task,
+      dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+      deadline: task.deadline ? new Date(task.deadline) : undefined,
+      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+      createdAt: new Date(task.createdAt),
+      updatedAt: new Date(task.updatedAt)
+    }));
+
+    const deserializedHabits = allHabits.map(habit => ({
+      ...habit,
+      createdAt: new Date(habit.createdAt),
+      updatedAt: new Date(habit.updatedAt)
+    }));
+
+    const deserializedHabitLogs = allHabitLogs.map(log => ({
+      ...log,
+      date: new Date(log.date),
+      createdAt: new Date(log.createdAt)
+    }));
+
+    setTimeBlocks(deserializedTimeBlocks);
+    setGoals(deserializedGoals);
+    setKeyResults(deserializedKeyResults);
+    setProjects(deserializedProjects);
+    setTasks(deserializedTasks);
+    setHabits(deserializedHabits);
+    setHabitLogs(deserializedHabitLogs);
+
+    console.log('📊 loadDataGuest() COMPLETE', {
+      timeBlocks: deserializedTimeBlocks.length,
+      goals: deserializedGoals.length,
+      adapter: db.getAdapterDebugInfo()
+    });
+  };
 
   // Update KPIs periodically
   useEffect(() => {
@@ -194,8 +360,6 @@ export default function HomePage() {
     
     // Se user loggato ma adapter non è Firebase o userId non settato, NON procedere
     if (currentUserId) {
-      // ⚠️ TEMP: Disabled Firebase check - always load from IndexedDB
-      /*
       if (!db.isUsingFirebase) {
         console.warn('⚠️ loadData() SKIPPED: User logged in but adapter is not Firebase', {
           adapterType: adapterInfo.adapterType,
@@ -203,10 +367,7 @@ export default function HomePage() {
         });
         return; // ⚠️ NON sovrascrivere state con []
       }
-      */
       
-      // ⚠️ TEMP: Disabled userId mismatch check for IndexedDB
-      /*
       if (adapterInfo.userId !== currentUserId) {
         console.warn('⚠️ loadData() SKIPPED: Adapter userId mismatch', {
           adapterUserId: adapterInfo.userId,
@@ -214,7 +375,6 @@ export default function HomePage() {
         });
         return; // ⚠️ NON sovrascrivere state con []
       }
-      */
     }
     
     try {
@@ -291,8 +451,6 @@ export default function HomePage() {
           actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
         }));
 
-      console.log('🔥 Loaded timeBlocks for user', filterUserId, ':', deserializedTimeBlocks.map(b => ({id: b.id, userId: b.userId})));
-
       // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL collections by userId
       const userGoals = allGoals.filter(item => item.userId === filterUserId);
       const userKeyResults = allKeyResults.filter(item => item.userId === filterUserId);
@@ -352,81 +510,10 @@ export default function HomePage() {
     }
   };
 
-  const migrateLocalDataToFirebase = async (localData: {
-    timeBlocks: TimeBlock[];
-    goals: Goal[];
-    projects: Project[];
-    tasks: Task[];
-    habits: Habit[];
-    habitLogs: HabitLog[];
-  }) => {
-    if (!currentUser?.uid || !db.isUsingFirebase) return;
-    
-    try {
-      console.log('🔄 Migrating local data to Firebase...', {
-        timeBlocks: localData.timeBlocks.length,
-        goals: localData.goals.length,
-        projects: localData.projects.length
-      });
-      
-      // Migrate timeBlocks
-      for (const block of localData.timeBlocks) {
-        if (!timeBlocks.find(b => b.id === block.id)) {
-          await db.create('timeBlocks', block);
-          setTimeBlocks(prev => [...prev, block]);
-        }
-      }
-      
-      // Migrate goals
-      for (const goal of localData.goals) {
-        if (!goals.find(g => g.id === goal.id)) {
-          await db.create('goals', goal);
-          setGoals(prev => [...prev, goal]);
-        }
-      }
-      
-      // Migrate projects
-      for (const project of localData.projects) {
-        if (!projects.find(p => p.id === project.id)) {
-          await db.create('projects', project);
-          setProjects(prev => [...prev, project]);
-        }
-      }
-      
-      // Migrate tasks
-      for (const task of localData.tasks) {
-        if (!tasks.find(t => t.id === task.id)) {
-          await db.create('tasks', task);
-          setTasks(prev => [...prev, task]);
-        }
-      }
-      
-      // Migrate habits
-      for (const habit of localData.habits) {
-        if (!habits.find(h => h.id === habit.id)) {
-          await db.create('habits', habit);
-          setHabits(prev => [...prev, habit]);
-        }
-      }
-      
-      // Migrate habitLogs
-      for (const log of localData.habitLogs) {
-        if (!habitLogs.find(l => l.id === log.id)) {
-          await db.create('habitLogs', log);
-          setHabitLogs(prev => [...prev, log]);
-        }
-      }
-      
-      console.log('✅ Migration completed');
-    } catch (error) {
-      console.error('❌ Migration failed:', error);
-    }
-  };
-
   const calculateUserStats = async () => {
     try {
       const allSessions = await db.getAll<Session>('sessions');
-      const userSessions = allSessions.filter(s => s.userId === (currentUser?.uid || 'user-1')); // 🔥 FIX: Use real userId
+      const userSessions = allSessions.filter(s => s.userId === currentUser!.uid);
       
       // Calculate max streak from habits (real data)
       const maxStreak = habits.reduce((max, habit) => Math.max(max, habit.streakCount || 0), 0);
@@ -497,7 +584,7 @@ export default function HomePage() {
     try {
       setAnalyticsLoading(true);
       
-      const userId = currentUser?.uid || 'user-1'; // 🔥 FIX: Use real userId
+      const userId = currentUser!.uid;
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
 
       const [
@@ -556,7 +643,7 @@ export default function HomePage() {
         taskId, 
         timeBlockId, 
         'default',
-        currentUser?.uid || 'user-1'
+        currentUser?.uid || 'guest-user'
       );
       setCurrentSession(session);
       
@@ -595,7 +682,7 @@ export default function HomePage() {
       // 🚀 PERFORMANCE: Direct state update instead of full reload
       if (completedSession) {
         // Update KPIs immediately with new session data
-        const updatedKPIs = await db.calculateTodayKPIs(currentUser?.uid || 'user-1');
+        const updatedKPIs = await db.calculateTodayKPIs(currentUser!.uid);
         setTodayKPIs(updatedKPIs);
       }
     } catch (error) {
@@ -605,17 +692,6 @@ export default function HomePage() {
 
   // Time block management
   const handleCreateTimeBlock = async (blockData: Partial<TimeBlock>) => {
-    // ⚠️ TEMP: Disabled Firebase switching - use IndexedDB only
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔥 DEV LOG: Add TimeBlock clicked', {
-        adapter: db.getAdapterDebugInfo(),
-        useFirebase: db.isUsingFirebase,
-        userId: currentUser?.uid,
-        blockData
-      });
-    }
-    
     console.log('🔥 PSYCHOPATH: === STARTING handleCreateTimeBlock ===');
     console.log('🔥 PSYCHOPATH: Input data:', blockData);
     setTimeBlockError(null);
@@ -624,12 +700,16 @@ export default function HomePage() {
     try {
       console.log('🔥 PSYCHOPATH: Database adapter type:', db.isUsingFirebase ? 'Firebase' : 'IndexedDB');
       const adapterInfo = db.getAdapterDebugInfo();
+      if (adapterInfo.useFirebase && !currentUser?.uid) {
+        console.warn('⚠️ Firebase adapter active without user. Falling back to IndexedDB for time block creation.');
+        await db.switchToIndexedDB();
+      }
 
       const startTime = blockData.startTime ? new Date(blockData.startTime) : new Date();
       const endTime = blockData.endTime ? new Date(blockData.endTime) : new Date(startTime.getTime() + 60 * 60 * 1000);
       const createdAt = blockData.createdAt ? new Date(blockData.createdAt) : new Date();
       const updatedAt = blockData.updatedAt ? new Date(blockData.updatedAt) : new Date();
-      const userId = currentUser?.uid; // No fallback in Firebase mode
+      const userId = currentUser?.uid; // No fallback - use real userId or undefined for guest
       
       // 🔥 PSYCHOPATH FIX: Ensure proper data structure with unique ID
       blockToCreate = {
@@ -680,15 +760,6 @@ export default function HomePage() {
       // 🎮 GAMING: Celebrate successful time block creation
       audioManager.taskCompleted();
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: Add TimeBlock SUCCESS', {
-          adapter: db.getAdapterDebugInfo(),
-          useFirebase: db.isUsingFirebase,
-          userId: currentUser?.uid,
-          createdBlock: deserializedBlock
-        });
-      }
-      
     } catch (error: any) {
       console.error('❌ PSYCHOPATH: CRITICAL ERROR in handleCreateTimeBlock:', error);
       console.error('❌ PSYCHOPATH: Error details:', {
@@ -699,15 +770,6 @@ export default function HomePage() {
       const tempId = blockToCreate ? blockToCreate.id : null;
       setTimeBlocks(prev => tempId ? prev.filter(block => block.id !== tempId) : prev);
       setTimeBlockError(error?.message || 'Unable to save the time block. Please try again or check your connection.');
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: Add TimeBlock FAILED', {
-          adapter: db.getAdapterDebugInfo(),
-          useFirebase: db.isUsingFirebase,
-          userId: currentUser?.uid,
-          error: error?.message
-        });
-      }
     }
     
     console.log('🔥 PSYCHOPATH: === ENDING handleCreateTimeBlock ===');
@@ -804,7 +866,7 @@ export default function HomePage() {
         const newLog: HabitLog = {
           id: `log-${Date.now()}`,
           habitId,
-          userId: currentUser?.uid || 'user-1', // 🔥 FIX: Use real userId
+          userId: currentUser?.uid || 'guest-user',
           date: today,
           completed,
           value,
@@ -821,17 +883,11 @@ export default function HomePage() {
 
   // OKR management functions
   const handleCreateGoal = async (goalData: Partial<Goal>) => {
-    // ⚠️ TEMP: Disabled Firebase switching - use IndexedDB only
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔥 DEV LOG: Add Goal clicked', {
-        adapter: db.getAdapterDebugInfo(),
-        useFirebase: db.isUsingFirebase,
-        userId: currentUser?.uid,
-        goalData
-      });
+    if (!currentUser?.uid) {
+      console.error('Cannot create goal: user not authenticated');
+      return;
     }
-    
+
     try {
       console.log('🔥 PSYCHOPATH: Creating goal:', goalData);
       
@@ -839,7 +895,7 @@ export default function HomePage() {
       const goalToCreate: Goal = {
         ...goalData,
         id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: currentUser?.uid, // No fallback in Firebase mode
+        userId: currentUser.uid,
         domainId: goalData.domainId || 'domain-1',
         status: goalData.status || 'active',
         targetDate: goalData.targetDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days from now
@@ -854,8 +910,8 @@ export default function HomePage() {
       
       console.log('🔥 PSICOPATICO GOAL CREATION DEBUG:', {
         goalToCreateUserId: goalToCreate.userId,
-        expectedUserId: currentUser?.uid || 'user-1',
-        userIdMatch: goalToCreate.userId === (currentUser?.uid || 'user-1'),
+        expectedUserId: currentUser.uid,
+        userIdMatch: goalToCreate.userId === currentUser.uid,
         goalTitle: goalToCreate.title,
         goalToCreate: goalToCreate
       });
@@ -885,26 +941,8 @@ export default function HomePage() {
       
       // 🚀 PERFORMANCE: State already updated above - no reload needed
       console.log('🚀 PERFORMANCE: Goal created and state updated efficiently');
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: Add Goal SUCCESS', {
-          adapter: db.getAdapterDebugInfo(),
-          useFirebase: db.isUsingFirebase,
-          userId: currentUser?.uid,
-          createdGoal: deserializedGoal
-        });
-      }
-    } catch (error: any) {
+    } catch (error) {
       console.error('❌ PSYCHOPATH: Failed to create goal:', error);
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: Add Goal FAILED', {
-          adapter: db.getAdapterDebugInfo(),
-          useFirebase: db.isUsingFirebase,
-          userId: currentUser?.uid,
-          error: error?.message
-        });
-      }
     }
   };
 
@@ -922,6 +960,11 @@ export default function HomePage() {
   };
 
   const handleCreateKeyResult = async (keyResultData: Partial<KeyResult>) => {
+    if (!currentUser?.uid) {
+      console.error('Cannot create key result: user not authenticated');
+      return;
+    }
+
     try {
       console.log('🔥 PSYCHOPATH: Creating key result:', keyResultData);
       
@@ -929,7 +972,7 @@ export default function HomePage() {
       const keyResultToCreate: KeyResult = {
         ...keyResultData,
         id: `keyresult-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: currentUser?.uid || 'user-1', // 🔥 FORCE userId
+        userId: currentUser.uid,
         goalId: keyResultData.goalId || '',
         currentValue: keyResultData.currentValue || 0,
         progress: 0, // Start at 0%
@@ -986,40 +1029,48 @@ export default function HomePage() {
   };
 
   const handleCreateProject = async (projectData: Partial<Project>) => {
-    // ⚠️ TEMP: Disabled Firebase switching - use IndexedDB only
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔥 DEV LOG: Add Project clicked', {
-        adapter: db.getAdapterDebugInfo(),
-        useFirebase: db.isUsingFirebase,
-        userId: currentUser?.uid,
-        projectData
-      });
-    }
+    // 🔥 OPTIMISTIC UPDATE: Create project with proper ID
+    const projectToCreate: Project = {
+      ...projectData,
+      id: `project-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: effectiveUserId, // Use effectiveUserId for both logged and guest
+      domainId: projectData.domainId || 'domain-1',
+      status: projectData.status || 'active',
+      priority: projectData.priority || 'medium',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as Project;
     
     try {
-      const newProject = await db.create<Project>('projects', projectData as Project);
-      setProjects([...projects, newProject]);
+      console.log('CREATE_PROJECT_START', projectData);
+      console.log('CREATE_PROJECT_OPTIMISTIC', projectToCreate.id);
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: Add Project SUCCESS', {
-          adapter: db.getAdapterDebugInfo(),
-          useFirebase: db.isUsingFirebase,
-          userId: currentUser?.uid,
-          createdProject: newProject
-        });
-      }
-    } catch (error: any) {
-      console.error('Failed to create project:', error);
+      // Immediately update UI
+      setProjects(prevProjects => {
+        if (prevProjects.find(p => p.id === projectToCreate.id)) {
+          console.warn('⚠️ Project already exists in state, updating instead');
+          return prevProjects.map(p => p.id === projectToCreate.id ? projectToCreate : p);
+        }
+        return [...prevProjects, projectToCreate];
+      });
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: Add Project FAILED', {
-          adapter: db.getAdapterDebugInfo(),
-          useFirebase: db.isUsingFirebase,
-          userId: currentUser?.uid,
-          error: error?.message
-        });
-      }
+      // Persist to database
+      const savedProject = await db.create<Project>('projects', projectToCreate);
+      console.log('CREATE_PROJECT_SUCCESS', savedProject);
+      
+      // Update state with persisted version if needed
+      setProjects(prevProjects => 
+        prevProjects.map(p => p.id === projectToCreate.id ? {
+          ...savedProject,
+          dueDate: savedProject.dueDate ? new Date(savedProject.dueDate) : undefined,
+          createdAt: new Date(savedProject.createdAt),
+          updatedAt: new Date(savedProject.updatedAt)
+        } : p)
+      );
+    } catch (error) {
+      console.error('❌ CREATE_PROJECT_ERROR:', error);
+      // Rollback optimistic update
+      setProjects(prevProjects => prevProjects.filter(p => p.id !== projectToCreate.id));
     }
   };
 
@@ -1036,17 +1087,89 @@ export default function HomePage() {
     }
   };
 
+  const handleDeleteProject = async (id: string) => {
+    // Get project and associated tasks before deletion
+    const projectToDelete = projects.find(p => p.id === id);
+    const projectTasks = tasks.filter(t => t.projectId === id);
+    
+    try {
+      console.log('DELETE_PROJECT_START', id);
+      console.log('DELETE_PROJECT_OPTIMISTIC', { projectId: id, tasksCount: projectTasks.length });
+      
+      // Immediately update UI (optimistic)
+      setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
+      setTasks(prevTasks => prevTasks.filter(t => t.projectId !== id));
+      
+      // Delete from database
+      await db.delete('projects', id);
+      
+      // Delete associated tasks from database
+      for (const task of projectTasks) {
+        await db.delete('tasks', task.id);
+      }
+      
+      console.log(`✅ DELETE_PROJECT_SUCCESS: Deleted project ${id} and ${projectTasks.length} associated tasks`);
+    } catch (error) {
+      console.error('❌ DELETE_PROJECT_ERROR:', error);
+      // Rollback optimistic updates
+      if (projectToDelete) {
+        setProjects(prevProjects => [...prevProjects, projectToDelete]);
+        setTasks(prevTasks => [...prevTasks, ...projectTasks]);
+      }
+    }
+  };
+
   const handleBadgeUnlocked = (badge: any) => {
     // Show celebration toast or animation
     console.log('Badge unlocked:', badge.name);
   };
 
   const handleCreateTask = async (taskData: Partial<Task>) => {
+    // 🔥 OPTIMISTIC UPDATE: Create task with proper ID
+    const taskToCreate: Task = {
+      ...taskData,
+      id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: effectiveUserId, // Use effectiveUserId for both logged and guest
+      domainId: taskData.domainId || 'domain-1',
+      status: taskData.status || 'pending',
+      priority: taskData.priority || 'medium',
+      estimatedMinutes: taskData.estimatedMinutes || 60,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as Task;
+    
     try {
-      const newTask = await db.create<Task>('tasks', taskData as Task);
-      setTasks([...tasks, newTask]);
+      console.log('CREATE_TASK_START', taskData);
+      console.log('CREATE_TASK_OPTIMISTIC', taskToCreate.id);
+      
+      // Immediately update UI
+      setTasks(prevTasks => {
+        if (prevTasks.find(t => t.id === taskToCreate.id)) {
+          console.warn('⚠️ Task already exists in state, updating instead');
+          return prevTasks.map(t => t.id === taskToCreate.id ? taskToCreate : t);
+        }
+        return [...prevTasks, taskToCreate];
+      });
+      
+      // Persist to database
+      const savedTask = await db.create<Task>('tasks', taskToCreate);
+      console.log('CREATE_TASK_SUCCESS', savedTask);
+      
+      // Update state with persisted version if needed
+      setTasks(prevTasks => 
+        prevTasks.map(t => t.id === taskToCreate.id ? {
+          ...savedTask,
+          dueDate: savedTask.dueDate ? new Date(savedTask.dueDate) : undefined,
+          deadline: savedTask.deadline ? new Date(savedTask.deadline) : undefined,
+          completedAt: savedTask.completedAt ? new Date(savedTask.completedAt) : undefined,
+          createdAt: new Date(savedTask.createdAt),
+          updatedAt: new Date(savedTask.updatedAt)
+        } : t)
+      );
     } catch (error) {
-      console.error('Failed to create task:', error);
+      console.error('❌ CREATE_TASK_ERROR:', error);
+      // Rollback optimistic update
+      setTasks(prevTasks => prevTasks.filter(t => t.id !== taskToCreate.id));
     }
   };
 
@@ -1077,7 +1200,7 @@ export default function HomePage() {
     },
   };
 
-  if (authLoading || isLoading) {
+  if (!authReady || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -1086,7 +1209,7 @@ export default function HomePage() {
           </div>
           <h2 className="heading-1 text-neutral-900 mb-4">Life Tracker</h2>
           <p className="text-body text-lg">
-            {authLoading ? 'Checking authentication...' : 'Initializing system...'}
+            {!authReady ? 'Checking authentication...' : 'Initializing system...'}
           </p>
           <div className="mt-6 flex justify-center space-x-2">
             {[...Array(3)].map((_, i) => (
@@ -1205,7 +1328,7 @@ export default function HomePage() {
                     existingTasks={tasks}
                     userPreferences={{}}
                     className="w-full"
-                    currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
+                    currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId
                   />
                 </div>
 
@@ -1300,8 +1423,8 @@ export default function HomePage() {
                     onDeleteTimeBlock={handleDeleteTimeBlock}
                     selectedDate={selectedDate}
                     onDateChange={setSelectedDate}
-                    currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
-                    isReady={isReady}
+                    currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId (works for both logged and guest)
+                    isReady={true} // 🔥 FIX: Always ready since we have effectiveUserId
                   />
                 </>
               )}
@@ -1374,7 +1497,7 @@ export default function HomePage() {
                   onUpdateHabit={handleUpdateHabit}
                   onDeleteHabit={handleDeleteHabit}
                   onLogHabit={handleLogHabit}
-                  currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
+                  currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId
                 />
               )}
 
@@ -1384,16 +1507,17 @@ export default function HomePage() {
                   keyResults={keyResults}
                   projects={projects}
                   tasks={tasks}
+                  timeBlocks={timeBlocks}
                   onCreateGoal={handleCreateGoal}
                   onUpdateGoal={handleUpdateGoal}
                   onCreateKeyResult={handleCreateKeyResult}
                   onUpdateKeyResult={handleUpdateKeyResult}
                   onCreateProject={handleCreateProject}
                   onUpdateProject={handleUpdateProject}
+                  onDeleteProject={handleDeleteProject}
                   onCreateTask={handleCreateTask}
                   onUpdateTask={handleUpdateTask}
-                  currentUserId={currentUser?.uid} // 🔥 CRITICAL FIX: Pass real user ID
-                  isReady={isReady}
+                  currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId
                 />
               )}
 
@@ -1408,7 +1532,7 @@ export default function HomePage() {
               {activeTab === 'goal_analytics' && (
                 <GoalAnalyticsDashboard
                   goals={goals}
-                  userId={currentUser?.uid || 'user-1'}
+                  userId={currentUser?.uid || 'guest-user'}
                   selectedGoalId={selectedGoalId}
                   onGoalSelect={setSelectedGoalId}
                 />

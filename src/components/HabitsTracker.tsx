@@ -122,11 +122,16 @@ export default function HabitsTracker({
   };
 
   const handleCreateHabit = () => {
+    if (!currentUserId) {
+      console.error('Cannot create habit: userId not available');
+      return;
+    }
+
     if (newHabitData.name) {
       onCreateHabit({
         ...newHabitData,
         id: `habit-${Date.now()}`,
-        userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+        userId: currentUserId,
         domainId: 'default',
         isActive: true,
         streakCount: 0,

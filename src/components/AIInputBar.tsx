@@ -159,6 +159,11 @@ export default function AIInputBar({
   };
 
   const executeResult = async (result: NLParseResult) => {
+    if (!currentUserId) {
+      console.error('Cannot execute AI result: userId not available');
+      return;
+    }
+
     console.log('🧠 AI EXECUTE: Processing', result.parsedItems.length, 'items');
 
     for (const item of result.parsedItems) {
@@ -175,7 +180,7 @@ export default function AIInputBar({
                 estimatedMinutes: taskData.estimatedDuration || 60,
                 priority: taskData.priority,
                 status: 'pending',
-                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+                userId: currentUserId,
                 domainId: 'default',
                 projectId: undefined,
                 goalId: taskData.goalId,
@@ -222,7 +227,7 @@ export default function AIInputBar({
                 endTime: blockData.endTime,
                 type: blockData.type || 'work',
                 status: 'planned',
-                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+                userId: currentUserId,
                 domainId: 'domain-1',
                 createdAt: new Date(),
                 updatedAt: new Date()
@@ -241,7 +246,7 @@ export default function AIInputBar({
                 category: goalData.category || 'important_not_urgent',
                 priority: goalData.priority || 'medium',
                 status: 'active',
-                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+                userId: currentUserId,
                 domainId: 'default',
                 targetDate: goalData.deadline || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
                 timeAllocationTarget: goalData.estimatedHours || 5,
@@ -265,7 +270,7 @@ export default function AIInputBar({
                 frequency: habitData.frequency || 'daily',
                 targetValue: 1,
                 unit: 'completion',
-                userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+                userId: currentUserId,
                 isActive: true,
                 streakCount: 0,
                 bestStreak: 0,

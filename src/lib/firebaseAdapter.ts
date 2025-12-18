@@ -23,7 +23,7 @@ import {
   Query,
   DocumentSnapshot,
 } from 'firebase/firestore';
-import { db as firestore } from './firebase';
+import { firestore } from './firebase';
 import { 
   User, Domain, Goal, KeyResult, Project, Task, TimeBlock, Session, 
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
@@ -133,37 +133,31 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async create<T extends { id?: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere
-    this.restoreUserId();
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔥 DEV LOG: FirebaseAdapter.create called', {
-        collectionName,
-        userId: this.userId,
-        path: `users/${this.userId}/${collectionName}`,
-        dataId: data.id
-      });
-    }
+    console.log('🔥 PSYCHOPATH: Firebase create() called with:', {
+      collectionName,
+      userId: this.userId,
+      dataId: data.id,
+      firestore: !!firestore,
+      isInitialized: this.isInitialized
+    });
     
     if (!firestore || !this.isInitialized) {
       const error = 'Firebase Firestore not initialized';
-      if (process.env.NODE_ENV === 'development') {
-        console.error('❌ DEV LOG: FirebaseAdapter.create ERROR:', error);
-      }
+      console.error('❌ PSYCHOPATH: Firebase create failed:', error);
       throw new Error(error);
     }
     
     if (!this.userId) {
       const error = 'Firebase userId not set';
-      if (process.env.NODE_ENV === 'development') {
-        console.error('❌ DEV LOG: FirebaseAdapter.create ERROR:', error);
-      }
+      console.error('❌ PSYCHOPATH: Firebase create failed:', error);
       throw new Error(error);
     }
     
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
+      
+      console.log('🔥 PSYCHOPATH: Firebase collection path:', collectionPath);
       
       // Prepare data with timestamps
       const dataWithTimestamps: any = {
@@ -175,46 +169,31 @@ export class FirebaseAdapter implements DatabaseAdapter {
       // Convert date fields to Timestamps
       this.convertDatesToTimestamps(dataWithTimestamps);
       
+      console.log('🔥 PSYCHOPATH: Data prepared for Firebase:', dataWithTimestamps);
+      
       if (data.id) {
         // Use custom ID - FIX: Use setDoc instead of updateDoc
         const docRef = doc(collectionRef, data.id);
+        console.log('🔥 PSYCHOPATH: Using setDoc for custom ID:', data.id);
         await setDoc(docRef, dataWithTimestamps);
-        
-        const result = this.convertTimestampsToDates({ ...data, ...dataWithTimestamps }) as T;
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔥 DEV LOG: FirebaseAdapter.create SUCCESS', {
-            collectionName,
-            path: `users/${this.userId}/${collectionName}`,
-            docId: result.id
-          });
-        }
-        
-        return result;
+        console.log('🔥 PSYCHOPATH: ✅ setDoc SUCCESS for:', data.id);
+        return this.convertTimestampsToDates({ ...data, ...dataWithTimestamps }) as T;
       } else {
         // Auto-generate ID
+        console.log('🔥 PSYCHOPATH: Using addDoc for auto-generated ID');
         const docRef = await addDoc(collectionRef, dataWithTimestamps);
+        console.log('🔥 PSYCHOPATH: ✅ addDoc SUCCESS with ID:', docRef.id);
         const newData = { ...data, id: docRef.id, ...dataWithTimestamps };
-        const result = this.convertTimestampsToDates(newData) as T;
-        
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔥 DEV LOG: FirebaseAdapter.create SUCCESS', {
-            collectionName,
-            path: `users/${this.userId}/${collectionName}`,
-            docId: result.id
-          });
-        }
-        
-        return result;
+        return this.convertTimestampsToDates(newData) as T;
       }
     } catch (error: any) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('❌ DEV LOG: FirebaseAdapter.create FAILED', {
-          collectionName,
-          path: `users/${this.userId}/${collectionName}`,
-          error: error?.message
-        });
-      }
+      console.error('❌ PSYCHOPATH: Firebase create FAILED:', {
+        collectionName,
+        error: error,
+        errorMessage: error?.message,
+        errorCode: error?.code,
+        errorStack: error?.stack
+      });
       throw error;
     }
   }
@@ -312,60 +291,48 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
     
-    // ⚠️ FIX: Verifica userId prima di procedere - se manca, restituisci array vuoto invece di errore
-    if (!this.userId) {
-      console.warn('⚠️ FirebaseAdapter: userId not set, cannot getAll. Restoring from sessionStorage...');
-      this.restoreUserId();
-      if (!this.userId) {
-        console.warn('⚠️ FirebaseAdapter: userId still not set after restore, returning empty array');
-        return [];
-      }
-    }
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔥 DEV LOG: FirebaseAdapter.getAll called', {
-        collectionName,
-        userId: this.userId,
-        path: `users/${this.userId}/${collectionName}`
-      });
-    }
+    console.log('🔥 PSYCHOPATH: FirebaseAdapter.getAll() called with:', {
+      collectionName,
+      userId: this.userId,
+      firestore: !!firestore,
+      isInitialized: this.isInitialized
+    });
     
     if (!firestore) {
       const error = 'Firebase Firestore not initialized';
-      if (process.env.NODE_ENV === 'development') {
-        console.error('❌ DEV LOG: FirebaseAdapter.getAll ERROR:', error);
-      }
+      console.error('❌ PSYCHOPATH: FirebaseAdapter.getAll() ERROR:', error);
       throw new Error(error);
     }
     
     try {
       const collectionPath = this.getUserCollection(collectionName);
+      console.log('🔥 PSYCHOPATH: Firebase collection path:', collectionPath);
+      
       const collectionRef = collection(firestore, collectionPath);
+      console.log('🔥 PSYCHOPATH: Firebase collection reference created');
+      
       const querySnapshot = await getDocs(collectionRef);
+      console.log('🔥 PSYCHOPATH: Firebase query executed, docs found:', querySnapshot.size);
       
       const results: T[] = [];
       querySnapshot.forEach(doc => {
+        console.log('🔥 PSYCHOPATH: Processing doc:', {
+          id: doc.id,
+          data: doc.data()
+        });
         const data = { id: doc.id, ...doc.data() };
         results.push(this.convertTimestampsToDates(data) as T);
       });
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔥 DEV LOG: FirebaseAdapter.getAll SUCCESS', {
-          collectionName,
-          path: collectionPath,
-          docCount: results.length
-        });
-      }
+      console.log('🔥 PSYCHOPATH: FirebaseAdapter.getAll() SUCCESS:', {
+        collectionName,
+        totalResults: results.length,
+        results: results.map((item: any) => ({ id: item.id, userId: item.userId }))
+      });
       
       return results;
-    } catch (error: any) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('❌ DEV LOG: FirebaseAdapter.getAll FAILED', {
-          collectionName,
-          path: `users/${this.userId}/${collectionName}`,
-          error: error?.message
-        });
-      }
+    } catch (error) {
+      console.error(`❌ PSYCHOPATH: Failed to get all documents from ${collectionName}:`, error);
       throw error;
     }
   }

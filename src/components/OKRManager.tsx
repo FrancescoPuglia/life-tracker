@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Goal, KeyResult, Project, Task } from '@/types';
+import { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
 import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 
 interface OKRManagerProps {
@@ -10,16 +10,17 @@ interface OKRManagerProps {
   keyResults: KeyResult[];
   projects: Project[];
   tasks: Task[];
+  timeBlocks?: TimeBlock[];
   onCreateGoal: (goal: Partial<Goal>) => void;
   onUpdateGoal: (id: string, updates: Partial<Goal>) => void;
   onCreateKeyResult: (keyResult: Partial<KeyResult>) => void;
   onUpdateKeyResult: (id: string, updates: Partial<KeyResult>) => void;
   onCreateProject: (project: Partial<Project>) => void;
   onUpdateProject: (id: string, updates: Partial<Project>) => void;
+  onDeleteProject?: (id: string) => void;
   onCreateTask: (task: Partial<Task>) => void;
   onUpdateTask: (id: string, updates: Partial<Task>) => void;
   currentUserId?: string; // 🔥 CRITICAL FIX
-  isReady?: boolean; // Disable buttons until Firebase is ready
 }
 
 export default function OKRManager({
@@ -27,20 +28,22 @@ export default function OKRManager({
   keyResults,
   projects,
   tasks,
+  timeBlocks = [],
   onCreateGoal,
   onUpdateGoal,
   onCreateKeyResult,
   onUpdateKeyResult,
   onCreateProject,
   onUpdateProject,
+  onDeleteProject,
   onCreateTask,
   onUpdateTask,
-  currentUserId, // 🔥 CRITICAL FIX
-  isReady = false
+  currentUserId // 🔥 CRITICAL FIX
 }: OKRManagerProps) {
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<'goal' | 'keyResult' | 'project' | 'task' | null>(null);
   const [newItemData, setNewItemData] = useState<any>({});
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   
   // 🔥 PSICOPATICO ENHANCEMENT: Key Result Editing
   const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
@@ -81,6 +84,39 @@ export default function OKRManager({
     return totalProgress / goalKeyResults.length;
   };
 
+  // 🔥 NEW: Hours calculation utilities
+  const calculateProjectPlannedHours = (projectId: string): number => {
+    return timeBlocks
+      .filter(block => block.projectId === projectId)
+      .reduce((total, block) => {
+        const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
+        return total + (durationMs / (1000 * 60 * 60)); // Convert to hours
+      }, 0);
+  };
+
+  const calculateGoalPlannedHours = (goalId: string): number => {
+    // Sum from direct goal time blocks
+    const directGoalHours = timeBlocks
+      .filter(block => block.goalId === goalId || (block.goalIds && block.goalIds.includes(goalId)))
+      .reduce((total, block) => {
+        const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
+        const hours = durationMs / (1000 * 60 * 60);
+        // If block has goal allocation, use it
+        if (block.goalAllocation && block.goalAllocation[goalId]) {
+          return total + (hours * block.goalAllocation[goalId] / 100);
+        }
+        return total + hours;
+      }, 0);
+    
+    // Sum from project time blocks
+    const goalProjects = getGoalProjects(goalId);
+    const projectHours = goalProjects.reduce((total, project) => {
+      return total + calculateProjectPlannedHours(project.id);
+    }, 0);
+    
+    return directGoalHours + projectHours;
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'text-green-600 bg-green-50';
@@ -102,10 +138,15 @@ export default function OKRManager({
   };
 
   const handleCreateItem = () => {
+    if (!currentUserId) {
+      console.error('Cannot create item: userId not available');
+      return;
+    }
+
     const now = new Date();
     const baseData = {
       id: `${showCreateModal}-${Date.now()}`,
-      userId: currentUserId || 'user-1', // 🔥 FIX: Use real userId
+      userId: currentUserId,
       domainId: 'default',
       createdAt: now,
       updatedAt: now,
@@ -145,13 +186,32 @@ export default function OKRManager({
         });
         break;
       case 'task':
-        onCreateTask({ 
+        console.log('ADD_TASK_CLICK', { 
+          selectedGoal: selectedGoal?.id, 
+          selectedProject: selectedProject?.id,
+          currentUserId,
+          newItemData 
+        });
+        
+        // 🔥 FIX: Ensure task has proper project and goal IDs
+        const taskData = { 
           ...newItemData, 
           ...baseData,
+          projectId: selectedProject?.id || newItemData.projectId,
+          goalId: selectedGoal?.id || newItemData.goalId,
           status: 'pending',
           priority: 'medium',
           estimatedMinutes: 60
-        });
+        };
+        
+        console.log('CREATE_TASK_START', taskData);
+        
+        try {
+          onCreateTask(taskData);
+          console.log('CREATE_TASK_SUCCESS', taskData);
+        } catch (error) {
+          console.error('CREATE_TASK_ERROR', error);
+        }
         break;
     }
 
@@ -189,12 +249,18 @@ export default function OKRManager({
               </span>
             </div>
             
-            {goal.timeAllocationTarget > 0 && (
-              <div className="mt-2 text-xs text-blue-600 flex items-center">
-                <Clock className="w-3 h-3 mr-1" />
-                Target: {goal.timeAllocationTarget}hrs/week
+            <div className="mt-2 space-y-1">
+              {goal.timeAllocationTarget > 0 && (
+                <div className="text-xs text-blue-600 flex items-center">
+                  <Clock className="w-3 h-3 mr-1" />
+                  Target: {goal.timeAllocationTarget}hrs/week
+                </div>
+              )}
+              <div className="text-xs text-green-600 flex items-center">
+                <Target className="w-3 h-3 mr-1" />
+                Planned: {calculateGoalPlannedHours(goal.id).toFixed(1)}hrs
               </div>
-            )}
+            </div>
           </div>
           
           <div className="text-right">
@@ -334,6 +400,20 @@ export default function OKRManager({
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
               {project.status}
             </span>
+            {onDeleteProject && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (confirm(`Delete project "${project.name}"? This will also remove ${projectTasks.length} tasks.`)) {
+                    onDeleteProject(project.id);
+                  }
+                }}
+                className="text-red-500 hover:text-red-700 text-sm px-2 py-1 rounded"
+                title="Delete Project"
+              >
+                🗑️
+              </button>
+            )}
           </div>
         </div>
         
@@ -348,6 +428,29 @@ export default function OKRManager({
           </span>
         </div>
         
+        {/* Hours Progress */}
+        <div className="mt-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-600">Planned Hours:</span>
+            <span className="font-medium text-blue-600">
+              {calculateProjectPlannedHours(project.id).toFixed(1)}h
+              {project.totalHoursTarget && (
+                <span className="text-gray-500">/{project.totalHoursTarget}h</span>
+              )}
+            </span>
+          </div>
+          {project.totalHoursTarget && project.totalHoursTarget > 0 && (
+            <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+              <div
+                className="bg-blue-500 h-1 rounded-full transition-all duration-300"
+                style={{ 
+                  width: `${Math.min(100, (calculateProjectPlannedHours(project.id) / project.totalHoursTarget) * 100)}%` 
+                }}
+              />
+            </div>
+          )}
+        </div>
+        
         <div className="w-full bg-gray-200 rounded-full h-1.5">
           <div
             className="bg-green-500 h-1.5 rounded-full transition-all duration-300"
@@ -355,12 +458,26 @@ export default function OKRManager({
           />
         </div>
         
-        {project.dueDate && (
-          <div className="mt-2 text-xs text-gray-500 flex items-center">
-            <Clock className="w-3 h-3 mr-1" />
-            Due: {project.dueDate.toLocaleDateString()}
-          </div>
-        )}
+        <div className="mt-2 space-y-1">
+          {project.dueDate && (
+            <div className="text-xs text-gray-500 flex items-center">
+              <Clock className="w-3 h-3 mr-1" />
+              Due: {project.dueDate.toLocaleDateString()}
+            </div>
+          )}
+          {project.weeklyHoursTarget && (
+            <div className="text-xs text-blue-600 flex items-center">
+              <Clock className="w-3 h-3 mr-1" />
+              Weekly: {project.weeklyHoursTarget}hrs
+            </div>
+          )}
+          {project.totalHoursTarget && (
+            <div className="text-xs text-green-600 flex items-center">
+              <Target className="w-3 h-3 mr-1" />
+              Total: {project.totalHoursTarget}hrs
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -666,7 +783,61 @@ export default function OKRManager({
               </div>
             )}
 
-            {(showCreateModal === 'project' || showCreateModal === 'task') && (
+            {showCreateModal === 'project' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    value={newItemData.dueDate ? newItemData.dueDate.toISOString().split('T')[0] : ''}
+                    onChange={(e) => setNewItemData({ ...newItemData, dueDate: e.target.value ? new Date(e.target.value) : undefined })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Weekly Hours Target</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={newItemData.weeklyHoursTarget || ''}
+                      onChange={(e) => setNewItemData({ ...newItemData, weeklyHoursTarget: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                      placeholder="e.g., 5.0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Total Hours Target</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={newItemData.totalHoursTarget || ''}
+                      onChange={(e) => setNewItemData({ ...newItemData, totalHoursTarget: parseInt(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                      placeholder="e.g., 100"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                  <select
+                    value={newItemData.priority || 'medium'}
+                    onChange={(e) => setNewItemData({ ...newItemData, priority: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              </>
+            )}
+            
+            {showCreateModal === 'task' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
                 <select
@@ -768,8 +939,154 @@ export default function OKRManager({
     return createPortal(modalContent, document.body);
   };
 
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-gray-900">OKR Management</h2>
+        <button
+          onClick={() => setShowCreateModal('goal')}
+          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          <Plus className="w-4 h-4" />
+          <span>New Goal</span>
+        </button>
+      </div>
+
+      {/* Goals Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {goals.length === 0 ? (
+          <div className="col-span-full">
+            <div className="card card-body text-center py-12">
+              <div className="text-6xl mb-4">🎯</div>
+              <h3 className="heading-2 mb-4">No Goals Yet</h3>
+              <p className="text-body mb-6">
+                Create your first goal to start organizing your objectives and key results.
+              </p>
+              <button
+                onClick={() => setShowCreateModal('goal')}
+                className="btn btn-primary"
+              >
+                🚀 Create First Goal
+              </button>
+            </div>
+          </div>
+        ) : (
+          goals.map(goal => (
+            <GoalCard key={goal.id} goal={goal} />
+          ))
+        )}
+      </div>
+
+      {/* Selected Goal Details */}
+      {selectedGoal && (
+        <div className="bg-gray-50 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
+              <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(selectedGoal.priority)}`}>
+                  {selectedGoal.priority} priority
+                </span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700">
+                  {selectedGoal.complexity} complexity
+                </span>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
+                  {selectedGoal.category.replace('_', ' & ').replace('urgent', 'Urgent').replace('important', 'Important').replace('not', 'Not')}
+                </span>
+                {selectedGoal.timeAllocationTarget > 0 && (
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
+                    {selectedGoal.timeAllocationTarget}hrs/week target
+                  </span>
+                )}
+                {selectedGoal.estimatedHours && (
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700">
+                    ~{selectedGoal.estimatedHours}hrs total
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setShowCreateModal('keyResult')}
+                className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Key Result</span>
+              </button>
+              <button
+                onClick={() => setShowCreateModal('project')}
+                className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Project</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Key Results */}
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
+                <Target className="w-4 h-4 mr-2" />
+                Key Results
+              </h4>
+              <div className="space-y-3">
+                {getGoalKeyResults(selectedGoal.id).map(kr => (
+                  <KeyResultCard key={kr.id} keyResult={kr} />
+                ))}
+              </div>
+            </div>
+
+            {/* Projects */}
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
+                <TrendingUp className="w-4 h-4 mr-2" />
+                Projects
+              </h4>
+              <div className="space-y-3">
+                {getGoalProjects(selectedGoal.id).map(project => (
+                  <div key={project.id}>
+                    <ProjectCard project={project} />
+                    
+                    {/* Project Tasks */}
+                    <div className="mt-2 ml-4 space-y-2">
+                      {getProjectTasks(project.id).slice(0, 3).map(task => (
+                        <TaskCard key={task.id} task={task} />
+                      ))}
+                      {getProjectTasks(project.id).length > 3 && (
+                        <div className="text-xs text-gray-500 text-center py-1">
+                          +{getProjectTasks(project.id).length - 3} more tasks
+                        </div>
+                      )}
+                      <button
+                        onClick={() => {
+                          console.log('ADD_TASK_CLICK', { goalId: selectedGoal?.id, projectId: project.id, currentUserId });
+                          setSelectedProject(project);
+                          setNewItemData({ projectId: project.id, goalId: selectedGoal?.id });
+                          setShowCreateModal('task');
+                        }}
+                        className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
+                      >
+                        + Add Task
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modals */}
+      <CreateModal />
+      <KeyResultEditModal />
+    </div>
+  );
+
   // 🔥 PSICOPATICO MODAL: Key Result Editor
-  const KeyResultEditModal = () => {
+  function KeyResultEditModal() {
     if (!showKeyResultModal || !editingKeyResult) return null;
     if (typeof window === 'undefined') return null;
 
@@ -957,151 +1274,4 @@ export default function OKRManager({
 
     return createPortal(modalContent, document.body);
   }
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">OKR Management</h2>
-        <button
-          onClick={() => setShowCreateModal('goal')}
-          disabled={!isReady}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-lg ${
-            isReady 
-              ? 'bg-blue-600 text-white hover:bg-blue-700' 
-              : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-          }`}
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Goal</span>
-        </button>
-      </div>
-
-      {/* Goals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {goals.length === 0 ? (
-          <div className="col-span-full">
-            <div className="card card-body text-center py-12">
-              <div className="text-6xl mb-4">🎯</div>
-              <h3 className="heading-2 mb-4">No Goals Yet</h3>
-              <p className="text-body mb-6">
-                Create your first goal to start organizing your objectives and key results.
-              </p>
-              <button
-                onClick={() => setShowCreateModal('goal')}
-                className="btn btn-primary"
-              >
-                🚀 Create First Goal
-              </button>
-            </div>
-          </div>
-        ) : (
-          goals.map(goal => (
-            <GoalCard key={goal.id} goal={goal} />
-          ))
-        )}
-      </div>
-
-      {/* Selected Goal Details */}
-      {selectedGoal && (
-        <div className="bg-gray-50 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
-              <div className="mt-2 flex flex-wrap gap-3 text-sm">
-                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(selectedGoal.priority)}`}>
-                  {selectedGoal.priority} priority
-                </span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700">
-                  {selectedGoal.complexity} complexity
-                </span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
-                  {selectedGoal.category.replace('_', ' & ').replace('urgent', 'Urgent').replace('important', 'Important').replace('not', 'Not')}
-                </span>
-                {selectedGoal.timeAllocationTarget > 0 && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                    {selectedGoal.timeAllocationTarget}hrs/week target
-                  </span>
-                )}
-                {selectedGoal.estimatedHours && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700">
-                    ~{selectedGoal.estimatedHours}hrs total
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setShowCreateModal('keyResult')}
-                className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Key Result</span>
-              </button>
-              <button
-                onClick={() => setShowCreateModal('project')}
-                className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Project</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Key Results */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                <Target className="w-4 h-4 mr-2" />
-                Key Results
-              </h4>
-              <div className="space-y-3">
-                {getGoalKeyResults(selectedGoal.id).map(kr => (
-                  <KeyResultCard key={kr.id} keyResult={kr} />
-                ))}
-              </div>
-            </div>
-
-            {/* Projects */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                <TrendingUp className="w-4 h-4 mr-2" />
-                Projects
-              </h4>
-              <div className="space-y-3">
-                {getGoalProjects(selectedGoal.id).map(project => (
-                  <div key={project.id}>
-                    <ProjectCard project={project} />
-                    
-                    {/* Project Tasks */}
-                    <div className="mt-2 ml-4 space-y-2">
-                      {getProjectTasks(project.id).slice(0, 3).map(task => (
-                        <TaskCard key={task.id} task={task} />
-                      ))}
-                      {getProjectTasks(project.id).length > 3 && (
-                        <div className="text-xs text-gray-500 text-center py-1">
-                          +{getProjectTasks(project.id).length - 3} more tasks
-                        </div>
-                      )}
-                      <button
-                        onClick={() => setShowCreateModal('task')}
-                        className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
-                      >
-                        + Add Task
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modals */}
-      <CreateModal />
-      <KeyResultEditModal />
-    </div>
-  );
-
 }

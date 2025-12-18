@@ -1,5 +1,5 @@
 export const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyD92k6Hg84gh6YC5xmUSsF7yWpZUWuYp24",
+   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyD92k6Hg84gh6YC5xmUSsF7yWpZUWuYp24",
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "life-tracker-12000.firebaseapp.com",
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "life-tracker-12000",
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "life-tracker-12000.firebasestorage.app",

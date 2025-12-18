@@ -136,8 +136,12 @@ export class SessionManager {
     taskId?: string, 
     timeBlockId?: string, 
     domainId: string = 'default',
-    userId: string = 'user-1'
+    userId?: string
   ): Promise<Session> {
+    if (!userId) {
+      throw new Error('userId is required to start a session');
+    }
+
     if (this.currentSession && this.currentSession.status === 'active') {
       throw new Error('A session is already active. Stop or pause the current session first.');
     }
