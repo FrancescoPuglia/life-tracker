@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Session, TimeBlock, KPI, Goal, KeyResult, Project, Task, 
-  Habit, HabitLog, AnalyticsData 
+  Habit, HabitLog, AnalyticsData, BlockType 
 } from '@/types';
 import { SessionManager } from '@/utils/sessionManager';
 import { db } from '@/lib/database';
@@ -43,6 +43,7 @@ export default function HomePage() {
 
   // Data states
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
+  const [blockTypes, setBlockTypes] = useState<BlockType[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [keyResults, setKeyResults] = useState<KeyResult[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -139,10 +140,11 @@ export default function HomePage() {
     console.log('📊 loadDataLogged() START - Firebase mode');
     
     const [
-      allTimeBlocks, allGoals, allKeyResults, allProjects, 
+      allTimeBlocks, allBlockTypes, allGoals, allKeyResults, allProjects, 
       allTasks, allHabits, allHabitLogs
     ] = await Promise.all([
       db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<BlockType>('blockTypes'),
       db.getAll<Goal>('goals'),
       db.getAll<KeyResult>('keyResults'),
       db.getAll<Project>('projects'),
@@ -204,7 +206,15 @@ export default function HomePage() {
       createdAt: new Date(log.createdAt)
     }));
 
+    // Deserialize blockTypes
+    const deserializedBlockTypes = allBlockTypes.map(blockType => ({
+      ...blockType,
+      createdAt: new Date(blockType.createdAt),
+      updatedAt: new Date(blockType.updatedAt)
+    }));
+
     setTimeBlocks(deserializedTimeBlocks);
+    setBlockTypes(deserializedBlockTypes);
     setGoals(deserializedGoals);
     setKeyResults(deserializedKeyResults);
     setProjects(deserializedProjects);
@@ -214,9 +224,13 @@ export default function HomePage() {
 
     console.log('📊 loadDataLogged() COMPLETE', {
       timeBlocks: deserializedTimeBlocks.length,
+      blockTypes: deserializedBlockTypes.length,
       goals: deserializedGoals.length,
       adapter: db.getAdapterDebugInfo()
     });
+    
+    // 🌱 SEED: Create default block types if none exist
+    await seedDefaultBlockTypes();
   };
 
   // GUEST MODE: Load data from IndexedDB (no userId filtering)
@@ -224,10 +238,11 @@ export default function HomePage() {
     console.log('📊 loadDataGuest() START - IndexedDB mode');
     
     const [
-      allTimeBlocks, allGoals, allKeyResults, allProjects, 
+      allTimeBlocks, allBlockTypes, allGoals, allKeyResults, allProjects, 
       allTasks, allHabits, allHabitLogs
     ] = await Promise.all([
       db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<BlockType>('blockTypes'),
       db.getAll<Goal>('goals'),
       db.getAll<KeyResult>('keyResults'),
       db.getAll<Project>('projects'),
@@ -289,7 +304,15 @@ export default function HomePage() {
       createdAt: new Date(log.createdAt)
     }));
 
+    // Deserialize blockTypes for guest mode
+    const deserializedBlockTypes = allBlockTypes.map(blockType => ({
+      ...blockType,
+      createdAt: new Date(blockType.createdAt),
+      updatedAt: new Date(blockType.updatedAt)
+    }));
+
     setTimeBlocks(deserializedTimeBlocks);
+    setBlockTypes(deserializedBlockTypes);
     setGoals(deserializedGoals);
     setKeyResults(deserializedKeyResults);
     setProjects(deserializedProjects);
@@ -299,9 +322,81 @@ export default function HomePage() {
 
     console.log('📊 loadDataGuest() COMPLETE', {
       timeBlocks: deserializedTimeBlocks.length,
+      blockTypes: deserializedBlockTypes.length,
       goals: deserializedGoals.length,
       adapter: db.getAdapterDebugInfo()
     });
+    
+    // 🌱 SEED: Create default block types if none exist
+    await seedDefaultBlockTypes();
+  };
+
+  // 🌱 SEED DEFAULT BLOCK TYPES
+  const seedDefaultBlockTypes = async () => {
+    if (blockTypes.length > 0) {
+      console.log('🌱 SEED: BlockTypes already exist, skipping seed');
+      return;
+    }
+
+    console.log('🌱 SEED: Creating default block types');
+    
+    const defaultTypes = [
+      { name: 'Work', color: '#2563eb', icon: '💼' },
+      { name: 'Deep Focus', color: '#9333ea', icon: '🎯' },
+      { name: 'Meeting', color: '#ea580c', icon: '🤝' },
+      { name: 'Break', color: '#16a34a', icon: '☕' },
+      { name: 'Admin', color: '#4b5563', icon: '⚙️' }
+    ];
+
+    for (const typeData of defaultTypes) {
+      await handleCreateBlockType(typeData);
+    }
+  };
+
+  // 🎆 CREATE BLOCK TYPE
+  const handleCreateBlockType = async (blockTypeData: Partial<BlockType>) => {
+    // 🔥 OPTIMISTIC UPDATE: Create blockType with proper ID
+    const blockTypeToCreate: BlockType = {
+      ...blockTypeData,
+      id: `blocktype-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: effectiveUserId, // Use effectiveUserId for both logged and guest
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as BlockType;
+    
+    try {
+      console.log('BLOCKTYPE_CREATE_START', blockTypeData);
+      console.log('BLOCKTYPE_CREATE_OPTIMISTIC', blockTypeToCreate.id);
+      
+      // Immediately update UI
+      setBlockTypes(prevBlockTypes => {
+        if (prevBlockTypes.find(bt => bt.id === blockTypeToCreate.id)) {
+          console.warn('⚠️ BlockType already exists in state, updating instead');
+          return prevBlockTypes.map(bt => bt.id === blockTypeToCreate.id ? blockTypeToCreate : bt);
+        }
+        return [...prevBlockTypes, blockTypeToCreate];
+      });
+      
+      // Persist to database
+      const savedBlockType = await db.create<BlockType>('blockTypes', blockTypeToCreate);
+      console.log('BLOCKTYPE_CREATE_SUCCESS', savedBlockType);
+      
+      // Update state with persisted version if needed
+      setBlockTypes(prevBlockTypes => 
+        prevBlockTypes.map(bt => bt.id === blockTypeToCreate.id ? {
+          ...savedBlockType,
+          createdAt: new Date(savedBlockType.createdAt),
+          updatedAt: new Date(savedBlockType.updatedAt)
+        } : bt)
+      );
+      
+      return savedBlockType;
+    } catch (error) {
+      console.error('❌ BLOCKTYPE_CREATE_ERROR:', error);
+      // Rollback optimistic update
+      setBlockTypes(prevBlockTypes => prevBlockTypes.filter(bt => bt.id !== blockTypeToCreate.id));
+      throw error;
+    }
   };
 
   // Update KPIs periodically
@@ -1415,12 +1510,14 @@ export default function HomePage() {
                   )}
                   <TimeBlockPlanner
                     timeBlocks={timeBlocks}
+                    blockTypes={blockTypes}
                     tasks={tasks}
                     projects={projects}
                     goals={goals}
                     onCreateTimeBlock={handleCreateTimeBlock}
                     onUpdateTimeBlock={handleUpdateTimeBlock}
                     onDeleteTimeBlock={handleDeleteTimeBlock}
+                    onCreateBlockType={handleCreateBlockType}
                     selectedDate={selectedDate}
                     onDateChange={setSelectedDate}
                     currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId (works for both logged and guest)

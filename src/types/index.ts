@@ -103,6 +103,16 @@ export interface Task {
   updatedAt: Date;
 }
 
+export interface BlockType {
+  id: string;
+  userId: string;
+  name: string; // e.g., "Scacchi", "Sport", "Studio"
+  color: string; // hex color (e.g., #3b82f6)
+  icon?: string; // emoji or icon (optional)
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface TimeBlock {
   id: string;
   title: string;
@@ -119,6 +129,7 @@ export interface TimeBlock {
   actualEndTime?: Date;
   status: 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'overrun';
   type: 'work' | 'break' | 'buffer' | 'travel' | 'meeting' | 'focus' | 'admin' | 'deep' | 'shallow';
+  blockTypeId?: string; // Reference to custom BlockType
   color?: string; // Custom hex color override (e.g., #3b82f6)
   location?: string;
   notes?: string;

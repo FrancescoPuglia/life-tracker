@@ -164,15 +164,36 @@ h3 {
   background: var(--neutral-400);
 }
 
-/* Remove all animations/keyframes that are "gaming" style */
-@keyframes none {
-  to { transform: none; }
+/* Professional loading animations */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.animate-pulse,
-.animate-bounce,
-.animate-spin {
-  animation: none !important;
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.95);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Professional loading state */
