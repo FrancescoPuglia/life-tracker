@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { TimeBlock, Task, Project, Goal } from '@/types';
-import { toDateSafe } from '@/utils/dateUtils';
+import { parseDateTime, isBlockOverdue, getOverdueMinutes } from '@/lib/datetime';
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
@@ -256,24 +256,11 @@ export default function TimeBlockPlanner({
     }
   };
 
-  // 🔥 P1 FIX: Improved overdue logic with safe date parsing
+  // 🔥 P0 TASK C: Centralized overdue logic using datetime utilities
   const getStatusIndicator = (block: TimeBlock) => {
-    const now = new Date();
-    const blockEndTime = toDateSafe(block.endTime);
-    const blockDate = toDateSafe(block.startTime);
-    const selectedDateStr = selectedDate.toDateString();
-    const blockDateStr = blockDate.toDateString();
-    
-    // Only show overdue for blocks that are:
-    // 1. Not completed 
-    // 2. Past their end time
-    // 3. On today or past days (not future days)
-    const isOverdue = block.status !== 'completed' && 
-                      now > blockEndTime && 
-                      (blockDateStr === new Date().toDateString() || blockDate < new Date());
-    
-    const isActive = block.status === 'in_progress';
     const isCompleted = block.status === 'completed';
+    const isActive = block.status === 'in_progress';
+    const isOverdue = isBlockOverdue(block.endTime, block.status, selectedDate);
     
     if (isCompleted) return '✅';
     if (isActive) return '🔴';
@@ -281,21 +268,19 @@ export default function TimeBlockPlanner({
     return '⏰';
   };
 
-  // 🔥 P1 FIX: Get overdue message with safe date parsing
+  // 🔥 P0 TASK C: Centralized overdue message using datetime utilities
   const getOverdueMessage = (block: TimeBlock) => {
-    const now = new Date();
-    const blockEndTime = toDateSafe(block.endTime);
-    
-    if (block.status !== 'completed' && now > blockEndTime) {
-      const overdueMinutes = Math.floor((now.getTime() - blockEndTime.getTime()) / (1000 * 60));
-      if (overdueMinutes > 60) {
-        const overdueHours = Math.floor(overdueMinutes / 60);
-        const remainingMinutes = overdueMinutes % 60;
-        return `Overdue by ${overdueHours}h ${remainingMinutes}m`;
-      }
-      return `Overdue by ${overdueMinutes} minutes`;
+    if (!isBlockOverdue(block.endTime, block.status, selectedDate)) {
+      return null;
     }
-    return null;
+    
+    const overdueMinutes = getOverdueMinutes(block.endTime, block.status, selectedDate);
+    if (overdueMinutes > 60) {
+      const overdueHours = Math.floor(overdueMinutes / 60);
+      const remainingMinutes = overdueMinutes % 60;
+      return `Overdue by ${overdueHours}h ${remainingMinutes}m`;
+    }
+    return `Overdue by ${overdueMinutes} minutes`;
   };
 
 

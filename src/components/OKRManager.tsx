@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
 import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
-import { toDateSafe, getDurationSafe, msToHours, formatHours } from '@/utils/dateUtils';
+import { parseDateTime, calculateDuration, msToHours, formatHours } from '@/lib/datetime';
 
 interface OKRManagerProps {
   goals: Goal[];
@@ -87,15 +87,15 @@ export default function OKRManager({
       }, 0);
   };
 
-  // 🔥 P1 FIX: Calculate ACTUAL completed hours for projects using safe date parsing
+  // 🔥 P0 TASK C + P1 TASK D: Calculate ACTUAL completed hours for projects using centralized datetime
   const calculateProjectActualHours = (projectId: string): number => {
     return timeBlocks
       .filter(block => block.projectId === projectId && block.status === 'completed')
       .reduce((total, block) => {
         // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
-        const startTime = block.actualStartTime ? toDateSafe(block.actualStartTime) : toDateSafe(block.startTime);
-        const endTime = block.actualEndTime ? toDateSafe(block.actualEndTime) : toDateSafe(block.endTime);
-        const durationMs = getDurationSafe(startTime, endTime);
+        const startTime = block.actualStartTime || block.startTime;
+        const endTime = block.actualEndTime || block.endTime;
+        const durationMs = calculateDuration(startTime, endTime);
         return total + msToHours(durationMs);
       }, 0);
   };
@@ -123,7 +123,7 @@ export default function OKRManager({
     return directGoalHours + projectHours;
   };
 
-  // 🔥 P1 FIX: Calculate ACTUAL completed hours for goals
+  // 🔥 P0 TASK C + P1 TASK D: Calculate ACTUAL completed hours for goals using centralized datetime
   const calculateGoalActualHours = (goalId: string): number => {
     // Sum from direct goal time blocks (completed only)
     const directGoalHours = timeBlocks
@@ -132,10 +132,10 @@ export default function OKRManager({
         block.status === 'completed'
       )
       .reduce((total, block) => {
-        const startTime = block.actualStartTime ? new Date(block.actualStartTime) : new Date(block.startTime);
-        const endTime = block.actualEndTime ? new Date(block.actualEndTime) : new Date(block.endTime);
-        const durationMs = endTime.getTime() - startTime.getTime();
-        const hours = durationMs / (1000 * 60 * 60);
+        const startTime = block.actualStartTime || block.startTime;
+        const endTime = block.actualEndTime || block.endTime;
+        const durationMs = calculateDuration(startTime, endTime);
+        const hours = msToHours(durationMs);
         // If block has goal allocation, use it
         if (block.goalAllocation && block.goalAllocation[goalId]) {
           return total + (hours * block.goalAllocation[goalId] / 100);

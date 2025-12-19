@@ -1419,10 +1419,10 @@ export default function HomePage() {
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-        {/* Auth Modal */}
+        {/* Auth Modal - Always open, no close for true AuthGate */}
         <AuthModal 
-          isOpen={showAuthModal} 
-          onClose={() => setShowAuthModal(false)} 
+          isOpen={true} 
+          onClose={() => {}} 
         />
 
         {/* Landing page pulita per guest */}
@@ -1463,16 +1463,9 @@ export default function HomePage() {
             </div>
             
             <div className="mt-12">
-              <button
-                onClick={() => {
-                  setShowAuthModal(true);
-                  audioManager.buttonFeedback();
-                }}
-                onMouseEnter={() => audioManager.buttonHover()}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-lg px-10 py-5 rounded-lg transition-all duration-200"
-              >
-                🚀 Start Your Journey
-              </button>
+              <p className="text-slate-400 text-lg">
+                📱 Use the auth dialog above to get started
+              </p>
               <p className="text-slate-400 text-sm mt-4">
                 Free to use • Cloud sync with Firebase • Offline capable
               </p>
