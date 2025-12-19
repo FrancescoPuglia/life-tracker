@@ -440,7 +440,17 @@ export default function TimeBlockPlanner({
                     {block.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-                <div className="text-xl drop-shadow-sm">{getStatusIndicator(block)}</div>
+                <div 
+                  className="text-xl drop-shadow-sm cursor-help" 
+                  title={
+                    block.status === 'completed' ? 'Completed' :
+                    block.status === 'in_progress' ? 'In Progress' :
+                    (block.status === 'planned' && new Date() > block.endTime) ? `Overdue by ${Math.floor((new Date().getTime() - block.endTime.getTime()) / 60000)} minutes` :
+                    'Planned'
+                  }
+                >
+                  {getStatusIndicator(block)}
+                </div>
               </div>
             </div>
           ))}

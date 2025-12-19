@@ -27,6 +27,9 @@ import RealTimeAdaptation from '@/components/RealTimeAdaptation';
 import MicroCoachDashboard from '@/components/MicroCoachDashboard';
 import { audioManager } from '@/lib/audioManager';
 
+// Build ID for deploy verification
+const BUILD_ID = `2025-12-19-${Date.now().toString(36)}`;
+
 export default function HomePage() {
   const auth = useAuth();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -147,8 +150,8 @@ export default function HomePage() {
           setShowAuthModal(true);
         }
 
-        // Phase 2: Non-blocking background init
-        setTimeout(() => {
+        // Phase 2: Non-blocking background init using requestIdleCallback when available
+        const runBackgroundInit = () => {
           console.time('BACKGROUND_INIT');
           const backgroundStart = performance.now();
           Promise.all([
@@ -160,7 +163,13 @@ export default function HomePage() {
             console.timeEnd('BACKGROUND_INIT');
             console.log('🚀 BACKGROUND_INIT completed');
           });
-        }, 0);
+        };
+
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+          window.requestIdleCallback(runBackgroundInit);
+        } else {
+          setTimeout(runBackgroundInit, 0);
+        }
 
       } catch (error) {
         console.error('INIT_ERROR', error);
@@ -170,12 +179,15 @@ export default function HomePage() {
         console.timeEnd('TOTAL_INIT');
         
         // Print performance summary
-        console.log('🔥 INIT_PERFORMANCE_SUMMARY:', {
+        const criticalPathMs = timings.DB_INIT + (timings.FIREBASE_SWITCH || 0) + (timings.ESSENTIAL_DATA_LOAD || timings.GUEST_LOAD || 0);
+        
+        console.log('🚀 PERF_SUMMARY:', {
           mode: currentUser?.uid ? 'LOGGED' : 'GUEST',
           effectiveUserId: effectiveUserId,
-          timings: timings,
-          criticalPath: timings.DB_INIT + (timings.FIREBASE_SWITCH || 0) + (timings.ESSENTIAL_DATA_LOAD || timings.GUEST_LOAD || 0),
-          buildId: process.env.NEXT_PUBLIC_BUILD_ID || 'unknown'
+          criticalPath: Math.round(criticalPathMs),
+          totalTime: Math.round(timings.TOTAL_INIT),
+          timings: Object.fromEntries(Object.entries(timings).map(([k, v]) => [k, Math.round(v)])),
+          buildId: BUILD_ID
         });
         
         setIsLoading(false);
@@ -416,10 +428,10 @@ export default function HomePage() {
 
   // Reload analytics when timeRange changes
   useEffect(() => {
-    if (!isLoading && analyticsData) {
+    if (!isLoading && analyticsData && authReady) {
       loadAnalyticsData();
     }
-  }, [timeRange, isLoading]);
+  }, [timeRange, isLoading, authReady]);
 
   // Update current time block
   useEffect(() => {
@@ -675,7 +687,24 @@ export default function HomePage() {
     try {
       setAnalyticsLoading(true);
       
-      const userId = currentUser!.uid;
+      // SAFE: Use effectiveUserId instead of currentUser!.uid
+      const userId = currentUser?.uid ?? effectiveUserId;
+      const isLoggedUser = !!currentUser?.uid;
+      
+      console.log('ANALYTICS_START', { 
+        mode: isLoggedUser ? 'logged' : 'guest', 
+        uid: userId, 
+        authReady 
+      });
+      
+      // If no valid userId available, skip analytics gracefully
+      if (!userId || userId === 'guest-temp') {
+        console.log('ANALYTICS_SKIP', 'no valid userId available');
+        setAnalyticsData(null);
+        setAnalyticsLoading(false);
+        return;
+      }
+      
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
 
       const [
@@ -721,7 +750,7 @@ export default function HomePage() {
 
       setAnalyticsLoading(false);
     } catch (error) {
-      console.error('Failed to load analytics data:', error);
+      console.error('ANALYTICS_ERROR', error);
       setAnalyticsLoading(false);
     }
   };
@@ -1331,7 +1360,7 @@ export default function HomePage() {
       {currentUser && <DailyMotivation />}
 
       {/* NOW Bar - Professional Header */}
-      <div className="card fixed top-0 left-0 right-0 z-40 border-l-0 border-r-0 border-t-0 rounded-none">
+      <div className="bg-white/90 backdrop-blur-md border-b border-neutral-200 shadow-lg fixed top-0 left-0 right-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           {/* Left side - NOW Bar */}
           <div className="flex-1">
@@ -1392,15 +1421,15 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Main Content - Professional 2-Column Layout */}
-      <div className="pt-24 pb-8 bg-neutral-50">
+      {/* Main Content - Professional 2-Column Layout with Modern Background */}
+      <div className="pt-24 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
         {currentUser ? (
           <div className="container mx-auto">
             <div className="grid-responsive gap-6">
               {/* LEFT SIDEBAR - Control Panel */}
               <div className="space-y-6">
                 {/* AI Brain - Compact & Clean */}
-                <div className="card card-body">
+                <div className="card-elevated card-body hover-lift transition-smooth">
                   <div className="mb-4">
                     <h3 className="heading-3 flex items-center gap-3">
                       🧠 AI Assistant
@@ -1424,7 +1453,7 @@ export default function HomePage() {
                 </div>
 
                 {/* KPI Dashboard - Clean Cards */}
-                <div className="card">
+                <div className="card-elevated hover-lift transition-smooth">
                   <div className="card-header">
                     <h3 className="heading-3">Today's Progress</h3>
                   </div>
@@ -1437,7 +1466,7 @@ export default function HomePage() {
                 </div>
 
                 {/* Module Navigation - Professional Cards */}
-                <div className="card">
+                <div className="card-elevated hover-lift transition-smooth">
                   <div className="card-header">
                     <h3 className="heading-3">Modules</h3>
                   </div>
@@ -1475,7 +1504,7 @@ export default function HomePage() {
               </div>
 
               {/* RIGHT MAIN CONTENT - Focus Area */}
-              <div className="card">
+              <div className="card-elevated shadow-xl">
                 <div className="card-header">
                   <h2 className="heading-2">
                     {activeTab === 'planner' && '📅 Time Planner'}
@@ -1652,7 +1681,7 @@ export default function HomePage() {
               </p>
               
               <div className="grid md:grid-cols-3 gap-8 mt-16">
-                <div className="card card-body text-center">
+                <div className="card-elevated card-body text-center hover-lift transition-smooth">
                   <div className="text-4xl mb-4">🚀</div>
                   <h3 className="heading-3 mb-3">Smart Planning</h3>
                   <p className="text-body">
@@ -1660,7 +1689,7 @@ export default function HomePage() {
                   </p>
                 </div>
                 
-                <div className="card card-body text-center">
+                <div className="card-elevated card-body text-center hover-lift transition-smooth">
                   <div className="text-4xl mb-4">🔥</div>
                   <h3 className="heading-3 mb-3">Habit Mastery</h3>
                   <p className="text-body">
@@ -1668,7 +1697,7 @@ export default function HomePage() {
                   </p>
                 </div>
                 
-                <div className="card card-body text-center">
+                <div className="card-elevated card-body text-center hover-lift transition-smooth">
                   <div className="text-4xl mb-4">📊</div>
                   <h3 className="heading-3 mb-3">Deep Analytics</h3>
                   <p className="text-body">
@@ -1696,6 +1725,16 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      {/* Build Info Footer - Deploy Verification */}
+      <footer className="border-t border-neutral-200 bg-neutral-50 py-3">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex justify-between items-center text-xs text-neutral-500">
+            <span>Life Tracker © 2025</span>
+            <span className="font-mono">build: {BUILD_ID}</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
