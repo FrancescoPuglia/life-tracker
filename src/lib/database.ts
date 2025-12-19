@@ -71,12 +71,12 @@ class IndexedDBAdapter implements DatabaseAdapter {
         console.timeEnd('IDB_OPEN');
         const error = request.error;
         
-        // Handle VersionError specifically
+        // 🔥 P0 FIX: Handle VersionError specifically with better messaging
         if (error && error.name === 'VersionError') {
           const enhancedError = new Error(
-            `VersionError: Local database version is newer than this build. ` +
-            `Expected: ${this.version}, but browser has newer version. ` +
-            `Please refresh the page or reset local database.`
+            `VersionError: Local database version conflict (Expected: ${this.version}). ` +
+            `This usually happens when opening multiple tabs or after updates. ` +
+            `Close other tabs and refresh, or reset local database if the problem persists.`
           );
           enhancedError.name = 'VersionError';
           reject(enhancedError);
@@ -1078,6 +1078,28 @@ class LifeTrackerDB {
     });
 
     return todayBlocks;
+  }
+
+  // 🚀 P0 OPTIMIZATION: Get timeBlocks for a specific date
+  async getTimeBlocksForDate(userId: string, date: Date): Promise<TimeBlock[]> {
+    const dayStart = new Date(date);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Adapter-agnostic fallback: get all timeBlocks and filter in JS
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    
+    // Filter for the specific date and matching userId
+    const dateBlocks = allTimeBlocks.filter(block => {
+      if (block.userId !== userId) return false;
+      
+      const startTime = this.toDateSafe(block.startTime);
+      if (!startTime) return false;
+      return startTime >= dayStart && startTime < dayEnd;
+    });
+
+    return dateBlocks;
   }
 
   // Helper to safely convert various date formats to Date

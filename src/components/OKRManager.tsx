@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
 import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { toDateSafe, getDurationSafe, msToHours, formatHours } from '@/utils/dateUtils';
 
 interface OKRManagerProps {
   goals: Goal[];
@@ -76,13 +77,26 @@ export default function OKRManager({
     return tasks.filter(t => t.projectId === projectId);
   };
 
-  // 🔥 NEW: Hours calculation utilities
+  // 🔥 P1 FIX: Hours calculation utilities with ACTUAL vs PLANNED distinction
   const calculateProjectPlannedHours = (projectId: string): number => {
     return timeBlocks
       .filter(block => block.projectId === projectId)
       .reduce((total, block) => {
         const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
         return total + (durationMs / (1000 * 60 * 60)); // Convert to hours
+      }, 0);
+  };
+
+  // 🔥 P1 FIX: Calculate ACTUAL completed hours for projects using safe date parsing
+  const calculateProjectActualHours = (projectId: string): number => {
+    return timeBlocks
+      .filter(block => block.projectId === projectId && block.status === 'completed')
+      .reduce((total, block) => {
+        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
+        const startTime = block.actualStartTime ? toDateSafe(block.actualStartTime) : toDateSafe(block.startTime);
+        const endTime = block.actualEndTime ? toDateSafe(block.actualEndTime) : toDateSafe(block.endTime);
+        const durationMs = getDurationSafe(startTime, endTime);
+        return total + msToHours(durationMs);
       }, 0);
   };
 
@@ -104,6 +118,35 @@ export default function OKRManager({
     const goalProjects = getGoalProjects(goalId);
     const projectHours = goalProjects.reduce((total, project) => {
       return total + calculateProjectPlannedHours(project.id);
+    }, 0);
+    
+    return directGoalHours + projectHours;
+  };
+
+  // 🔥 P1 FIX: Calculate ACTUAL completed hours for goals
+  const calculateGoalActualHours = (goalId: string): number => {
+    // Sum from direct goal time blocks (completed only)
+    const directGoalHours = timeBlocks
+      .filter(block => 
+        (block.goalId === goalId || (block.goalIds && block.goalIds.includes(goalId))) &&
+        block.status === 'completed'
+      )
+      .reduce((total, block) => {
+        const startTime = block.actualStartTime ? new Date(block.actualStartTime) : new Date(block.startTime);
+        const endTime = block.actualEndTime ? new Date(block.actualEndTime) : new Date(block.endTime);
+        const durationMs = endTime.getTime() - startTime.getTime();
+        const hours = durationMs / (1000 * 60 * 60);
+        // If block has goal allocation, use it
+        if (block.goalAllocation && block.goalAllocation[goalId]) {
+          return total + (hours * block.goalAllocation[goalId] / 100);
+        }
+        return total + hours;
+      }, 0);
+    
+    // Sum from project time blocks (completed only)
+    const goalProjects = getGoalProjects(goalId);
+    const projectHours = goalProjects.reduce((total, project) => {
+      return total + calculateProjectActualHours(project.id);
     }, 0);
     
     return directGoalHours + projectHours;
@@ -138,24 +181,24 @@ export default function OKRManager({
         return;
       }
       
-      // Strategy 2: Hours-based progress
-      const plannedHours = calculateGoalPlannedHours(goal.id);
+      // Strategy 2: Hours-based progress using ACTUAL hours vs TARGET hours
+      const actualHours = calculateGoalActualHours(goal.id);
       const targetHours = goalProjects.reduce((sum, project) => {
         return sum + (project.totalHoursTarget || 0);
       }, 0);
       
-      console.log(`  Hours-based calculation: ${plannedHours}h planned / ${targetHours}h target`);
+      console.log(`  Hours-based calculation: ${actualHours}h actual / ${targetHours}h target`);
       
       if (targetHours > 0) {
-        const hoursProgress = Math.min(100, (plannedHours / targetHours) * 100);
+        const hoursProgress = Math.min(100, (actualHours / targetHours) * 100);
         console.log(`  Hours Progress: ${hoursProgress}%`);
         progressMap.set(goal.id, hoursProgress);
         return;
       }
       
-      // Fallback: Show 0% but log that we have planned hours without targets
-      if (plannedHours > 0) {
-        console.log(`  Fallback: ${plannedHours}h planned but no targets set`);
+      // Fallback: Show 0% but log that we have actual hours without targets
+      if (actualHours > 0) {
+        console.log(`  Fallback: ${actualHours}h actual but no targets set`);
       }
       
       progressMap.set(goal.id, 0);

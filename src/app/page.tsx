@@ -78,6 +78,10 @@ export default function HomePage() {
   const adapterInfo = db.getAdapterDebugInfo();
   const lastLoadedUserId = useRef<string | null>(null);
   const hasInitialized = useRef(false);
+  
+  // 🔥 P0 FIX: Deterministic init guards  
+  const initInFlightRef = useRef(false);
+  const hasInitializedForUserRef = useRef<string | null>(null);
 
   const sessionManager = SessionManager.getInstance();
 
@@ -109,8 +113,20 @@ export default function HomePage() {
   // DETERMINISTIC INIT: Only run after auth is definitively ready
   useEffect(() => {
     if (!authReady || typeof window === 'undefined') return;
+    
+    // 🔥 P0 FIX: Deterministic guard - prevent multiple init runs
+    const userKey = currentUser?.uid || 'guest';
+    if (initInFlightRef.current || hasInitializedForUserRef.current === userKey) {
+      console.log('🔥 INIT SKIPPED:', { 
+        initInFlight: initInFlightRef.current,
+        alreadyInitialized: hasInitializedForUserRef.current === userKey,
+        userKey 
+      });
+      return;
+    }
 
     const run = async () => {
+      initInFlightRef.current = true;
       console.time('TOTAL_INIT');
       const timings: Record<string, number> = {};
       const startTotal = performance.now();
@@ -130,7 +146,15 @@ export default function HomePage() {
           console.time('FIREBASE_SWITCH');
           const fbStart = performance.now();
           const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
-          await ensureFirestorePersistence(firestore);
+          
+          // 🔥 P0 FIX: Firebase persistence NON-BLOCCANTE con warning
+          try {
+            await ensureFirestorePersistence(firestore);
+          } catch (error: any) {
+            console.warn('⚠️ Firebase persistence failed but continuing:', error?.message || error);
+            // NON rethrow - continua senza persistence
+          }
+          
           await db.switchToFirebase(currentUser.uid);
           timings.FIREBASE_SWITCH = performance.now() - fbStart;
           console.timeEnd('FIREBASE_SWITCH');
@@ -184,12 +208,15 @@ export default function HomePage() {
         console.log('🚀 PERF_SUMMARY:', {
           mode: currentUser?.uid ? 'LOGGED' : 'GUEST',
           effectiveUserId: effectiveUserId,
-          criticalPath: Math.round(criticalPathMs),
-          totalTime: Math.round(timings.TOTAL_INIT),
+          criticalPathMs: Math.round(criticalPathMs),
+          totalMs: Math.round(timings.TOTAL_INIT),
           timings: Object.fromEntries(Object.entries(timings).map(([k, v]) => [k, Math.round(v)])),
           buildId: BUILD_ID
         });
         
+        // 🔥 P0 FIX: Mark as initialized for this user
+        hasInitializedForUserRef.current = userKey;
+        initInFlightRef.current = false;
         setIsLoading(false);
       }
     };
@@ -199,19 +226,24 @@ export default function HomePage() {
 
   // ESSENTIAL DATA LOGGED: Load only what's needed for first render
   const loadEssentialDataLogged = async () => {
+    if (!currentUser?.uid) {
+      console.error('loadEssentialDataLogged called without currentUser.uid');
+      return;
+    }
+    
     console.log('📊 loadEssentialDataLogged() START - Firebase mode');
     
-    // Load only essential data for planner (default tab)
+    // 🚀 P0 OPTIMIZATION: Load only TODAY's timeBlocks + goals + projects (minimal for UI unlock)
     const [
-      allTimeBlocks, allGoals, allProjects
+      todayTimeBlocks, allGoals, allProjects
     ] = await Promise.all([
-      db.getAll<TimeBlock>('timeBlocks'),
+      db.getTodayTimeBlocks(currentUser.uid), // Only today's blocks for fast init
       db.getAll<Goal>('goals'),
       db.getAll<Project>('projects')
     ]);
 
     // Deserialize essential data
-    const deserializedTimeBlocks = allTimeBlocks.map(block => ({
+    const deserializedTimeBlocks = todayTimeBlocks.map(block => ({
       ...block,
       startTime: new Date(block.startTime),
       endTime: new Date(block.endTime),
@@ -306,17 +338,17 @@ export default function HomePage() {
   const loadEssentialDataGuest = async () => {
     console.log('📊 loadEssentialDataGuest() START - IndexedDB mode');
     
-    // Load only essential data for planner (default tab)
+    // 🚀 P0 OPTIMIZATION: Load only TODAY's timeBlocks + goals + projects (minimal for UI unlock)
     const [
-      allTimeBlocks, allGoals, allProjects
+      todayTimeBlocks, allGoals, allProjects
     ] = await Promise.all([
-      db.getAll<TimeBlock>('timeBlocks'),
+      db.getTodayTimeBlocks(effectiveUserId), // Only today's blocks for fast init
       db.getAll<Goal>('goals'),
       db.getAll<Project>('projects')
     ]);
 
     // Deserialize essential data
-    const deserializedTimeBlocks = allTimeBlocks.map(block => ({
+    const deserializedTimeBlocks = todayTimeBlocks.map(block => ({
       ...block,
       startTime: new Date(block.startTime),
       endTime: new Date(block.endTime),
@@ -450,6 +482,44 @@ export default function HomePage() {
 
     return () => clearInterval(interval);
   }, [timeBlocks]);
+
+  // 🚀 P0 OPTIMIZATION: Load timeBlocks for selected date on-demand
+  useEffect(() => {
+    const loadTimeBlocksForDate = async () => {
+      if (!authReady || !hasInitializedForUserRef.current) return;
+      
+      const selectedDateStr = selectedDate.toDateString();
+      const hasBlocksForDate = timeBlocks.some(block => 
+        new Date(block.startTime).toDateString() === selectedDateStr
+      );
+      
+      // If we don't have blocks for this date, load them
+      if (!hasBlocksForDate && selectedDateStr !== new Date().toDateString()) {
+        console.log('📅 Loading timeBlocks for date:', selectedDateStr);
+        try {
+          const userId = currentUser?.uid || effectiveUserId;
+          const dateBlocks = await db.getTimeBlocksForDate(userId, selectedDate);
+          
+          const deserializedBlocks = dateBlocks.map(block => ({
+            ...block,
+            startTime: new Date(block.startTime),
+            endTime: new Date(block.endTime),
+            createdAt: new Date(block.createdAt),
+            updatedAt: new Date(block.updatedAt),
+            actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+            actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+          }));
+          
+          setTimeBlocks(prev => [...prev, ...deserializedBlocks]);
+          console.log(`📅 Loaded ${deserializedBlocks.length} blocks for ${selectedDateStr}`);
+        } catch (error) {
+          console.warn('Failed to load blocks for date:', error);
+        }
+      }
+    };
+
+    loadTimeBlocksForDate();
+  }, [selectedDate, authReady, hasInitializedForUserRef.current, currentUser?.uid, effectiveUserId]);
 
   const loadData = async () => {
     if (typeof window === 'undefined') {
@@ -1328,22 +1398,151 @@ export default function HomePage() {
     },
   };
 
-  if (!authReady || isLoading) {
+  // 🔥 P0 FIX: AuthGate - Solo login screen pulita prima dell'auth
+  if (!authReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
           <div className="w-20 h-20 mx-auto mb-8">
-            <div className="w-20 h-20 border-4 border-primary-200 rounded-full border-r-primary-600" style={{ animation: 'spin 1s linear infinite' }}></div>
+            <div className="w-20 h-20 border-4 border-blue-200 rounded-full border-r-blue-600" style={{ animation: 'spin 1s linear infinite' }}></div>
           </div>
-          <h2 className="heading-1 text-neutral-900 mb-4">Life Tracker</h2>
-          <p className="text-body text-lg">
-            {!authReady ? 'Checking authentication...' : 'Initializing system...'}
+          <h2 className="text-3xl font-bold text-white mb-4">Life Tracker</h2>
+          <p className="text-slate-300 text-lg">
+            Checking authentication...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // 🔥 P0 FIX: Guest landing page - Solo quando auth è ready ma user non loggato
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
+        {/* Auth Modal */}
+        <AuthModal 
+          isOpen={showAuthModal} 
+          onClose={() => setShowAuthModal(false)} 
+        />
+
+        {/* Landing page pulita per guest */}
+        <div className="max-w-4xl mx-auto px-4 text-center py-20">
+          <div className="space-y-8">
+            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">
+              Life Tracker
+            </h1>
+            <p className="text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed">
+              Transform your productivity with evidence-based time tracking, habit formation, and goal achievement. 
+              Know every second what to do.
+            </p>
+            
+            <div className="grid md:grid-cols-3 gap-8 mt-16">
+              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
+                <div className="text-4xl mb-4">🚀</div>
+                <h3 className="text-xl font-semibold text-white mb-3">Smart Planning</h3>
+                <p className="text-slate-300">
+                  Drag-and-drop timeboxing with automatic conflict detection and real-time adjustments.
+                </p>
+              </div>
+              
+              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
+                <div className="text-4xl mb-4">🔥</div>
+                <h3 className="text-xl font-semibold text-white mb-3">Habit Mastery</h3>
+                <p className="text-slate-300">
+                  Build lasting habits with streak tracking, implementation intentions, and smart reminders.
+                </p>
+              </div>
+              
+              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
+                <div className="text-4xl mb-4">📊</div>
+                <h3 className="text-xl font-semibold text-white mb-3">Deep Analytics</h3>
+                <p className="text-slate-300">
+                  Correlation analysis, performance trends, and actionable insights powered by your data.
+                </p>
+              </div>
+            </div>
+            
+            <div className="mt-12">
+              <button
+                onClick={() => {
+                  setShowAuthModal(true);
+                  audioManager.buttonFeedback();
+                }}
+                onMouseEnter={() => audioManager.buttonHover()}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-lg px-10 py-5 rounded-lg transition-all duration-200"
+              >
+                🚀 Start Your Journey
+              </button>
+              <p className="text-slate-400 text-sm mt-4">
+                Free to use • Cloud sync with Firebase • Offline capable
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 🔥 P0 FIX: Check for database errors (VersionError recovery)
+  const dbError = db.getDatabaseError();
+  if (dbError && dbError.type === 'VersionError') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center p-8 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl">
+          <div className="text-6xl mb-6">⚠️</div>
+          <h2 className="text-2xl font-bold text-white mb-4">Database Version Conflict</h2>
+          <p className="text-slate-300 mb-6 leading-relaxed">
+            {dbError.message}
+          </p>
+          
+          {dbError.canReset && (
+            <div className="space-y-4">
+              <button
+                onClick={async () => {
+                  try {
+                    await db.resetLocalDatabase();
+                    db.clearDatabaseError();
+                    window.location.reload();
+                  } catch (error) {
+                    console.error('Reset failed:', error);
+                  }
+                }}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition-all duration-200"
+              >
+                Reset Local Database
+              </button>
+              <p className="text-xs text-slate-400">
+                ⚠️ This will delete your local data. Cloud data remains safe.
+              </p>
+            </div>
+          )}
+          
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-all duration-200"
+          >
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 🔥 P0 FIX: Loading state SOLO per utenti loggati durante init
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-20 h-20 mx-auto mb-8">
+            <div className="w-20 h-20 border-4 border-blue-200 rounded-full border-r-blue-600" style={{ animation: 'spin 1s linear infinite' }}></div>
+          </div>
+          <h2 className="text-3xl font-bold text-white mb-4">Life Tracker</h2>
+          <p className="text-slate-300 text-lg">Initializing system...</p>
           <div className="mt-6 flex justify-center space-x-2">
             {[...Array(3)].map((_, i) => (
               <div 
                 key={i}
-                className="w-3 h-3 rounded-full bg-primary-500"
+                className="w-3 h-3 rounded-full bg-blue-500"
                 style={{ animation: 'pulse 1.5s ease-in-out infinite', animationDelay: `${i * 0.3}s` }}
               />
             ))}
@@ -1401,7 +1600,7 @@ export default function HomePage() {
                 {/* User info */}
                 <div className="flex items-center space-x-3">
                   <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold">
-                    {currentUser.displayName?.[0] || currentUser.email?.[0] || 'U'}
+                    {(currentUser.displayName && currentUser.displayName[0]) || (currentUser.email && currentUser.email[0]) || 'U'}
                   </div>
                   <div className="hidden md:block">
                     <div className="text-sm font-medium text-neutral-900">
@@ -1441,9 +1640,8 @@ export default function HomePage() {
 
       {/* Main Content - Professional 2-Column Layout with Modern Background */}
       <div className="pt-24 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
-        {currentUser ? (
-          <div className="container mx-auto">
-            <div className="grid-responsive gap-6">
+        <div className="container mx-auto">
+          <div className="grid-responsive gap-6">
               {/* LEFT SIDEBAR - Control Panel */}
               <div className="space-y-6">
                 {/* AI Brain - Compact & Clean */}
@@ -1682,66 +1880,10 @@ export default function HomePage() {
                   onBadgeUnlocked={handleBadgeUnlocked}
                 />
               )}
-                </div>
               </div>
             </div>
           </div>
-        ) : (
-          // Landing page for non-authenticated users
-          <div className="max-w-4xl mx-auto px-4 text-center py-20">
-            <div className="space-y-8">
-              <h1 className="heading-1 text-4xl md:text-6xl text-neutral-900 mb-6">
-                Life Tracker
-              </h1>
-              <p className="text-xl text-neutral-600 max-w-2xl mx-auto leading-relaxed">
-                Transform your productivity with evidence-based time tracking, habit formation, and goal achievement. 
-                Know every second what to do.
-              </p>
-              
-              <div className="grid md:grid-cols-3 gap-8 mt-16">
-                <div className="bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-2xl p-8 text-center hover:shadow-xl hover:scale-105 transition-all duration-300">
-                  <div className="text-4xl mb-4">🚀</div>
-                  <h3 className="heading-3 mb-3">Smart Planning</h3>
-                  <p className="text-body">
-                    Drag-and-drop timeboxing with automatic conflict detection and real-time adjustments.
-                  </p>
-                </div>
-                
-                <div className="bg-gradient-to-br from-white to-orange-50 border border-orange-200 rounded-2xl p-8 text-center hover:shadow-xl hover:scale-105 transition-all duration-300">
-                  <div className="text-4xl mb-4">🔥</div>
-                  <h3 className="heading-3 mb-3">Habit Mastery</h3>
-                  <p className="text-body">
-                    Build lasting habits with streak tracking, implementation intentions, and smart reminders.
-                  </p>
-                </div>
-                
-                <div className="bg-gradient-to-br from-white to-purple-50 border border-purple-200 rounded-2xl p-8 text-center hover:shadow-xl hover:scale-105 transition-all duration-300">
-                  <div className="text-4xl mb-4">📊</div>
-                  <h3 className="heading-3 mb-3">Deep Analytics</h3>
-                  <p className="text-body">
-                    Correlation analysis, performance trends, and actionable insights powered by your data.
-                  </p>
-                </div>
-              </div>
-              
-              <div className="mt-12">
-                <button
-                  onClick={() => {
-                    setShowAuthModal(true);
-                    audioManager.buttonFeedback();
-                  }}
-                  onMouseEnter={() => audioManager.buttonHover()}
-                  className="btn btn-primary text-lg px-10 py-5"
-                >
-                  🚀 Start Your Journey
-                </button>
-                <p className="text-small mt-4">
-                  Free to use • Cloud sync with Firebase • Offline capable
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Build Info Footer - Deploy Verification */}

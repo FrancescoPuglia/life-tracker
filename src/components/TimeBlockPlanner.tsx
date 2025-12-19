@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { TimeBlock, Task, Project, Goal } from '@/types';
+import { toDateSafe } from '@/utils/dateUtils';
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
@@ -255,9 +256,22 @@ export default function TimeBlockPlanner({
     }
   };
 
+  // 🔥 P1 FIX: Improved overdue logic with safe date parsing
   const getStatusIndicator = (block: TimeBlock) => {
     const now = new Date();
-    const isOverdue = block.status === 'planned' && now > block.endTime;
+    const blockEndTime = toDateSafe(block.endTime);
+    const blockDate = toDateSafe(block.startTime);
+    const selectedDateStr = selectedDate.toDateString();
+    const blockDateStr = blockDate.toDateString();
+    
+    // Only show overdue for blocks that are:
+    // 1. Not completed 
+    // 2. Past their end time
+    // 3. On today or past days (not future days)
+    const isOverdue = block.status !== 'completed' && 
+                      now > blockEndTime && 
+                      (blockDateStr === new Date().toDateString() || blockDate < new Date());
+    
     const isActive = block.status === 'in_progress';
     const isCompleted = block.status === 'completed';
     
@@ -265,6 +279,23 @@ export default function TimeBlockPlanner({
     if (isActive) return '🔴';
     if (isOverdue) return '⚠️';
     return '⏰';
+  };
+
+  // 🔥 P1 FIX: Get overdue message with safe date parsing
+  const getOverdueMessage = (block: TimeBlock) => {
+    const now = new Date();
+    const blockEndTime = toDateSafe(block.endTime);
+    
+    if (block.status !== 'completed' && now > blockEndTime) {
+      const overdueMinutes = Math.floor((now.getTime() - blockEndTime.getTime()) / (1000 * 60));
+      if (overdueMinutes > 60) {
+        const overdueHours = Math.floor(overdueMinutes / 60);
+        const remainingMinutes = overdueMinutes % 60;
+        return `Overdue by ${overdueHours}h ${remainingMinutes}m`;
+      }
+      return `Overdue by ${overdueMinutes} minutes`;
+    }
+    return null;
   };
 
 
