@@ -108,25 +108,76 @@ export default function HomePage() {
     if (!authReady || typeof window === 'undefined') return;
 
     const run = async () => {
+      console.time('TOTAL_INIT');
+      const timings: Record<string, number> = {};
+      const startTotal = performance.now();
+
       setIsLoading(true);
       try {
+        // Phase 1: Critical blocking init only
+        console.time('DB_INIT');
+        const dbStart = performance.now();
         await db.init(); // Configure adapter -> IndexedDB default in browser
-        await audioManager.init();
+        timings.DB_INIT = performance.now() - dbStart;
+        console.timeEnd('DB_INIT');
 
+        // Determine mode and essential data only
         if (currentUser?.uid) {
           // LOGGED IN MODE: Use Firebase
+          console.time('FIREBASE_SWITCH');
+          const fbStart = performance.now();
           const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
-          await ensureFirestorePersistence(firestore); // Must run before any Firestore ops
-          await db.switchToFirebase(currentUser.uid);   // Atomic switch to Firebase
-          await loadDataLogged(); // Load user-scoped data from Firebase
+          await ensureFirestorePersistence(firestore);
+          await db.switchToFirebase(currentUser.uid);
+          timings.FIREBASE_SWITCH = performance.now() - fbStart;
+          console.timeEnd('FIREBASE_SWITCH');
+
+          console.time('ESSENTIAL_DATA_LOAD');
+          const dataStart = performance.now();
+          await loadEssentialDataLogged(); // Load only what's needed for first render
+          timings.ESSENTIAL_DATA_LOAD = performance.now() - dataStart;
+          console.timeEnd('ESSENTIAL_DATA_LOAD');
         } else {
           // GUEST MODE: Use IndexedDB for local persistence
-          await loadDataGuest(); // Load guest data from IndexedDB
+          console.time('GUEST_LOAD');
+          const guestStart = performance.now();
+          await loadEssentialDataGuest(); // Load only essential guest data
+          timings.GUEST_LOAD = performance.now() - guestStart;
+          console.timeEnd('GUEST_LOAD');
           setShowAuthModal(true);
         }
+
+        // Phase 2: Non-blocking background init
+        setTimeout(() => {
+          console.time('BACKGROUND_INIT');
+          const backgroundStart = performance.now();
+          Promise.all([
+            audioManager.init().catch(e => console.warn('Audio init failed:', e)),
+            currentUser?.uid ? loadSecondaryDataLogged() : loadSecondaryDataGuest(),
+            loadAnalyticsData().catch(e => console.warn('Analytics load failed:', e))
+          ]).then(() => {
+            timings.BACKGROUND_INIT = performance.now() - backgroundStart;
+            console.timeEnd('BACKGROUND_INIT');
+            console.log('🚀 BACKGROUND_INIT completed');
+          });
+        }, 0);
+
       } catch (error) {
         console.error('INIT_ERROR', error);
+        timings.ERROR = performance.now() - startTotal;
       } finally {
+        timings.TOTAL_INIT = performance.now() - startTotal;
+        console.timeEnd('TOTAL_INIT');
+        
+        // Print performance summary
+        console.log('🔥 INIT_PERFORMANCE_SUMMARY:', {
+          mode: currentUser?.uid ? 'LOGGED' : 'GUEST',
+          effectiveUserId: effectiveUserId,
+          timings: timings,
+          criticalPath: timings.DB_INIT + (timings.FIREBASE_SWITCH || 0) + (timings.ESSENTIAL_DATA_LOAD || timings.GUEST_LOAD || 0),
+          buildId: process.env.NEXT_PUBLIC_BUILD_ID || 'unknown'
+        });
+        
         setIsLoading(false);
       }
     };
@@ -134,24 +185,20 @@ export default function HomePage() {
     run();
   }, [authReady, currentUser?.uid]);
 
-  // LOGGED IN: Load data from Firebase (user-scoped by adapter)
-  const loadDataLogged = async () => {
-    console.log('📊 loadDataLogged() START - Firebase mode');
+  // ESSENTIAL DATA LOGGED: Load only what's needed for first render
+  const loadEssentialDataLogged = async () => {
+    console.log('📊 loadEssentialDataLogged() START - Firebase mode');
     
+    // Load only essential data for planner (default tab)
     const [
-      allTimeBlocks, allGoals, allKeyResults, allProjects, 
-      allTasks, allHabits, allHabitLogs
+      allTimeBlocks, allGoals, allProjects
     ] = await Promise.all([
       db.getAll<TimeBlock>('timeBlocks'),
       db.getAll<Goal>('goals'),
-      db.getAll<KeyResult>('keyResults'),
-      db.getAll<Project>('projects'),
-      db.getAll<Task>('tasks'),
-      db.getAll<Habit>('habits'),
-      db.getAll<HabitLog>('habitLogs')
+      db.getAll<Project>('projects')
     ]);
 
-    // Firebase adapter is user-scoped, no need to filter by userId
+    // Deserialize essential data
     const deserializedTimeBlocks = allTimeBlocks.map(block => ({
       ...block,
       startTime: new Date(block.startTime),
@@ -162,18 +209,11 @@ export default function HomePage() {
       actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
     }));
 
-    // Deserialize dates for all collections
     const deserializedGoals = allGoals.map(goal => ({
       ...goal,
       targetDate: new Date(goal.targetDate),
       createdAt: new Date(goal.createdAt),
       updatedAt: new Date(goal.updatedAt)
-    }));
-
-    const deserializedKeyResults = allKeyResults.map(kr => ({
-      ...kr,
-      createdAt: new Date(kr.createdAt),
-      updatedAt: new Date(kr.updatedAt)
     }));
 
     const deserializedProjects = allProjects.map(project => ({
@@ -183,89 +223,36 @@ export default function HomePage() {
       updatedAt: new Date(project.updatedAt)
     }));
 
-    const deserializedTasks = allTasks.map(task => ({
-      ...task,
-      dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-      deadline: task.deadline ? new Date(task.deadline) : undefined,
-      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
-      createdAt: new Date(task.createdAt),
-      updatedAt: new Date(task.updatedAt)
-    }));
-
-    const deserializedHabits = allHabits.map(habit => ({
-      ...habit,
-      createdAt: new Date(habit.createdAt),
-      updatedAt: new Date(habit.updatedAt)
-    }));
-
-    const deserializedHabitLogs = allHabitLogs.map(log => ({
-      ...log,
-      date: new Date(log.date),
-      createdAt: new Date(log.createdAt)
-    }));
-
+    // Set essential data immediately
     setTimeBlocks(deserializedTimeBlocks);
     setGoals(deserializedGoals);
-    setKeyResults(deserializedKeyResults);
     setProjects(deserializedProjects);
-    setTasks(deserializedTasks);
-    setHabits(deserializedHabits);
-    setHabitLogs(deserializedHabitLogs);
 
-    console.log('📊 loadDataLogged() COMPLETE', {
+    console.log('📊 loadEssentialDataLogged() COMPLETE - Essential data loaded', {
       timeBlocks: deserializedTimeBlocks.length,
       goals: deserializedGoals.length,
-      adapter: db.getAdapterDebugInfo()
+      projects: deserializedProjects.length
     });
   };
 
-  // GUEST MODE: Load data from IndexedDB (no userId filtering)
-  const loadDataGuest = async () => {
-    console.log('📊 loadDataGuest() START - IndexedDB mode');
+  // SECONDARY DATA LOGGED: Load remaining data in background
+  const loadSecondaryDataLogged = async () => {
+    console.log('📊 loadSecondaryDataLogged() START - Firebase mode');
     
     const [
-      allTimeBlocks, allGoals, allKeyResults, allProjects, 
-      allTasks, allHabits, allHabitLogs
+      allKeyResults, allTasks, allHabits, allHabitLogs
     ] = await Promise.all([
-      db.getAll<TimeBlock>('timeBlocks'),
-      db.getAll<Goal>('goals'),
       db.getAll<KeyResult>('keyResults'),
-      db.getAll<Project>('projects'),
       db.getAll<Task>('tasks'),
       db.getAll<Habit>('habits'),
       db.getAll<HabitLog>('habitLogs')
     ]);
 
-    // Guest mode: no userId filtering, all data is "guest" data
-    const deserializedTimeBlocks = allTimeBlocks.map(block => ({
-      ...block,
-      startTime: new Date(block.startTime),
-      endTime: new Date(block.endTime),
-      createdAt: new Date(block.createdAt),
-      updatedAt: new Date(block.updatedAt),
-      actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-      actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-    }));
-
-    // Deserialize dates for all collections
-    const deserializedGoals = allGoals.map(goal => ({
-      ...goal,
-      targetDate: new Date(goal.targetDate),
-      createdAt: new Date(goal.createdAt),
-      updatedAt: new Date(goal.updatedAt)
-    }));
-
+    // Deserialize secondary data
     const deserializedKeyResults = allKeyResults.map(kr => ({
       ...kr,
       createdAt: new Date(kr.createdAt),
       updatedAt: new Date(kr.updatedAt)
-    }));
-
-    const deserializedProjects = allProjects.map(project => ({
-      ...project,
-      dueDate: project.dueDate ? new Date(project.dueDate) : undefined,
-      createdAt: new Date(project.createdAt),
-      updatedAt: new Date(project.updatedAt)
     }));
 
     const deserializedTasks = allTasks.map(task => ({
@@ -289,18 +276,122 @@ export default function HomePage() {
       createdAt: new Date(log.createdAt)
     }));
 
-    setTimeBlocks(deserializedTimeBlocks);
-    setGoals(deserializedGoals);
+    // Set secondary data
     setKeyResults(deserializedKeyResults);
-    setProjects(deserializedProjects);
     setTasks(deserializedTasks);
     setHabits(deserializedHabits);
     setHabitLogs(deserializedHabitLogs);
 
-    console.log('📊 loadDataGuest() COMPLETE', {
+    console.log('📊 loadSecondaryDataLogged() COMPLETE', {
+      keyResults: deserializedKeyResults.length,
+      tasks: deserializedTasks.length,
+      habits: deserializedHabits.length,
+      habitLogs: deserializedHabitLogs.length
+    });
+  };
+
+  // ESSENTIAL DATA GUEST: Load only what's needed for first render  
+  const loadEssentialDataGuest = async () => {
+    console.log('📊 loadEssentialDataGuest() START - IndexedDB mode');
+    
+    // Load only essential data for planner (default tab)
+    const [
+      allTimeBlocks, allGoals, allProjects
+    ] = await Promise.all([
+      db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<Goal>('goals'),
+      db.getAll<Project>('projects')
+    ]);
+
+    // Deserialize essential data
+    const deserializedTimeBlocks = allTimeBlocks.map(block => ({
+      ...block,
+      startTime: new Date(block.startTime),
+      endTime: new Date(block.endTime),
+      createdAt: new Date(block.createdAt),
+      updatedAt: new Date(block.updatedAt),
+      actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+      actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+    }));
+
+    const deserializedGoals = allGoals.map(goal => ({
+      ...goal,
+      targetDate: new Date(goal.targetDate),
+      createdAt: new Date(goal.createdAt),
+      updatedAt: new Date(goal.updatedAt)
+    }));
+
+    const deserializedProjects = allProjects.map(project => ({
+      ...project,
+      dueDate: project.dueDate ? new Date(project.dueDate) : undefined,
+      createdAt: new Date(project.createdAt),
+      updatedAt: new Date(project.updatedAt)
+    }));
+
+    // Set essential data immediately
+    setTimeBlocks(deserializedTimeBlocks);
+    setGoals(deserializedGoals);
+    setProjects(deserializedProjects);
+
+    console.log('📊 loadEssentialDataGuest() COMPLETE - Essential data loaded', {
       timeBlocks: deserializedTimeBlocks.length,
       goals: deserializedGoals.length,
-      adapter: db.getAdapterDebugInfo()
+      projects: deserializedProjects.length
+    });
+  };
+
+  // SECONDARY DATA GUEST: Load remaining data in background
+  const loadSecondaryDataGuest = async () => {
+    console.log('📊 loadSecondaryDataGuest() START - IndexedDB mode');
+    
+    const [
+      allKeyResults, allTasks, allHabits, allHabitLogs
+    ] = await Promise.all([
+      db.getAll<KeyResult>('keyResults'),
+      db.getAll<Task>('tasks'),
+      db.getAll<Habit>('habits'),
+      db.getAll<HabitLog>('habitLogs')
+    ]);
+
+    // Deserialize secondary data
+    const deserializedKeyResults = allKeyResults.map(kr => ({
+      ...kr,
+      createdAt: new Date(kr.createdAt),
+      updatedAt: new Date(kr.updatedAt)
+    }));
+
+    const deserializedTasks = allTasks.map(task => ({
+      ...task,
+      dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+      deadline: task.deadline ? new Date(task.deadline) : undefined,
+      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+      createdAt: new Date(task.createdAt),
+      updatedAt: new Date(task.updatedAt)
+    }));
+
+    const deserializedHabits = allHabits.map(habit => ({
+      ...habit,
+      createdAt: new Date(habit.createdAt),
+      updatedAt: new Date(habit.updatedAt)
+    }));
+
+    const deserializedHabitLogs = allHabitLogs.map(log => ({
+      ...log,
+      date: new Date(log.date),
+      createdAt: new Date(log.createdAt)
+    }));
+
+    // Set secondary data
+    setKeyResults(deserializedKeyResults);
+    setTasks(deserializedTasks);
+    setHabits(deserializedHabits);
+    setHabitLogs(deserializedHabitLogs);
+
+    console.log('📊 loadSecondaryDataGuest() COMPLETE', {
+      keyResults: deserializedKeyResults.length,
+      tasks: deserializedTasks.length,
+      habits: deserializedHabits.length,
+      habitLogs: deserializedHabitLogs.length
     });
   };
 
