@@ -48,22 +48,45 @@ class MemoryAdapter implements DatabaseAdapter {
   async enableOnline(): Promise<void> { return; }
 }
 
+// IndexedDB version constant - single source of truth
+const IDB_VERSION = 2;
+
 // IndexedDB Adapter (existing implementation)
 class IndexedDBAdapter implements DatabaseAdapter {
   private db: IDBDatabase | null = null;
   private dbName = 'LifeTrackerDB';
-  private version = 1;
+  private version = IDB_VERSION;
 
   async init(): Promise<void> {
     if (typeof window === 'undefined') {
       throw new Error('IndexedDB not available in server environment');
     }
     
+    console.time('IDB_OPEN');
+    
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.version);
 
-      request.onerror = () => reject(request.error);
+      request.onerror = () => {
+        console.timeEnd('IDB_OPEN');
+        const error = request.error;
+        
+        // Handle VersionError specifically
+        if (error && error.name === 'VersionError') {
+          const enhancedError = new Error(
+            `VersionError: Local database version is newer than this build. ` +
+            `Expected: ${this.version}, but browser has newer version. ` +
+            `Please refresh the page or reset local database.`
+          );
+          enhancedError.name = 'VersionError';
+          reject(enhancedError);
+        } else {
+          reject(error);
+        }
+      };
+      
       request.onsuccess = () => {
+        console.timeEnd('IDB_OPEN');
         this.db = request.result;
         resolve();
       };
@@ -656,6 +679,40 @@ class IndexedDBAdapter implements DatabaseAdapter {
 
     return { highlights, challenges, insights, nextWeekGoals };
   }
+
+  // Reset database method - only for recovery scenarios
+  async resetDatabase(): Promise<void> {
+    if (typeof window === 'undefined') {
+      throw new Error('Database reset not available in server environment');
+    }
+
+    // Close existing connection
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+
+    // Delete the database
+    return new Promise((resolve, reject) => {
+      const deleteRequest = indexedDB.deleteDatabase(this.dbName);
+      
+      deleteRequest.onsuccess = () => {
+        console.log('Local database reset successfully');
+        resolve();
+      };
+      
+      deleteRequest.onerror = () => {
+        console.error('Failed to reset local database:', deleteRequest.error);
+        reject(deleteRequest.error);
+      };
+
+      // Handle blocked case
+      deleteRequest.onblocked = () => {
+        console.warn('Database reset blocked - close other tabs and try again');
+        reject(new Error('Database reset blocked - close other tabs and try again'));
+      };
+    });
+  }
 }
 
 // Main Database Wrapper
@@ -705,11 +762,40 @@ class LifeTrackerDB {
   }
 
   async init(): Promise<void> {
+    console.time('AUTH_READY');
+    
     // ⚠️ FIX: Se siamo in browser e adapter è MemoryAdapter, riconfigura lazy
     if (typeof window !== 'undefined' && this.adapter instanceof MemoryAdapter) {
       this.configureAdapter();
     }
-    await this.adapter.init();
+
+    try {
+      await this.adapter.init();
+      console.timeEnd('AUTH_READY');
+    } catch (error: any) {
+      console.timeEnd('AUTH_READY');
+      
+      // Handle VersionError specifically - don't let it hang the init
+      if (error && error.name === 'VersionError') {
+        console.error('IndexedDB VersionError detected:', error.message);
+        
+        // Store error for UI to handle
+        if (typeof window !== 'undefined') {
+          (window as any).__lifeTrackerDBError = {
+            type: 'VersionError',
+            message: error.message,
+            canReset: !this.useFirebase // Only allow reset for guest mode
+          };
+        }
+        
+        // Don't throw - let app continue with limited functionality
+        console.warn('Database init failed but app will continue with limited functionality');
+        return;
+      }
+      
+      // For other errors, still throw
+      throw error;
+    }
   }
 
   get isUsingFirebase(): boolean {
@@ -1386,6 +1472,36 @@ class LifeTrackerDB {
     if (nextWeekGoals.length === 0) nextWeekGoals.push('Maintain current momentum');
 
     return { highlights, challenges, insights, nextWeekGoals };
+  }
+
+  // Public method to reset IndexedDB - only for guest users in recovery scenarios
+  async resetLocalDatabase(): Promise<void> {
+    if (this.useFirebase) {
+      throw new Error('Database reset not available in logged mode - data is stored in Firebase');
+    }
+
+    if (!(this.adapter instanceof IndexedDBAdapter)) {
+      throw new Error('Reset only available for IndexedDB adapter');
+    }
+
+    await (this.adapter as any).resetDatabase();
+    
+    // Reinitialize after reset
+    this.configureAdapter();
+    await this.init();
+  }
+
+  // Check if there's a database error from initialization
+  getDatabaseError(): { type: string; message: string; canReset: boolean } | null {
+    if (typeof window === 'undefined') return null;
+    return (window as any).__lifeTrackerDBError || null;
+  }
+
+  // Clear database error (after user handles it)
+  clearDatabaseError(): void {
+    if (typeof window !== 'undefined') {
+      delete (window as any).__lifeTrackerDBError;
+    }
   }
 }
 

@@ -615,8 +615,15 @@ export default function HomePage() {
 
   const calculateUserStats = async () => {
     try {
+      // SAFE: Use effectiveUserId for stats calculation
+      if (!currentUser?.uid && !effectiveUserId) {
+        console.log('STATS_SKIP: No valid user ID available');
+        return;
+      }
+      
+      const userId = currentUser?.uid || effectiveUserId;
       const allSessions = await db.getAll<Session>('sessions');
-      const userSessions = allSessions.filter(s => s.userId === currentUser!.uid);
+      const userSessions = allSessions.filter(s => s.userId === userId);
       
       // Calculate max streak from habits (real data)
       const maxStreak = habits.reduce((max, habit) => Math.max(max, habit.streakCount || 0), 0);
@@ -800,9 +807,10 @@ export default function HomePage() {
       setCurrentSession(null);
       
       // 🚀 PERFORMANCE: Direct state update instead of full reload
-      if (completedSession) {
+      if (completedSession && (currentUser?.uid || effectiveUserId)) {
         // Update KPIs immediately with new session data
-        const updatedKPIs = await db.calculateTodayKPIs(currentUser!.uid);
+        const userId = currentUser?.uid || effectiveUserId;
+        const updatedKPIs = await db.calculateTodayKPIs(userId);
         setTodayKPIs(updatedKPIs);
       }
     } catch (error) {
@@ -1362,8 +1370,18 @@ export default function HomePage() {
       {/* NOW Bar - Professional Header */}
       <div className="bg-white/90 backdrop-blur-md border-b border-neutral-200 shadow-lg fixed top-0 left-0 right-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          {/* Left side - NOW Bar */}
-          <div className="flex-1">
+          {/* Logo/Brand */}
+          <div className="flex items-center space-x-4">
+            <div className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              ⚡ LifeTracker
+            </div>
+            <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-mono">
+              {BUILD_ID}
+            </div>
+          </div>
+          
+          {/* Center - NOW Bar */}
+          <div className="flex-1 mx-8">
             <NowBar
               currentSession={currentSession}
               currentTimeBlock={currentTimeBlock}
@@ -1681,7 +1699,7 @@ export default function HomePage() {
               </p>
               
               <div className="grid md:grid-cols-3 gap-8 mt-16">
-                <div className="card-elevated card-body text-center hover-lift transition-smooth">
+                <div className="bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-2xl p-8 text-center hover:shadow-xl hover:scale-105 transition-all duration-300">
                   <div className="text-4xl mb-4">🚀</div>
                   <h3 className="heading-3 mb-3">Smart Planning</h3>
                   <p className="text-body">
@@ -1689,7 +1707,7 @@ export default function HomePage() {
                   </p>
                 </div>
                 
-                <div className="card-elevated card-body text-center hover-lift transition-smooth">
+                <div className="bg-gradient-to-br from-white to-orange-50 border border-orange-200 rounded-2xl p-8 text-center hover:shadow-xl hover:scale-105 transition-all duration-300">
                   <div className="text-4xl mb-4">🔥</div>
                   <h3 className="heading-3 mb-3">Habit Mastery</h3>
                   <p className="text-body">
@@ -1697,7 +1715,7 @@ export default function HomePage() {
                   </p>
                 </div>
                 
-                <div className="card-elevated card-body text-center hover-lift transition-smooth">
+                <div className="bg-gradient-to-br from-white to-purple-50 border border-purple-200 rounded-2xl p-8 text-center hover:shadow-xl hover:scale-105 transition-all duration-300">
                   <div className="text-4xl mb-4">📊</div>
                   <h3 className="heading-3 mb-3">Deep Analytics</h3>
                   <p className="text-body">

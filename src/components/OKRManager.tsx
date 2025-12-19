@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
 import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
@@ -76,14 +76,6 @@ export default function OKRManager({
     return tasks.filter(t => t.projectId === projectId);
   };
 
-  const calculateGoalProgress = (goalId: string): number => {
-    const goalKeyResults = getGoalKeyResults(goalId);
-    if (goalKeyResults.length === 0) return 0;
-    
-    const totalProgress = goalKeyResults.reduce((sum, kr) => sum + kr.progress, 0);
-    return totalProgress / goalKeyResults.length;
-  };
-
   // 🔥 NEW: Hours calculation utilities
   const calculateProjectPlannedHours = (projectId: string): number => {
     return timeBlocks
@@ -115,6 +107,66 @@ export default function OKRManager({
     }, 0);
     
     return directGoalHours + projectHours;
+  };
+
+  // 🔥 OPTIMIZED: Memoized progress calculation for all goals
+  const goalProgressMap = useMemo(() => {
+    const progressMap = new Map<string, number>();
+    
+    goals.forEach(goal => {
+      const goalKeyResults = getGoalKeyResults(goal.id);
+      const goalProjects = getGoalProjects(goal.id);
+      
+      console.log('🎯 OKR_PROGRESS_DEBUG:', {
+        goalId: goal.id,
+        goalTitle: goal.title,
+        keyResultsCount: goalKeyResults.length,
+        projectsCount: goalProjects.length
+      });
+      
+      // Strategy 1: KeyResults with targetValue
+      const validKeyResults = goalKeyResults.filter(kr => kr.targetValue > 0);
+      if (validKeyResults.length > 0) {
+        const totalProgress = validKeyResults.reduce((sum, kr) => {
+          const krProgress = (kr.currentValue / kr.targetValue) * 100;
+          console.log(`  KeyResult ${kr.title}: ${kr.currentValue}/${kr.targetValue} = ${krProgress}%`);
+          return sum + Math.min(100, krProgress);
+        }, 0);
+        const avgProgress = totalProgress / validKeyResults.length;
+        console.log(`  Traditional KR Progress: ${avgProgress}%`);
+        progressMap.set(goal.id, avgProgress);
+        return;
+      }
+      
+      // Strategy 2: Hours-based progress
+      const plannedHours = calculateGoalPlannedHours(goal.id);
+      const targetHours = goalProjects.reduce((sum, project) => {
+        return sum + (project.totalHoursTarget || 0);
+      }, 0);
+      
+      console.log(`  Hours-based calculation: ${plannedHours}h planned / ${targetHours}h target`);
+      
+      if (targetHours > 0) {
+        const hoursProgress = Math.min(100, (plannedHours / targetHours) * 100);
+        console.log(`  Hours Progress: ${hoursProgress}%`);
+        progressMap.set(goal.id, hoursProgress);
+        return;
+      }
+      
+      // Fallback: Show 0% but log that we have planned hours without targets
+      if (plannedHours > 0) {
+        console.log(`  Fallback: ${plannedHours}h planned but no targets set`);
+      }
+      
+      progressMap.set(goal.id, 0);
+    });
+    
+    return progressMap;
+  }, [goals, keyResults, projects, timeBlocks]);
+
+  const calculateGoalProgress = (goalId: string): number => {
+    // Use memoized progress calculation
+    return goalProgressMap.get(goalId) || 0;
   };
 
   const getStatusColor = (status: string) => {
@@ -265,7 +317,19 @@ export default function OKRManager({
           
           <div className="text-right">
             <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
-            <div className="text-xs text-gray-500">Progress</div>
+            <div className="text-xs text-gray-500">
+              {goalKeyResults.filter(kr => kr.targetValue > 0).length > 0 
+                ? 'KR Progress' 
+                : goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0)
+                  ? 'Hours Progress'
+                  : 'Progress'
+              }
+            </div>
+            {goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0) && (
+              <div className="text-xs text-gray-400 mt-1">
+                {calculateGoalPlannedHours(goal.id).toFixed(1)}h / {goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0)}h
+              </div>
+            )}
           </div>
         </div>
 
