@@ -196,6 +196,13 @@ export default function OKRManager({
         return;
       }
       
+      // Strategy 3: If no hours target but projects exist, check individual project progress
+      if (goalProjects.length > 0) {
+        console.log(`  No hours target set, but ${goalProjects.length} projects exist`);
+        progressMap.set(goal.id, 0); // Show 0% to indicate no target
+        return;
+      }
+      
       // Fallback: Show 0% but log that we have actual hours without targets
       if (actualHours > 0) {
         console.log(`  Fallback: ${actualHours}h actual but no targets set`);
@@ -335,20 +342,43 @@ export default function OKRManager({
           
           {/* Progress percentage - always visible, mobile-friendly */}
           <div className="text-right sm:text-right sm:ml-4 flex-shrink-0">
-            <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
-            <div className="text-xs text-gray-500">
-              {goalKeyResults.filter(kr => kr.targetValue > 0).length > 0 
-                ? 'KR Progress' 
-                : goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0)
-                  ? 'Hours Progress'
-                  : 'Progress'
+            {(() => {
+              const hasKRs = goalKeyResults.filter(kr => kr.targetValue > 0).length > 0;
+              const hasHourTargets = goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0);
+              const actualHours = calculateGoalActualHours(goal.id);
+              const targetHours = goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0);
+              
+              if (hasKRs) {
+                return (
+                  <>
+                    <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
+                    <div className="text-xs text-gray-500">KR Progress</div>
+                  </>
+                );
+              } else if (hasHourTargets) {
+                return (
+                  <>
+                    <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
+                    <div className="text-xs text-gray-500">Hours Progress</div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {formatHours(actualHours)}h / {formatHours(targetHours)}h
+                    </div>
+                  </>
+                );
+              } else {
+                return (
+                  <>
+                    <div className="text-2xl font-bold text-gray-400">—</div>
+                    <div className="text-xs text-gray-500">No Target</div>
+                    {actualHours > 0 && (
+                      <div className="text-xs text-gray-400 mt-1">
+                        {formatHours(actualHours)}h logged
+                      </div>
+                    )}
+                  </>
+                );
               }
-            </div>
-            {goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0) && (
-              <div className="text-xs text-gray-400 mt-1">
-                {formatHours(calculateGoalActualHours(goal.id))}h / {goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0)}h
-              </div>
-            )}
+            })()}
           </div>
         </div>
 

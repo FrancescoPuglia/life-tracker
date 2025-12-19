@@ -1,0 +1,52 @@
+{
+  "name": "Life Tracker",
+  "short_name": "LifeTracker",
+  "description": "A comprehensive life tracking system with real-time timeboxing, habit tracking, and analytics",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "lifestyle", "health"],
+  "icons": [
+    {
+      "src": "icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start Session",
+      "short_name": "Start",
+      "description": "Start a new tracking session",
+      "url": "./?action=start",
+      "icons": [
+        {
+          "src": "icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Today's Habits",
+      "short_name": "Habits",
+      "description": "Check today's habits",
+      "url": "./?tab=habits",
+      "icons": [
+        {
+          "src": "icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

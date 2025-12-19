@@ -102,7 +102,9 @@ export default function HomePage() {
 
   // Initialize auth state listener - DETERMINISTIC GATE
   useEffect(() => {
+    console.time('AUTH_READY');
     const unsubscribe = auth.onAuthStateChange((user) => {
+      console.timeEnd('AUTH_READY');
       setCurrentUser(user);
       setAuthReady(true); // Auth is definitively ready after first callback
     });
@@ -1415,68 +1417,24 @@ export default function HomePage() {
     );
   }
 
-  // 🔥 P0 FIX: Guest landing page - Solo quando auth è ready ma user non loggato
+  // 🔥 P0.1 FIX: TRUE AUTH GATE - No app UI visible until auth complete
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-        {/* Auth Modal */}
+      <div className="fixed inset-0 z-50 bg-slate-900">
+        {/* Full-screen auth overlay - NO app UI underneath */}
         <AuthModal 
-          isOpen={showAuthModal} 
-          onClose={() => setShowAuthModal(false)} 
+          isOpen={true}
+          onClose={() => {}} 
         />
-
-        {/* Landing page pulita per guest */}
-        <div className="max-w-4xl mx-auto px-4 text-center py-20">
-          <div className="space-y-8">
+        {/* Fallback background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+          <div className="text-center">
             <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">
               Life Tracker
             </h1>
-            <p className="text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed">
-              Transform your productivity with evidence-based time tracking, habit formation, and goal achievement. 
-              Know every second what to do.
+            <p className="text-xl text-slate-300 max-w-2xl mx-auto">
+              Please sign in to continue
             </p>
-            
-            <div className="grid md:grid-cols-3 gap-8 mt-16">
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
-                <div className="text-4xl mb-4">🚀</div>
-                <h3 className="text-xl font-semibold text-white mb-3">Smart Planning</h3>
-                <p className="text-slate-300">
-                  Drag-and-drop timeboxing with automatic conflict detection and real-time adjustments.
-                </p>
-              </div>
-              
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
-                <div className="text-4xl mb-4">🔥</div>
-                <h3 className="text-xl font-semibold text-white mb-3">Habit Mastery</h3>
-                <p className="text-slate-300">
-                  Build lasting habits with streak tracking, implementation intentions, and smart reminders.
-                </p>
-              </div>
-              
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
-                <div className="text-4xl mb-4">📊</div>
-                <h3 className="text-xl font-semibold text-white mb-3">Deep Analytics</h3>
-                <p className="text-slate-300">
-                  Correlation analysis, performance trends, and actionable insights powered by your data.
-                </p>
-              </div>
-            </div>
-            
-            <div className="mt-12">
-              <button
-                onClick={() => {
-                  setShowAuthModal(true);
-                  audioManager.buttonFeedback();
-                }}
-                onMouseEnter={() => audioManager.buttonHover()}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-lg px-10 py-5 rounded-lg transition-all duration-200"
-              >
-                🚀 Start Your Journey
-              </button>
-              <p className="text-slate-400 text-sm mt-4">
-                Free to use • Cloud sync with Firebase • Offline capable
-              </p>
-            </div>
           </div>
         </div>
       </div>

@@ -256,46 +256,49 @@ export default function TimeBlockPlanner({
     }
   };
 
-  // 🔥 P1 FIX: Improved overdue logic with safe date parsing
+  // 🔥 P0.2 FIX: Correct overdue logic with selectedDate reference
   const getStatusIndicator = (block: TimeBlock) => {
     const now = new Date();
-    const blockEndTime = toDateSafe(block.endTime);
-    const blockDate = toDateSafe(block.startTime);
-    const selectedDateStr = selectedDate.toDateString();
-    const blockDateStr = blockDate.toDateString();
+    // CRITICAL: Pass selectedDate as referenceDate for HH:mm strings
+    const blockEndTime = toDateSafe(block.endTime, selectedDate);
+    const blockStartTime = toDateSafe(block.startTime, selectedDate);
     
-    // Only show overdue for blocks that are:
-    // 1. Not completed 
-    // 2. Past their end time
-    // 3. On today or past days (not future days)
-    const isOverdue = block.status !== 'completed' && 
-                      now > blockEndTime && 
-                      (blockDateStr === new Date().toDateString() || blockDate < new Date());
+    // Never overdue if completed/cancelled/missed
+    if (block.status === 'completed' || block.status === 'cancelled' || block.status === 'missed') {
+      return '✅';
+    }
     
-    const isActive = block.status === 'in_progress';
-    const isCompleted = block.status === 'completed';
+    // Never overdue if in future
+    if (blockEndTime > now) {
+      return block.status === 'in_progress' ? '🔴' : '⏰';
+    }
     
-    if (isCompleted) return '✅';
-    if (isActive) return '🔴';
+    // Overdue only when: endDateTime < now AND status not completed
+    const isOverdue = now > blockEndTime;
+    
+    if (block.status === 'in_progress') return '🔴';
     if (isOverdue) return '⚠️';
     return '⏰';
   };
 
-  // 🔥 P1 FIX: Get overdue message with safe date parsing
+  // 🔥 P0.2 FIX: Get overdue message with selectedDate reference
   const getOverdueMessage = (block: TimeBlock) => {
     const now = new Date();
-    const blockEndTime = toDateSafe(block.endTime);
+    // CRITICAL: Pass selectedDate as referenceDate for HH:mm strings
+    const blockEndTime = toDateSafe(block.endTime, selectedDate);
     
-    if (block.status !== 'completed' && now > blockEndTime) {
-      const overdueMinutes = Math.floor((now.getTime() - blockEndTime.getTime()) / (1000 * 60));
-      if (overdueMinutes > 60) {
-        const overdueHours = Math.floor(overdueMinutes / 60);
-        const remainingMinutes = overdueMinutes % 60;
-        return `Overdue by ${overdueHours}h ${remainingMinutes}m`;
-      }
-      return `Overdue by ${overdueMinutes} minutes`;
+    // Never overdue if completed/cancelled/missed or in future
+    if (block.status === 'completed' || block.status === 'cancelled' || block.status === 'missed' || blockEndTime > now) {
+      return null;
     }
-    return null;
+    
+    const overdueMinutes = Math.floor((now.getTime() - blockEndTime.getTime()) / (1000 * 60));
+    if (overdueMinutes > 60) {
+      const overdueHours = Math.floor(overdueMinutes / 60);
+      const remainingMinutes = overdueMinutes % 60;
+      return `Overdue by ${overdueHours}h ${remainingMinutes}m`;
+    }
+    return `Overdue by ${overdueMinutes} minutes`;
   };
 
 
@@ -471,16 +474,30 @@ export default function TimeBlockPlanner({
                     {block.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-                <div 
-                  className="text-xl drop-shadow-sm cursor-help" 
-                  title={
-                    block.status === 'completed' ? 'Completed' :
-                    block.status === 'in_progress' ? 'In Progress' :
-                    (block.status === 'planned' && new Date() > block.endTime) ? `Overdue by ${Math.floor((new Date().getTime() - block.endTime.getTime()) / 60000)} minutes` :
-                    'Planned'
-                  }
-                >
-                  {getStatusIndicator(block)}
+                <div className="flex flex-col space-y-2">
+                  <div 
+                    className="text-xl drop-shadow-sm cursor-help" 
+                    title={
+                      block.status === 'completed' ? 'Completed' :
+                      block.status === 'in_progress' ? 'In Progress' :
+                      getOverdueMessage(block) || 'Planned'
+                    }
+                  >
+                    {getStatusIndicator(block)}
+                  </div>
+                  {/* P0.4 FIX: Delete button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete "${block.title}"?`)) {
+                        onDeleteTimeBlock(block.id);
+                      }
+                    }}
+                    className="text-xs text-red-400 hover:text-red-600 bg-white/20 hover:bg-white/40 rounded px-1 transition-colors"
+                    title="Delete block"
+                  >
+                    🗑️
+                  </button>
                 </div>
               </div>
             </div>

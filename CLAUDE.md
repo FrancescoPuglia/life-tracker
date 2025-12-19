@@ -1,80 +1,69 @@
-# Life Tracker — CLAUDE.md (Project Memory)
+# Life Tracker — Project Operating Manual (CLAUDE.md)
 
 ## North Star
-Life Tracker è un "personal operating system" che converte:
-- Goals/OKR → Projects → (Key Results opzionali)
-- Pianificazione (Time Blocks) → Esecuzione reale (actual start/end) → Progress %
-Obiettivo: UX **fast**, **pulita**, **misurabile**. Niente bug su percentuali, niente init infinito, niente UI "sporca" pre-login.
+Life Tracker misura il progresso in modo GOAL-centrico:
+Goals → Projects → Tasks → TimeBlocks (tempo investito).
+La metrica primaria è: ORE REALI FATTE (actual), non ore pianificate.
 
-## HARD CONSTRAINTS (NON NEGOZIABILI)
-1) **NO DATA LOSS**: non cancellare/modificare i contenuti degli obiettivi già scritti dall'utente.  
-2) **NO FAKE UID / NO MAGIC USER-1**: guest deve avere un ID persistente stabile, logged usa `currentUser.uid`.  
-3) **MIGRAZIONI NON DISTRUTTIVE**: se cambia IndexedDB schema/versione, upgrade only + backward compat.  
-4) **INIT DETERMINISTICA**: nessun loop di init. Un solo run per cambio "auth mode" (guest→logged / logged→guest).  
-5) **PERFORMANCE BUDGET (DEV)**:
-   - Critical path (UI utilizzabile) target: ~< 1.5s su macchina normale
-   - Nessun task secondario può bloccare il render iniziale
-6) **TypeScript CLEAN + Build OK**: `npm run build` deve passare.
-7) Claude Code environment:
-   - Non usare `cd` fuori dalla root per policy; usare path assoluti o comandi con `--prefix`.
-   - Commit piccoli e verificabili.
+## Tech
+- Next.js 15 (App Router) + TypeScript
+- Tailwind CSS
+- Data layer: src/lib/database.ts (LifeTrackerDB) con adapters:
+  - Firebase (logged)
+  - IndexedDB (guest)
+  - (eventuale memory)
 
-## Architettura (alto livello)
-- Next.js app router.
-- Auth: Firebase auth (logged mode).
-- Storage:
-  - Guest mode: IndexedDB (LifeTrackerDB + adapter)
-  - Logged mode: Firebase/Firestore adapter (switch in runtime)
-- UI principali:
-  - Pre-login: deve mostrare SOLO schermata auth pulita (nessuna UI sottostante).
-  - Post-login: Dashboard + OKR + Time Planner + moduli.
+## HARD RULES (non negoziabili)
+1) MAI introdurre fallback user finti (es: "user-1").
+   - Logged: userId = currentUser.uid
+   - Guest: userId = guestId stabile (localStorage o helper esistente)
+2) MAI modificare/sovrascrivere dati già salvati (Goals/Projects/Tasks/TimeBlocks).
+   - Ogni change di schema deve essere backward-compatible.
+3) Niente wipe automatici del DB.
+   - Reset IndexedDB SOLO tramite UI di recovery e SOLO guest.
+4) Init deterministica: niente loop useEffect.
+5) build sempre verde: `npm run build` deve passare.
 
-## Data model essenziale (minimo)
-- Goal: id, userId, title, description, totalHoursTarget (se presente), status, priority, dates…
-- Project: id, userId, goalId, plannedHours/target info, status…
-- TimeBlock: id, userId, projectId (link), goalId (se usato), startTime, endTime,
-  status: planned | in_progress | completed,
-  actualStartTime?, actualEndTime?
-IMPORTANT: startTime/endTime devono essere **DateTime completi** (ISO) quando salvati.
+## Progress Rules (definizione ufficiale)
+### Actual hours (contano per %)
+Somma delle durate dei TimeBlocks con:
+- status === 'completed'
+- durata = (actualEndTime - actualStartTime) se esiste,
+  altrimenti (endTime - startTime)
 
-## Regole di Progress (Source of Truth)
-- Goal %:
-  - actualHours = somma ore di timeBlocks COMPLETED collegati ai project del goal
-  - actualHours usa (actualStartTime/actualEndTime) se entrambi presenti, altrimenti fallback (startTime/endTime)
-  - percent = min(actualHours / goal.totalHoursTarget * 100, 100) se target esiste
-- Project %:
-  - Se esiste target ore: actualHours/target
-  - Altrimenti mostra ore completed vs ore planned (ma NON inventare percentuali)
-- Vietato contare blocchi non completati nel "done".
+### Target hours (denominatore per %)
+- Task target: preferibilmente `estimatedMinutes`/`durationMinutes`/campo equivalente -> ore target task
+- Project target: somma target dei task (se ci sono), altrimenti campo target project (se esiste)
+- Goal target: somma target dei project (se ci sono), altrimenti campo target goal
 
-## Regole Overdue (Source of Truth)
-- Un blocco è overdue se:
-  - endTime (DateTime) < now
-  - status != completed
-- MA: parsing dev'essere deterministico:
-  - Se legacy HH:mm: convertire usando referenceDate (giorno del planner) senza timezone bugs.
-  - Un solo helper condiviso per parsing e durations.
+### Rollup gerarchico
+Un’ora completata su un TimeBlock linkato ad un Task:
+- incrementa Task actual
+- incrementa Project actual
+- incrementa Goal actual
 
-## Workflow obbligatorio per ogni fix
-1) Riproduci (steps precisi)
-2) Root cause (1-2 frasi)
-3) Patch minima (diff localizzato)
-4) Test:
-   - npm run dev: nessun errore console
-   - login: tempo e fluidità
-   - OKR/progress: scenario minimo verificato
-   - overdue: scenario minimo verificato
-   - npm run build OK
-5) Commit con messaggio chiaro + riepilogo con evidenze (log tempi + screenshot dove serve)
+Se un TimeBlock è linkato solo a Project (taskId assente):
+- incrementa Project actual
+- incrementa Goal actual
+- Task non cambia
 
-## Strumenti consigliati
-- git worktrees per lavorare in parallelo su bug separati.
-- Instrumentation: console.time/timeEnd e un PERF_SUMMARY unico per init.
+## TimeBlock Lifecycle (obbligatorio)
+- planned → in_progress → completed (o skipped/missed)
+- Deve esistere sempre un’azione UI per:
+  - Complete (set status completed + actual times se mancanti)
+  - Delete (rimuove il timeBlock)
+- Overdue: SOLO se endTime < now e status != completed.
+  Non deve impedire completamento o delete.
 
-## Definition of Done (DoD)
-- Login screen pulita (solo auth card, background uniforme)
-- Init senza loop e senza attese "assurde"
-- Percentuali goal/project corrette e leggibili (zero overlap a ogni breakpoint)
-- Overdue accurato (nessun overdue falso)
-- Build OK
+## Auth UX rule
+Prima del login NON deve essere montata l’UI dell’app sotto.
+Serve un AuthGate che renderizza SOLO una schermata pulita (sfondo uniforme scuro + card login).
 
+## Test Checklist (Definition of Done)
+- Login: UI app non visibile sotto l’Auth screen
+- Init: perceived < 2s in dev (sblocca UI dopo essential data)
+- TimeBlock: posso creare + completare + cancellare un blocco
+- Rollup: completare 1h su un task -> task/progetto/goal aumentano e % cambia
+- Overdue: tooltip coerente, non “false overdue”
+- Habits: click sul pallino crea/toglie log di oggi e aggiorna counters
+- `npm run build` OK

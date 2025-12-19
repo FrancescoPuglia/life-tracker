@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Input Debug Test</title>
+    <style>
+        body {
+            margin: 20px;
+            background: #f3f4f6;
+        }
+        
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 400px;
+            margin-bottom: 20px;
+        }
+        
+        .input-test {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            color: #111827 !important;
+            background-color: #ffffff !important;
+            -webkit-text-fill-color: #111827 !important;
+            text-shadow: none !important;
+            margin-bottom: 10px;
+        }
+        
+        .textarea-test {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            color: #111827 !important;
+            background-color: #ffffff !important;
+            -webkit-text-fill-color: #111827 !important;
+            text-shadow: none !important;
+            resize: vertical;
+            min-height: 60px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Input Text Visibility Test</h1>
+    
+    <div class="test-container">
+        <h2>Test 1: Basic Input</h2>
+        <label>Title:</label>
+        <input type="text" class="input-test" placeholder="Enter title here..." id="test1">
+        <label>Description:</label>
+        <textarea class="textarea-test" placeholder="Enter description here..." id="test2"></textarea>
+    </div>
+
+    <div class="test-container">
+        <h2>Test 2: Inline Style Input</h2>
+        <label>Title with inline styles:</label>
+        <input 
+            type="text" 
+            placeholder="Enter title here..."
+            style="
+                width: 100%;
+                padding: 8px 12px;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                color: #111827 !important;
+                background-color: #ffffff !important;
+                -webkit-text-fill-color: #111827 !important;
+                text-shadow: none !important;
+                margin-bottom: 10px;
+            "
+            id="test3"
+        >
+        
+        <label>Description with inline styles:</label>
+        <textarea 
+            placeholder="Enter description here..."
+            style="
+                width: 100%;
+                padding: 8px 12px;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                color: #111827 !important;
+                background-color: #ffffff !important;
+                -webkit-text-fill-color: #111827 !important;
+                text-shadow: none !important;
+                resize: vertical;
+                min-height: 60px;
+            "
+            id="test4"
+        ></textarea>
+    </div>
+
+    <div class="test-container">
+        <h2>Test 3: Black Text Override</h2>
+        <label>Force Black Text:</label>
+        <input 
+            type="text" 
+            placeholder="Enter title here..."
+            style="color: black !important; background: white !important; -webkit-text-fill-color: black !important;"
+            id="test5"
+        >
+    </div>
+
+    <script>
+        // Add event listeners to log what happens
+        document.querySelectorAll('input, textarea').forEach((element, index) => {
+            element.addEventListener('input', function(e) {
+                console.log(`Input ${index + 1} value:`, e.target.value);
+                console.log(`Input ${index + 1} computed styles:`, window.getComputedStyle(e.target));
+            });
+            
+            element.addEventListener('focus', function(e) {
+                console.log(`Input ${index + 1} focused`);
+                const styles = window.getComputedStyle(e.target);
+                console.log('Color:', styles.color);
+                console.log('Background:', styles.backgroundColor);
+                console.log('WebkitTextFillColor:', styles.webkitTextFillColor);
+            });
+        });
+    </script>
+</body>
+</html>
