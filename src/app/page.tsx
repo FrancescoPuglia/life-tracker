@@ -245,14 +245,15 @@ export default function HomePage() {
     ]);
 
     // Deserialize essential data
-    const deserializedTimeBlocks = todayTimeBlocks.map(block => ({
+    const deserializedTimeBlocks = todayTimeBlocks.map((block: any) => ({
       ...block,
       startTime: new Date(block.startTime),
       endTime: new Date(block.endTime),
-      createdAt: new Date(block.createdAt),
-      updatedAt: new Date(block.updatedAt),
+      createdAt: block.createdAt ? new Date(block.createdAt) : new Date(),
+      updatedAt: block.updatedAt ? new Date(block.updatedAt) : new Date(),
       actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
       actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+      status: normalizeTimeBlockStatus(block.status),
     }));
 
     const deserializedGoals = allGoals.map(goal => ({
@@ -350,15 +351,17 @@ export default function HomePage() {
     ]);
 
     // Deserialize essential data
-    const deserializedTimeBlocks = todayTimeBlocks.map(block => ({
-      ...block,
-      startTime: new Date(block.startTime),
-      endTime: new Date(block.endTime),
-      createdAt: new Date(block.createdAt),
-      updatedAt: new Date(block.updatedAt),
-      actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-      actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-    }));
+    const deserializedTimeBlocks = todayTimeBlocks.map((block: any) => ({
+  ...block,
+  startTime: new Date(block.startTime),
+  endTime: new Date(block.endTime),
+  createdAt: block.createdAt ? new Date(block.createdAt) : new Date(),
+  updatedAt: block.updatedAt ? new Date(block.updatedAt) : new Date(),
+  actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
+  actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+  status: normalizeTimeBlockStatus(block.status),
+}));
+
 
     const deserializedGoals = allGoals.map(goal => ({
       ...goal,
@@ -510,6 +513,7 @@ export default function HomePage() {
             updatedAt: new Date(block.updatedAt),
             actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
             actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+            status: normalizeTimeBlockStatus(block.status), // Normalize status
           }));
           
           setTimeBlocks(prev => [...prev, ...deserializedBlocks]);
@@ -624,6 +628,7 @@ export default function HomePage() {
           updatedAt: new Date(block.updatedAt),
           actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
           actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
+          status: normalizeTimeBlockStatus(block.status), // Normalize status
         }));
 
       // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL collections by userId
@@ -975,16 +980,52 @@ export default function HomePage() {
     console.log('🔥 PSYCHOPATH: === ENDING handleCreateTimeBlock ===');
   };
 
-  const handleUpdateTimeBlock = async (id: string, updates: Partial<TimeBlock>) => {
+  // --- Normalization helpers ---
+  type TimeBlockStatus = TimeBlock["status"];
+
+function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
+  const s = String(input ?? "").trim().toLowerCase();
+  if (["completed", "complete", "done"].includes(s)) return "completed";
+  if (["in_progress", "in-progress", "inprogress"].includes(s)) return "in_progress";
+  if (["cancelled", "canceled", "cancel"].includes(s)) return "cancelled";
+  if (["overrun"].includes(s)) return "overrun";
+  if (["planned", "pending", "todo", "missed"].includes(s)) return "planned";
+  return "planned";
+}
+
+  function toDateSafe(value: unknown, fallback: Date): Date {
+    if (value instanceof Date) return value;
+    const d = new Date(value as any);
+    return Number.isFinite(d.getTime()) ? d : fallback;
+  }
+
+  function buildUpdatedTimeBlock(oldBlock: TimeBlock, updates: Partial<TimeBlock>): TimeBlock {
+    const merged = { ...oldBlock, ...updates };
+    return {
+      ...merged,
+      status: normalizeTimeBlockStatus((updates as any).status ?? oldBlock.status),
+      startTime: toDateSafe(merged.startTime, oldBlock.startTime),
+      endTime: toDateSafe(merged.endTime, oldBlock.endTime),
+      actualStartTime: merged.actualStartTime
+        ? toDateSafe(merged.actualStartTime, oldBlock.actualStartTime ?? oldBlock.startTime)
+        : undefined,
+      actualEndTime: merged.actualEndTime
+        ? toDateSafe(merged.actualEndTime, oldBlock.actualEndTime ?? oldBlock.endTime)
+        : undefined,
+      updatedAt: new Date(),
+    };
+  }
+
+  const handleUpdateTimeBlock = async (id: string, updates: Partial<TimeBlock>): Promise<void> => {
+    const existingBlock = timeBlocks.find(b => b.id === id);
+    if (!existingBlock) return;
+    const updatedBlock = buildUpdatedTimeBlock(existingBlock, updates);
+    setTimeBlocks(prev => prev.map(b => (b.id === id ? updatedBlock : b)));
     try {
-      const existingBlock = timeBlocks.find(b => b.id === id);
-      if (existingBlock) {
-        const updatedBlock = { ...existingBlock, ...updates, updatedAt: new Date() };
-        await db.update('timeBlocks', updatedBlock);
-        setTimeBlocks(timeBlocks.map(b => b.id === id ? updatedBlock : b));
-      }
+      await db.update("timeBlocks", updatedBlock);
     } catch (error) {
-      console.error('Failed to update time block:', error);
+      console.error("Failed to update time block:", error);
+      // Optionally: reload from DB or rollback
     }
   };
 
@@ -1744,26 +1785,21 @@ export default function HomePage() {
               )}
 
               {activeTab === 'adaptation' && (
-                <RealTimeAdaptation
-                  currentSchedule={timeBlocks}
-                  tasks={tasks}
-                  goals={goals}
-                  currentSession={currentSession}
-                  userEnergyLevel={0.7} // Could be dynamic based on user input or ML
-                  onScheduleAdapted={async (newSchedule, changes) => {
-                    console.log('🔄 SCHEDULE ADAPTED:', changes.length, 'changes');
-                    // Update time blocks with the adapted schedule
-                    setTimeBlocks(newSchedule);
-                    audioManager.perfectDay();
-                  }}
-                  onEmergencyMode={(active, reason) => {
-                    console.log('🚨 EMERGENCY MODE:', active, reason);
-                    if (active) {
-                      audioManager.play('error');
-                    }
-                  }}
-                />
-              )}
+  <RealTimeAdaptation
+    currentSchedule={timeBlocks}
+    tasks={tasks}
+    goals={goals}
+    currentSession={currentSession}
+    userEnergyLevel={0.7} // Could be dynamic based on user input or ML
+    onScheduleAdapted={async (newSchedule, changes) => {
+      console.log('🔄 SCHEDULE ADAPTED:', changes.length, 'changes');
+      // Update time blocks with the adapted schedule
+      setTimeBlocks(newSchedule);
+      audioManager.perfectDay();
+    }}
+  />
+)}
+
 
               {activeTab === 'micro_coach' && (
                 <MicroCoachDashboard
