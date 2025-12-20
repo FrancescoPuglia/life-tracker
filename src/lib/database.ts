@@ -1059,25 +1059,40 @@ class LifeTrackerDB {
     return this.getByIndex<Session>('sessions', 'status', 'active');
   }
 
+  // 🔥 P0 TASK 6: Optimized getTodayTimeBlocks using indexes for faster init
   async getTodayTimeBlocks(userId: string): Promise<TimeBlock[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Adapter-agnostic fallback: get all timeBlocks and filter in JS
-    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-    
-    // Filter for today's blocks and matching userId
-    const todayBlocks = allTimeBlocks.filter(block => {
-      if (block.userId !== userId) return false;
+    try {
+      // Try to use indexed query by userId first for performance
+      const userTimeBlocks = await this.getByIndex<TimeBlock>('timeBlocks', 'userId', userId);
       
-      const startTime = this.toDateSafe(block.startTime);
-      if (!startTime) return false;
-      return startTime >= today && startTime < tomorrow;
-    });
+      // Filter for today's blocks from user's blocks (much smaller dataset)
+      const todayBlocks = userTimeBlocks.filter(block => {
+        const startTime = this.toDateSafe(block.startTime);
+        if (!startTime) return false;
+        return startTime >= today && startTime < tomorrow;
+      });
 
-    return todayBlocks;
+      return todayBlocks;
+    } catch (error) {
+      console.warn('🔥 getTodayTimeBlocks: Index query failed, falling back to full scan:', error);
+      
+      // Fallback to full scan if index query fails
+      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+      const todayBlocks = allTimeBlocks.filter(block => {
+        if (block.userId !== userId) return false;
+        
+        const startTime = this.toDateSafe(block.startTime);
+        if (!startTime) return false;
+        return startTime >= today && startTime < tomorrow;
+      });
+
+      return todayBlocks;
+    }
   }
 
   // 🚀 P0 OPTIMIZATION: Get timeBlocks for a specific date

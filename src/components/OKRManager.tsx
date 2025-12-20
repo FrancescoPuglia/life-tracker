@@ -5,6 +5,14 @@ import { createPortal } from 'react-dom';
 import { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
 import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { parseDateTime, calculateDuration, msToHours, formatHours } from '@/lib/datetime';
+import { 
+  calculateProjectActualHours, 
+  calculateProjectPlannedHours, 
+  calculateGoalActualHours, 
+  calculateGoalPlannedHours,
+  calculateGoalProgress,
+  calculateProjectProgress
+} from '@/utils/progressCalculation';
 
 interface OKRManagerProps {
   goals: Goal[];
@@ -77,80 +85,8 @@ export default function OKRManager({
     return tasks.filter(t => t.projectId === projectId);
   };
 
-  // 🔥 P1 FIX: Hours calculation utilities with ACTUAL vs PLANNED distinction
-  const calculateProjectPlannedHours = (projectId: string): number => {
-    return timeBlocks
-      .filter(block => block.projectId === projectId)
-      .reduce((total, block) => {
-        const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
-        return total + (durationMs / (1000 * 60 * 60)); // Convert to hours
-      }, 0);
-  };
+  // 🔥 P0 TASK 2: Use centralized progress calculation functions
 
-  // 🔥 P0 TASK C + P1 TASK D: Calculate ACTUAL completed hours for projects using centralized datetime
-  const calculateProjectActualHours = (projectId: string): number => {
-    return timeBlocks
-      .filter(block => block.projectId === projectId && block.status === 'completed')
-      .reduce((total, block) => {
-        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
-        const startTime = block.actualStartTime || block.startTime;
-        const endTime = block.actualEndTime || block.endTime;
-        const durationMs = calculateDuration(startTime, endTime);
-        return total + msToHours(durationMs);
-      }, 0);
-  };
-
-  const calculateGoalPlannedHours = (goalId: string): number => {
-    // Sum from direct goal time blocks
-    const directGoalHours = timeBlocks
-      .filter(block => block.goalId === goalId || (block.goalIds && block.goalIds.includes(goalId)))
-      .reduce((total, block) => {
-        const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
-        const hours = durationMs / (1000 * 60 * 60);
-        // If block has goal allocation, use it
-        if (block.goalAllocation && block.goalAllocation[goalId]) {
-          return total + (hours * block.goalAllocation[goalId] / 100);
-        }
-        return total + hours;
-      }, 0);
-    
-    // Sum from project time blocks
-    const goalProjects = getGoalProjects(goalId);
-    const projectHours = goalProjects.reduce((total, project) => {
-      return total + calculateProjectPlannedHours(project.id);
-    }, 0);
-    
-    return directGoalHours + projectHours;
-  };
-
-  // 🔥 P0 TASK C + P1 TASK D: Calculate ACTUAL completed hours for goals using centralized datetime
-  const calculateGoalActualHours = (goalId: string): number => {
-    // Sum from direct goal time blocks (completed only)
-    const directGoalHours = timeBlocks
-      .filter(block => 
-        (block.goalId === goalId || (block.goalIds && block.goalIds.includes(goalId))) &&
-        block.status === 'completed'
-      )
-      .reduce((total, block) => {
-        const startTime = block.actualStartTime || block.startTime;
-        const endTime = block.actualEndTime || block.endTime;
-        const durationMs = calculateDuration(startTime, endTime);
-        const hours = msToHours(durationMs);
-        // If block has goal allocation, use it
-        if (block.goalAllocation && block.goalAllocation[goalId]) {
-          return total + (hours * block.goalAllocation[goalId] / 100);
-        }
-        return total + hours;
-      }, 0);
-    
-    // Sum from project time blocks (completed only)
-    const goalProjects = getGoalProjects(goalId);
-    const projectHours = goalProjects.reduce((total, project) => {
-      return total + calculateProjectActualHours(project.id);
-    }, 0);
-    
-    return directGoalHours + projectHours;
-  };
 
   // 🔥 OPTIMIZED: Memoized progress calculation for all goals
   const goalProgressMap = useMemo(() => {
@@ -181,33 +117,23 @@ export default function OKRManager({
         return;
       }
       
-      // Strategy 2: Hours-based progress using ACTUAL hours vs TARGET hours
-      const actualHours = calculateGoalActualHours(goal.id);
-      const targetHours = goalProjects.reduce((sum, project) => {
-        return sum + (project.totalHoursTarget || 0);
-      }, 0);
-      
-      console.log(`  Hours-based calculation: ${actualHours}h actual / ${targetHours}h target`);
-      
-      if (targetHours > 0) {
-        const hoursProgress = Math.min(100, (actualHours / targetHours) * 100);
-        console.log(`  Hours Progress: ${hoursProgress}%`);
-        progressMap.set(goal.id, hoursProgress);
+      // Strategy 2: Hours-based progress using centralized calculation
+      const goalProgress = calculateGoalProgress(goal, timeBlocks, projects);
+      if (goalProgress > 0) {
+        console.log(`  Hours-based Progress: ${goalProgress}%`);
+        progressMap.set(goal.id, goalProgress);
         return;
       }
       
-      // Fallback: Show 0% but log that we have actual hours without targets
-      if (actualHours > 0) {
-        console.log(`  Fallback: ${actualHours}h actual but no targets set`);
-      }
-      
+      // Fallback: No progress calculation possible
+      console.log(`  No valid progress calculation method available`);
       progressMap.set(goal.id, 0);
     });
     
     return progressMap;
   }, [goals, keyResults, projects, timeBlocks]);
 
-  const calculateGoalProgress = (goalId: string): number => {
+  const getGoalProgress = (goalId: string): number => {
     // Use memoized progress calculation
     return goalProgressMap.get(goalId) || 0;
   };
@@ -315,7 +241,7 @@ export default function OKRManager({
   };
 
   const GoalCard = ({ goal }: { goal: Goal }) => {
-    const progress = calculateGoalProgress(goal.id);
+    const progress = getGoalProgress(goal.id);
     const goalKeyResults = getGoalKeyResults(goal.id);
     const goalProjects = getGoalProjects(goal.id);
     
@@ -346,7 +272,7 @@ export default function OKRManager({
             </div>
             {goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0) && (
               <div className="text-xs text-gray-400 mt-1">
-                {formatHours(calculateGoalActualHours(goal.id))}h / {goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0)}h
+                {formatHours(calculateGoalActualHours(goal.id, timeBlocks, projects))}h / {goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0)}h
               </div>
             )}
           </div>
@@ -376,7 +302,7 @@ export default function OKRManager({
           )}
           <div className="text-xs text-green-600 flex items-center">
             <Target className="w-3 h-3 mr-1" />
-            Planned: {formatHours(calculateGoalPlannedHours(goal.id))}hrs
+            Planned: {formatHours(calculateGoalPlannedHours(goal.id, timeBlocks, projects))}hrs
           </div>
         </div>
 
@@ -544,7 +470,7 @@ export default function OKRManager({
           <div className="flex items-center justify-between text-xs">
             <span className="text-gray-600">Planned Hours:</span>
             <span className="font-medium text-blue-600">
-              {calculateProjectPlannedHours(project.id).toFixed(1)}h
+              {calculateProjectPlannedHours(project.id, timeBlocks).toFixed(1)}h
               {project.totalHoursTarget && (
                 <span className="text-gray-500">/{project.totalHoursTarget}h</span>
               )}
@@ -555,7 +481,7 @@ export default function OKRManager({
               <div
                 className="bg-blue-500 h-1 rounded-full transition-all duration-300"
                 style={{ 
-                  width: `${Math.min(100, (calculateProjectPlannedHours(project.id) / project.totalHoursTarget) * 100)}%` 
+                  width: `${Math.min(100, (calculateProjectPlannedHours(project.id, timeBlocks) / project.totalHoursTarget) * 100)}%` 
                 }}
               />
             </div>

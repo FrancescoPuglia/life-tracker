@@ -187,9 +187,14 @@ export default function HabitsTracker({
           <div className="flex-1">
             <div className="flex items-center space-x-3">
               <button
-                onClick={() => handleToggleHabit(habit)}
-                disabled={!isToday}
-                className={`transition-colors ${!isToday ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => currentUserId && handleToggleHabit(habit)}
+                disabled={!isToday || !currentUserId}
+                className={`transition-colors ${(!isToday || !currentUserId) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                title={
+                  !currentUserId ? 'Please log in to track habits' :
+                  !isToday ? 'Can only log habits for today' :
+                  'Click to toggle habit completion'
+                }
               >
                 {log?.completed ? (
                   <CheckCircle className="w-6 h-6 text-green-600" />

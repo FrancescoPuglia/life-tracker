@@ -461,8 +461,7 @@ export default function TimeBlockPlanner({
                   title={
                     block.status === 'completed' ? 'Completed' :
                     block.status === 'in_progress' ? 'In Progress' :
-                    (block.status === 'planned' && new Date() > block.endTime) ? `Overdue by ${Math.floor((new Date().getTime() - block.endTime.getTime()) / 60000)} minutes` :
-                    'Planned'
+                    getOverdueMessage(block) || 'Planned'
                   }
                 >
                   {getStatusIndicator(block)}
@@ -843,6 +842,171 @@ export default function TimeBlockPlanner({
                 >
                   ✨ Create Block
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        , document.body
+      )}
+
+      {/* 🔥 P0 TASK 1: TimeBlock Detail Modal with Complete/Delete buttons */}
+      {selectedBlock && typeof window !== 'undefined' && createPortal(
+        <div 
+          className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
+          style={{ 
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setSelectedBlock(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+            style={{
+              transform: 'translateZ(0)',
+              position: 'relative',
+              zIndex: 10000
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-gray-900 flex items-center">
+                  {getBlockIcon(selectedBlock)} {selectedBlock.title}
+                </h3>
+                <button
+                  onClick={() => setSelectedBlock(null)}
+                  className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Block Details */}
+              <div className="space-y-4 mb-6">
+                {selectedBlock.description && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                    <p className="text-gray-900 bg-gray-50 p-3 rounded-lg">{selectedBlock.description}</p>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Start Time</label>
+                    <p className="text-gray-900 bg-gray-50 p-3 rounded-lg font-mono">
+                      {selectedBlock.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">End Time</label>
+                    <p className="text-gray-900 bg-gray-50 p-3 rounded-lg font-mono">
+                      {selectedBlock.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Status</label>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-2xl">{getStatusIndicator(selectedBlock)}</span>
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      selectedBlock.status === 'completed' ? 'bg-green-100 text-green-800' :
+                      selectedBlock.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {selectedBlock.status === 'completed' ? 'Completed' :
+                       selectedBlock.status === 'in_progress' ? 'In Progress' :
+                       'Planned'}
+                    </span>
+                  </div>
+                  {getOverdueMessage(selectedBlock) && (
+                    <p className="text-red-600 text-sm mt-1 font-medium">
+                      ⚠️ {getOverdueMessage(selectedBlock)}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Type</label>
+                  <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                    selectedBlock.type === 'work' ? 'bg-blue-100 text-blue-800' :
+                    selectedBlock.type === 'focus' ? 'bg-purple-100 text-purple-800' :
+                    selectedBlock.type === 'meeting' ? 'bg-orange-100 text-orange-800' :
+                    selectedBlock.type === 'break' ? 'bg-green-100 text-green-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {selectedBlock.type}
+                  </span>
+                </div>
+              </div>
+
+              {/* 🔥 P0 TASK 1: Complete/Delete Action Buttons */}
+              <div className="flex justify-between space-x-3 pt-4 border-t border-gray-200">
+                {/* Delete Button */}
+                <button
+                  onClick={() => {
+                    if (currentUserId && selectedBlock.id) {
+                      onDeleteTimeBlock(selectedBlock.id);
+                      setSelectedBlock(null);
+                    }
+                  }}
+                  disabled={!currentUserId}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all duration-200 font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                  type="button"
+                >
+                  <span>🗑️</span>
+                  <span>Delete</span>
+                </button>
+
+                {/* Status Toggle Button */}
+                {selectedBlock.status !== 'completed' ? (
+                  <button
+                    onClick={() => {
+                      if (currentUserId && selectedBlock.id) {
+                        // Mark as completed with actual times
+                        const now = new Date();
+                        onUpdateTimeBlock(selectedBlock.id, {
+                          status: 'completed',
+                          actualStartTime: selectedBlock.actualStartTime || selectedBlock.startTime,
+                          actualEndTime: now
+                        });
+                        setSelectedBlock(null);
+                      }
+                    }}
+                    disabled={!currentUserId}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all duration-200 font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                    type="button"
+                  >
+                    <span>✅</span>
+                    <span>Mark Complete</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (currentUserId && selectedBlock.id) {
+                        // Revert to planned status
+                        onUpdateTimeBlock(selectedBlock.id, {
+                          status: 'planned',
+                          actualStartTime: undefined,
+                          actualEndTime: undefined
+                        });
+                        setSelectedBlock(null);
+                      }
+                    }}
+                    disabled={!currentUserId}
+                    className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-all duration-200 font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                    type="button"
+                  >
+                    <span>⏰</span>
+                    <span>Mark Planned</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

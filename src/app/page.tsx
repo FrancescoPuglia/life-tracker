@@ -205,14 +205,26 @@ export default function HomePage() {
         // Print performance summary
         const criticalPathMs = timings.DB_INIT + (timings.FIREBASE_SWITCH || 0) + (timings.ESSENTIAL_DATA_LOAD || timings.GUEST_LOAD || 0);
         
-        console.log('🚀 PERF_SUMMARY:', {
+        // 🔥 P0 TASK 6: Enhanced performance summary with targets and warnings
+        const targetMs = 1500; // 1.5s target from CLAUDE.md
+        const withinTarget = criticalPathMs <= targetMs;
+        
+        console.log(`🚀 PERF_SUMMARY ${withinTarget ? '✅' : '⚠️ SLOW'}:`, {
           mode: currentUser?.uid ? 'LOGGED' : 'GUEST',
           effectiveUserId: effectiveUserId,
           criticalPathMs: Math.round(criticalPathMs),
+          targetMs: targetMs,
+          withinTarget: withinTarget,
+          performanceRatio: `${Math.round((criticalPathMs / targetMs) * 100)}%`,
           totalMs: Math.round(timings.TOTAL_INIT),
           timings: Object.fromEntries(Object.entries(timings).map(([k, v]) => [k, Math.round(v)])),
-          buildId: BUILD_ID
+          buildId: BUILD_ID,
+          timestamp: new Date().toISOString()
         });
+        
+        if (!withinTarget) {
+          console.warn(`⚠️ PERFORMANCE WARNING: Critical path ${Math.round(criticalPathMs)}ms exceeds target ${targetMs}ms by ${Math.round(criticalPathMs - targetMs)}ms`);
+        }
         
         // 🔥 P0 FIX: Mark as initialized for this user
         hasInitializedForUserRef.current = userKey;
@@ -234,12 +246,16 @@ export default function HomePage() {
     console.log('📊 loadEssentialDataLogged() START - Firebase mode');
     
     // 🚀 P0 OPTIMIZATION: Load only TODAY's timeBlocks + goals + projects (minimal for UI unlock)
+    console.time('TIMEBLOCKS_LOAD');
+    console.time('GOALS_LOAD');
+    console.time('PROJECTS_LOAD');
+    
     const [
       todayTimeBlocks, allGoals, allProjects
     ] = await Promise.all([
-      db.getTodayTimeBlocks(currentUser.uid), // Only today's blocks for fast init
-      db.getAll<Goal>('goals'),
-      db.getAll<Project>('projects')
+      db.getTodayTimeBlocks(currentUser.uid).finally(() => console.timeEnd('TIMEBLOCKS_LOAD')),
+      db.getAll<Goal>('goals').finally(() => console.timeEnd('GOALS_LOAD')),
+      db.getAll<Project>('projects').finally(() => console.timeEnd('PROJECTS_LOAD'))
     ]);
 
     // Deserialize essential data
@@ -339,12 +355,16 @@ export default function HomePage() {
     console.log('📊 loadEssentialDataGuest() START - IndexedDB mode');
     
     // 🚀 P0 OPTIMIZATION: Load only TODAY's timeBlocks + goals + projects (minimal for UI unlock)
+    console.time('GUEST_TIMEBLOCKS_LOAD');
+    console.time('GUEST_GOALS_LOAD');
+    console.time('GUEST_PROJECTS_LOAD');
+    
     const [
       todayTimeBlocks, allGoals, allProjects
     ] = await Promise.all([
-      db.getTodayTimeBlocks(effectiveUserId), // Only today's blocks for fast init
-      db.getAll<Goal>('goals'),
-      db.getAll<Project>('projects')
+      db.getTodayTimeBlocks(effectiveUserId).finally(() => console.timeEnd('GUEST_TIMEBLOCKS_LOAD')),
+      db.getAll<Goal>('goals').finally(() => console.timeEnd('GUEST_GOALS_LOAD')),
+      db.getAll<Project>('projects').finally(() => console.timeEnd('GUEST_PROJECTS_LOAD'))
     ]);
 
     // Deserialize essential data
@@ -1064,7 +1084,7 @@ export default function HomePage() {
         const newLog: HabitLog = {
           id: `log-${Date.now()}`,
           habitId,
-          userId: currentUser?.uid || 'guest-user',
+          userId: effectiveUserId,
           date: today,
           completed,
           value,
@@ -1415,63 +1435,15 @@ export default function HomePage() {
     );
   }
 
-  // 🔥 P0 FIX: Guest landing page - Solo quando auth è ready ma user non loggato
+  // 🔥 P0 TASK 5: True AuthGate - ZERO app UI visible under login
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-        {/* Auth Modal - Always open, no close for true AuthGate */}
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        {/* Auth Modal - Only login screen, no other UI */}
         <AuthModal 
           isOpen={true} 
           onClose={() => {}} 
         />
-
-        {/* Landing page pulita per guest */}
-        <div className="max-w-4xl mx-auto px-4 text-center py-20">
-          <div className="space-y-8">
-            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">
-              Life Tracker
-            </h1>
-            <p className="text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed">
-              Transform your productivity with evidence-based time tracking, habit formation, and goal achievement. 
-              Know every second what to do.
-            </p>
-            
-            <div className="grid md:grid-cols-3 gap-8 mt-16">
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
-                <div className="text-4xl mb-4">🚀</div>
-                <h3 className="text-xl font-semibold text-white mb-3">Smart Planning</h3>
-                <p className="text-slate-300">
-                  Drag-and-drop timeboxing with automatic conflict detection and real-time adjustments.
-                </p>
-              </div>
-              
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
-                <div className="text-4xl mb-4">🔥</div>
-                <h3 className="text-xl font-semibold text-white mb-3">Habit Mastery</h3>
-                <p className="text-slate-300">
-                  Build lasting habits with streak tracking, implementation intentions, and smart reminders.
-                </p>
-              </div>
-              
-              <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-300">
-                <div className="text-4xl mb-4">📊</div>
-                <h3 className="text-xl font-semibold text-white mb-3">Deep Analytics</h3>
-                <p className="text-slate-300">
-                  Correlation analysis, performance trends, and actionable insights powered by your data.
-                </p>
-              </div>
-            </div>
-            
-            <div className="mt-12">
-              <p className="text-slate-400 text-lg">
-                📱 Use the auth dialog above to get started
-              </p>
-              <p className="text-slate-400 text-sm mt-4">
-                Free to use • Cloud sync with Firebase • Offline capable
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
     );
   }
