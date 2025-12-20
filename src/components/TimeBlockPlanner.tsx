@@ -264,7 +264,8 @@ export default function TimeBlockPlanner({
     const blockStartTime = toDateSafe(block.startTime, selectedDate);
     
     // Never overdue if completed/cancelled/missed
-    if (block.status === 'completed' || block.status === 'cancelled' || block.status === 'missed') {
+    if (block.status === 'completed' || block.status === 'cancelled') {
+
       return '✅';
     }
     
@@ -288,9 +289,10 @@ export default function TimeBlockPlanner({
     const blockEndTime = toDateSafe(block.endTime, selectedDate);
     
     // Never overdue if completed/cancelled/missed or in future
-    if (block.status === 'completed' || block.status === 'cancelled' || block.status === 'missed' || blockEndTime > now) {
-      return null;
-    }
+    if (block.status === 'completed' || block.status === 'cancelled' || blockEndTime > now) {
+  return null;
+}
+
     
     const overdueMinutes = Math.floor((now.getTime() - blockEndTime.getTime()) / (1000 * 60));
     if (overdueMinutes > 60) {
