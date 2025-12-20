@@ -1,3 +1,7 @@
+# Ignore worktrees and Claude artifacts
+worktrees/
+.claude/
+*.local.json
 # Dependencies
 node_modules/
 /.pnp
