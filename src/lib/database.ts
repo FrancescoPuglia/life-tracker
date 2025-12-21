@@ -6,43 +6,108 @@ import {
 import { DatabaseAdapter, firebaseAdapter } from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
 
+// Utility: Recursively remove undefined fields from objects/arrays, preserve Date
+export function sanitizeDeep<T>(value: T): T {
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) {
+    return value.map(sanitizeDeep) as any;
+  }
+  if (value && typeof value === 'object') {
+    const result: any = {};
+    Object.entries(value).forEach(([key, val]) => {
+      if (val !== undefined) {
+        result[key] = sanitizeDeep(val);
+      }
+    });
+    return result;
+  }
+  return value;
+}
+
+// Utility: Sanitize data for storage (removes undefined, preserves null/false/0)
+export function sanitizeForStorage<T>(data: T): T {
+  return sanitizeDeep(data);
+}
+
+// Helper: Build normalized habit log payload (NEVER include undefined)
+export function buildHabitLogPayload(params: {
+  id?: string;
+  habitId: string;
+  dateKey: string;
+  completed: boolean;
+  value?: number | boolean | null;
+  userId?: string;
+}): HabitLog {
+  const now = new Date();
+  
+  const payload: any = {
+    id: params.id || `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    habitId: params.habitId,
+    dateKey: params.dateKey,
+    completed: params.completed,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  // Only include userId if provided
+  if (params.userId) {
+    payload.userId = params.userId;
+  }
+
+  // Only include value if it's defined (omit undefined completely)
+  if (params.value !== undefined) {
+    payload.value = params.value;
+  }
+
+  return payload as HabitLog;
+}
+
 // No-op in-memory adapter for non-browser/server contexts
 class MemoryAdapter implements DatabaseAdapter {
   private store: Record<string, any[]> = {};
 
   async init(): Promise<void> { return; }
+
   async create<T extends { id?: string }>(collection: string, data: T): Promise<T> {
     if (!this.store[collection]) this.store[collection] = [];
     if (!data.id) data.id = `${collection}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    this.store[collection].push(data);
+    this.store[collection].push(sanitizeForStorage(data));
     return data;
   }
+
   async read<T>(collection: string, id: string): Promise<T | null> {
     const items = this.store[collection] || [];
     return (items.find((item) => item.id === id) as T) || null;
   }
+
   async update<T extends { id: string }>(collection: string, data: T): Promise<T> {
     const items = this.store[collection] || [];
     const idx = items.findIndex((item) => item.id === data.id);
-    if (idx >= 0) items[idx] = data;
+    if (idx >= 0) items[idx] = sanitizeForStorage(data);
     return data;
   }
+
   async delete(collection: string, id: string): Promise<void> {
     const items = this.store[collection] || [];
     this.store[collection] = items.filter((item) => item.id !== id);
   }
+
   async getAll<T>(collection: string): Promise<T[]> {
     return (this.store[collection] || []) as T[];
   }
+
   async getByIndex<T>(_collection: string, _field: string, _value: any): Promise<T[]> {
     return [];
   }
+
   async query<T>(_collection: string, _constraints: any[]): Promise<T[]> {
     return [];
   }
+
   subscribe<T>(_collection: string, _callback: (data: T[]) => void): () => void {
     return () => {};
   }
+
   isOnline(): boolean { return false; }
   async enableOffline(): Promise<void> { return; }
   async enableOnline(): Promise<void> { return; }
@@ -65,10 +130,24 @@ class IndexedDBAdapter implements DatabaseAdapter {
     console.time('IDB_OPEN');
     
     return new Promise((resolve, reject) => {
+      // TIMEOUT: Hard limit per IndexedDB open
+      const timeout = setTimeout(() => {
+        console.timeEnd('IDB_OPEN');
+        reject(new Error('IDB_OPEN_TIMEOUT: IndexedDB open blocked or took too long (>1500ms)'));
+      }, 1500);
+
       const request = indexedDB.open(this.dbName, this.version);
+
+      // BLOCKED: Handle database locked by another tab/process
+      request.onblocked = (event) => {
+        console.timeEnd('IDB_OPEN');
+        clearTimeout(timeout);
+        reject(new Error('IDB_BLOCKED: Database locked by another tab. Close other tabs and retry.'));
+      };
 
       request.onerror = () => {
         console.timeEnd('IDB_OPEN');
+        clearTimeout(timeout);
         const error = request.error;
         
         // 🔥 P0 FIX: Handle VersionError specifically with better messaging
@@ -87,7 +166,15 @@ class IndexedDBAdapter implements DatabaseAdapter {
       
       request.onsuccess = () => {
         console.timeEnd('IDB_OPEN');
+        clearTimeout(timeout);
         this.db = request.result;
+        
+        // Handle version change after open (another tab upgraded)
+        this.db.onversionchange = () => {
+          console.log('⚠️ IDB: Database upgraded by another tab, closing connection');
+          this.db?.close();
+        };
+        
         resolve();
       };
 
@@ -170,7 +257,7 @@ class IndexedDBAdapter implements DatabaseAdapter {
     
     return new Promise((resolve, reject) => {
       // 🔥 PSYCHOPATH FIX: Use PUT instead of ADD to allow overwrites
-      const request = store.put(data);
+      const request = store.put(sanitizeForStorage(data));
       request.onsuccess = () => {
         console.log('🔥 PSYCHOPATH: IndexedDB create SUCCESS:', data.id);
         resolve(data);
@@ -194,7 +281,7 @@ class IndexedDBAdapter implements DatabaseAdapter {
   async update<T extends { id: string }>(storeName: string, data: T): Promise<T> {
     const store = await this.getStore(storeName, 'readwrite');
     return new Promise((resolve, reject) => {
-      const request = store.put(data);
+      const request = store.put(sanitizeForStorage(data));
       request.onsuccess = () => resolve(data);
       request.onerror = () => reject(request.error);
     });
@@ -292,8 +379,6 @@ class IndexedDBAdapter implements DatabaseAdapter {
     return this.getByIndex<Session>('sessions', 'status', 'active');
   }
 
-  // REMOVED: getTodayTimeBlocks - now handled by LifeTrackerDB class
-
   async getActiveHabits(userId: string): Promise<Habit[]> {
     const habits = await this.getByIndex<Habit>('habits', 'userId', userId);
     return habits.filter(habit => habit.isActive);
@@ -332,10 +417,10 @@ class IndexedDBAdapter implements DatabaseAdapter {
       new Date(block.startTime) < tomorrow
     );
     
-    // Calculate focus minutes
+    // Calculate focus minutes (session.duration is in seconds, convert to minutes)
     const focusMinutes = todaySessions
       .filter(session => session.tags.includes('focus'))
-      .reduce((total, session) => total + (session.duration || 0), 0);
+      .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
     // Calculate plan vs actual
     const plannedMinutes = timeBlocks.reduce((total, block) => 
@@ -715,28 +800,72 @@ class IndexedDBAdapter implements DatabaseAdapter {
   }
 }
 
-// Main Database Wrapper
+// ============================================================================
+// 🔥 CRITICAL FIX: Main Database Wrapper with proper Firebase restoration
+// ============================================================================
 class LifeTrackerDB {
   private adapter: DatabaseAdapter;
   private useFirebase: boolean;
   private lastUserId: string | null = null;
-  private _activeUserId: string | null = null; // ⚠️ FIX: Traccia userId attivo per garantire invarianti
+  private _activeUserId: string | null = null;
+  private _isInitialized: boolean = false;
+  private _initPromise: Promise<void> | null = null;
 
   constructor() {
     this.useFirebase = false;
-    this.adapter = new MemoryAdapter(); // Placeholder until client configures
-    // ⚠️ FIX: NON chiamare configureAdapter() qui - sarà chiamato lazy in init() o switchToFirebase()
-    // Questo evita race condition quando Firebase non è ancora inizializzato
+    this.adapter = new MemoryAdapter(); // Placeholder
+    
+    // 🔥 CRITICAL FIX: Restore Firebase mode SYNCHRONOUSLY in constructor
+    // This ensures that even before init() is called, we're using the right adapter
+    this.restoreFirebaseModeSync();
+  }
+
+  // 🔥 NEW: Synchronous restore of Firebase mode from sessionStorage
+  private restoreFirebaseModeSync(): void {
+    if (typeof window === 'undefined') {
+      return; // Server-side, skip
+    }
+
+    const savedUserId = sessionStorage.getItem('firebase_userId');
+    
+    console.log('🔄 restoreFirebaseModeSync called:', {
+      savedUserId,
+      firebaseAdapterExists: !!firebaseAdapter
+    });
+
+    if (savedUserId && firebaseAdapter) {
+      console.log('✅ Restoring Firebase mode SYNCHRONOUSLY from sessionStorage');
+      
+      // Set all the state atomically
+      this._activeUserId = savedUserId;
+      this.lastUserId = savedUserId;
+      this.adapter = firebaseAdapter;
+      this.useFirebase = true;
+      
+      // Set userId on the adapter (sync operation)
+      firebaseAdapter.setUserId(savedUserId);
+      
+      console.log('✅ Firebase mode restored:', {
+        useFirebase: this.useFirebase,
+        activeUserId: this._activeUserId,
+        adapterType: this.adapter.constructor.name
+      });
+    } else if (!savedUserId) {
+      console.log('ℹ️ No saved userId in sessionStorage, will use IndexedDB');
+    } else if (!firebaseAdapter) {
+      console.warn('⚠️ Firebase adapter not available, will use IndexedDB');
+    }
   }
 
   private configureAdapter() {
     const inBrowser = typeof window !== 'undefined';
 
-    console.log('🔥 PSYCHOPATH: Database adapter selection:', {
+    console.log('🔧 configureAdapter called:', {
       inBrowser,
       hasApiKey: !!firebaseConfig?.apiKey,
       firebaseAdapterExists: !!firebaseAdapter,
-      activeUserId: this._activeUserId
+      activeUserId: this._activeUserId,
+      currentUseFirebase: this.useFirebase
     });
 
     if (!inBrowser) {
@@ -746,60 +875,90 @@ class LifeTrackerDB {
       return;
     }
 
-    // ⚠️ FIX: CRITICAL - NON selezionare FirebaseAdapter di default
-    // Default: IndexedDBAdapter finché non abbiamo activeUserId e switchToFirebase() è chiamato
-    // Questo garantisce INVARIANTE A: se useFirebase === true allora userId è settato
+    // 🔥 FIX: If already using Firebase (restored from session), don't override!
+    if (this.useFirebase && this.adapter === firebaseAdapter) {
+      console.log('✅ Already using Firebase adapter, skipping reconfiguration');
+      return;
+    }
+
+    // Default: IndexedDBAdapter for guest mode
     this.useFirebase = false;
     this.adapter = new IndexedDBAdapter();
 
-    console.log(`🔌 Database initialized with IndexedDB adapter (default)`);
-    console.log('🔥 PSYCHOPATH: Final adapter info:', {
-      useFirebase: this.useFirebase,
-      adapterType: this.adapter?.constructor?.name,
-      adapterInstance: !!this.adapter,
-      activeUserId: this._activeUserId
-    });
+    console.log(`🔌 Database configured with IndexedDB adapter (default)`);
   }
 
   async init(): Promise<void> {
-    console.time('AUTH_READY');
+    // Prevent multiple concurrent initializations
+    if (this._initPromise) {
+      return this._initPromise;
+    }
+
+    this._initPromise = this._doInit();
+    return this._initPromise;
+  }
+
+  private async _doInit(): Promise<void> {
+    console.time('DB_INIT');
     
-    // ⚠️ FIX: Se siamo in browser e adapter è MemoryAdapter, riconfigura lazy
-    if (typeof window !== 'undefined' && this.adapter instanceof MemoryAdapter) {
+    // 🔥 CRITICAL: If Firebase mode was restored in constructor, just init the adapter
+    if (this.useFirebase && this.adapter === firebaseAdapter) {
+      console.log('🔥 Firebase mode already active, initializing Firebase adapter');
+      try {
+        await this.adapter.init();
+        this._isInitialized = true;
+        console.timeEnd('DB_INIT');
+        console.log('✅ Firebase adapter initialized after restore');
+        return;
+      } catch (error) {
+        console.error('❌ Firebase adapter init failed:', error);
+        // Fall back to IndexedDB
+        console.log('⚠️ Falling back to IndexedDB');
+        this.useFirebase = false;
+        this._activeUserId = null;
+        this.adapter = new IndexedDBAdapter();
+        sessionStorage.removeItem('firebase_userId');
+      }
+    }
+    
+    // If we're still using MemoryAdapter, configure properly
+    if (this.adapter instanceof MemoryAdapter) {
       this.configureAdapter();
     }
 
     try {
       await this.adapter.init();
-      console.timeEnd('AUTH_READY');
+      this._isInitialized = true;
+      console.timeEnd('DB_INIT');
     } catch (error: any) {
-      console.timeEnd('AUTH_READY');
+      console.timeEnd('DB_INIT');
       
-      // Handle VersionError specifically - don't let it hang the init
+      // Handle VersionError specifically
       if (error && error.name === 'VersionError') {
         console.error('IndexedDB VersionError detected:', error.message);
         
-        // Store error for UI to handle
         if (typeof window !== 'undefined') {
           (window as any).__lifeTrackerDBError = {
             type: 'VersionError',
             message: error.message,
-            canReset: !this.useFirebase // Only allow reset for guest mode
+            canReset: !this.useFirebase
           };
         }
         
-        // Don't throw - let app continue with limited functionality
         console.warn('Database init failed but app will continue with limited functionality');
         return;
       }
       
-      // For other errors, still throw
       throw error;
     }
   }
 
   get isUsingFirebase(): boolean {
     return this.useFirebase;
+  }
+
+  get isInitialized(): boolean {
+    return this._isInitialized;
   }
 
   getAdapterDebugInfo(): {
@@ -809,21 +968,20 @@ class LifeTrackerDB {
     adapterMethods: string[];
     userId?: string;
     isInitialized?: boolean;
+    activeUserId?: string;
   } {
-    const debugInfo = {
+    const debugInfo: any = {
       useFirebase: this.useFirebase,
       adapterType: this.adapter?.constructor?.name || 'Unknown',
       hasAdapter: !!this.adapter,
-      adapterMethods: this.adapter ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.adapter)) : []
+      adapterMethods: this.adapter ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.adapter)) : [],
+      activeUserId: this._activeUserId,
+      isInitialized: this._isInitialized
     };
 
-    // Add Firebase-specific debug info
     if (this.useFirebase && this.adapter) {
       if ('userId' in this.adapter) {
-        (debugInfo as any).userId = (this.adapter as any).userId;
-      }
-      if ('isInitialized' in this.adapter) {
-        (debugInfo as any).isInitialized = (this.adapter as any).isInitialized;
+        debugInfo.userId = (this.adapter as any).userId;
       }
     }
 
@@ -831,74 +989,67 @@ class LifeTrackerDB {
   }
 
   async switchToFirebase(userId: string): Promise<void> {
-    console.log('🔥 PSYCHOPATH: switchToFirebase called with:', {
+    console.log('🔥 switchToFirebase called:', {
       userId,
       currentUseFirebase: this.useFirebase,
-      firebaseAdapterExists: !!firebaseAdapter,
-      currentAdapterType: this.adapter.constructor.name,
-      activeUserId: this._activeUserId
+      currentActiveUserId: this._activeUserId,
+      firebaseAdapterExists: !!firebaseAdapter
     });
+    
+    // 🔥 OPTIMIZATION: If already using Firebase with same userId, skip
+    if (this.useFirebase && this._activeUserId === userId && this.adapter === firebaseAdapter) {
+      console.log('✅ Already using Firebase with same userId, skipping switch');
+      return;
+    }
     
     if (!firebaseAdapter) {
       throw new Error('Cannot switch to Firebase - adapter not initialized');
     }
     
-    // ⚠️ FIX: CRITICAL - Operazione atomica per garantire INVARIANTE A
-    // 1. Set activeUserId PRIMA di tutto
+    // Atomic state update
     this._activeUserId = userId;
     this.lastUserId = userId;
-    
-    // 2. Set adapter = firebaseAdapter
     this.adapter = firebaseAdapter;
     
-    // 3. Chiamare adapter.setUserId(userId) SINCRONO (deve essere fatto prima di init)
-    if ('setUserId' in this.adapter) {
-      console.log('🔥 PSYCHOPATH: Calling setUserId on adapter (ATOMIC)');
-      (this.adapter as any).setUserId(userId);
-    } else {
-      throw new Error('FirebaseAdapter does not have setUserId method');
+    // Set userId on adapter (sync)
+    firebaseAdapter.setUserId(userId);
+    
+    // Persist to sessionStorage for refresh survival
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('firebase_userId', userId);
+      console.log('💾 userId persisted to sessionStorage');
     }
     
-    // 4. await adapter.init()
+    // Init adapter
     await this.adapter.init();
     
-    // 5. Set useFirebase = true SOLO dopo che tutto è pronto
+    // Set flag AFTER everything is ready
     this.useFirebase = true;
+    this._isInitialized = true;
     
-    console.log('✅ Switched to Firebase adapter (ATOMIC)', {
+    console.log('✅ Switched to Firebase adapter:', {
       userId,
       useFirebase: this.useFirebase,
       adapterType: this.adapter.constructor.name
     });
     
-    // ⚠️ FIX: INVARIANT CHECK - Verifica che tutto sia corretto
+    // Verify invariants
     this.checkInvariants(userId);
   }
   
-  // ⚠️ FIX: INVARIANT CHECK - Verifica invarianti A e B
   private checkInvariants(expectedUserId: string): void {
     const adapterInfo = this.getAdapterDebugInfo();
     const adapterUserId = adapterInfo.userId;
     
-    console.log('🔍 INVARIANT CHECK', {
-      currentUserId: expectedUserId,
+    console.log('🔍 INVARIANT CHECK:', {
+      expectedUserId,
       dbIsUsingFirebase: this.isUsingFirebase,
       dbActiveUserId: this._activeUserId,
-      firebaseAdapterUserId: adapterUserId,
-      invariantA: this.isUsingFirebase ? (adapterUserId === expectedUserId) : 'N/A (not using Firebase)',
-      invariantB: this.isUsingFirebase ? (!!adapterUserId) : 'N/A (not using Firebase)'
+      firebaseAdapterUserId: adapterUserId
     });
     
-    // INVARIANTE A: Se useFirebase === true allora adapter userId deve essere settato e uguale a currentUser.uid
     if (this.isUsingFirebase && adapterUserId !== expectedUserId) {
-      const error = `INVARIANT A VIOLATED: useFirebase=${this.isUsingFirebase}, expectedUserId=${expectedUserId}, actualUserId=${adapterUserId}`;
-      console.error('❌', error);
-      throw new Error(error);
-    }
-    
-    // INVARIANTE B: Nessuna chiamata a db.create/getAll/update/delete deve raggiungere FirebaseAdapter senza userId
-    if (this.isUsingFirebase && !adapterUserId) {
-      const error = `INVARIANT B VIOLATED: useFirebase=${this.isUsingFirebase}, adapterUserId is null`;
+      const error = `INVARIANT VIOLATED: userId mismatch - expected ${expectedUserId}, got ${adapterUserId}`;
       console.error('❌', error);
       throw new Error(error);
     }
@@ -912,129 +1063,98 @@ class LifeTrackerDB {
     if (this.useFirebase) {
       this.adapter = new IndexedDBAdapter();
       this.useFirebase = false;
+      this._activeUserId = null;
+      
+      // Clear persisted userId
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('firebase_userId');
+      }
+      
       await this.adapter.init();
       console.log('Switched to IndexedDB adapter');
     }
   }
 
+  // 🔥 NEW: Ensure adapter is ready before any operation
+  private async ensureReady(): Promise<void> {
+    if (!this._isInitialized) {
+      await this.init();
+    }
+  }
+
   // Delegate all methods to the current adapter
   async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
-    // ⚠️ FIX: INVARIANT CHECK B - Verifica che adapter sia pronto prima di operazioni
+    await this.ensureReady();
+    
+    // Invariant check for Firebase mode
     if (this.isUsingFirebase) {
       const adapterInfo = this.getAdapterDebugInfo();
       if (!adapterInfo.userId || adapterInfo.userId !== this._activeUserId) {
-        const error = `INVARIANT B VIOLATED: Cannot create - Firebase adapter userId not set or mismatch. activeUserId=${this._activeUserId}, adapterUserId=${adapterInfo.userId}`;
-        console.error('❌', error);
-        throw new Error(error);
+        throw new Error(`Cannot create - Firebase adapter userId not set or mismatch`);
       }
     }
     
-    console.log(`🔥 PSYCHOPATH: LifeTrackerDB.create() called for ${storeName}`, {
+    console.log(`📝 db.create(${storeName}):`, {
       useFirebase: this.useFirebase,
       adapterType: this.adapter?.constructor?.name,
-      hasAdapter: !!this.adapter,
       dataId: data.id,
-      dataUserId: (data as any).userId,
-      activeUserId: this._activeUserId,
-      timestamp: new Date().toISOString()
+      dataUserId: (data as any).userId
     });
     
     try {
-      console.log(`🔥 PSYCHOPATH: About to call adapter.create(${storeName}) on ${this.adapter.constructor.name}`);
       const result = await this.adapter.create(storeName, data);
-      console.log(`🔥 PSYCHOPATH: LifeTrackerDB.create() SUCCESS for ${storeName}:`, {
-        resultId: result.id,
-        resultUserId: (result as any).userId,
-        adapterUsed: this.adapter.constructor.name
-      });
+      console.log(`✅ db.create SUCCESS for ${storeName}:`, result.id);
       return result;
     } catch (error) {
-      console.error(`❌ PSYCHOPATH: LifeTrackerDB.create() ERROR for ${storeName}:`, {
-        error: error,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        adapterType: this.adapter?.constructor?.name,
-        useFirebase: this.useFirebase
-      });
+      console.error(`❌ db.create ERROR for ${storeName}:`, error);
       throw error;
     }
   }
 
   async read<T>(storeName: string, id: string): Promise<T | null> {
+    await this.ensureReady();
     return this.adapter.read(storeName, id);
   }
 
   async update<T extends { id: string }>(storeName: string, data: T): Promise<T> {
+    await this.ensureReady();
     return this.adapter.update(storeName, data);
   }
 
   async delete(storeName: string, id: string): Promise<void> {
+    await this.ensureReady();
     return this.adapter.delete(storeName, id);
   }
 
   async getAll<T>(storeName: string): Promise<T[]> {
-    // ⚠️ FIX: INVARIANT CHECK B - Verifica che adapter sia pronto prima di operazioni
+    await this.ensureReady();
+    
+    // Invariant check for Firebase mode
     if (this.isUsingFirebase) {
       const adapterInfo = this.getAdapterDebugInfo();
       if (!adapterInfo.userId || adapterInfo.userId !== this._activeUserId) {
-        const error = `INVARIANT B VIOLATED: Cannot getAll - Firebase adapter userId not set or mismatch. activeUserId=${this._activeUserId}, adapterUserId=${adapterInfo.userId}`;
-        console.error('❌', error);
-        throw new Error(error);
+        throw new Error(`Cannot getAll - Firebase adapter userId not set or mismatch`);
       }
     }
     
-    console.log(`🔥 PSYCHOPATH: LifeTrackerDB.getAll() called for ${storeName}`, {
+    console.log(`📖 db.getAll(${storeName}):`, {
       useFirebase: this.useFirebase,
       adapterType: this.adapter?.constructor?.name,
-      hasAdapter: !!this.adapter,
-      activeUserId: this._activeUserId,
-      adapterMethods: this.adapter ? Object.getOwnPropertyNames(Object.getPrototypeOf(this.adapter)) : [],
-      timestamp: new Date().toISOString()
+      activeUserId: this._activeUserId
     });
     
-    // Additional debugging to check adapter state
-    if (this.useFirebase && this.adapter) {
-      console.log(`🔥 PSYCHOPATH: Firebase adapter details:`, {
-        hasGetAllMethod: typeof this.adapter.getAll === 'function',
-        hasInitMethod: typeof this.adapter.init === 'function',
-        adapterStringified: this.adapter.toString ? this.adapter.toString() : 'No toString method'
-      });
-      
-      // Check if Firebase adapter has userId set (if it has setUserId method)
-      if ('getUserId' in this.adapter) {
-        console.log(`🔥 PSYCHOPATH: Firebase adapter userId:`, (this.adapter as any).getUserId());
-      }
-      if ('userId' in this.adapter) {
-        console.log(`🔥 PSYCHOPATH: Firebase adapter userId property:`, (this.adapter as any).userId);
-      }
-    }
-    
     try {
-      console.log(`🔥 PSYCHOPATH: About to call adapter.getAll(${storeName}) on ${this.adapter.constructor.name}`);
       const result = await this.adapter.getAll(storeName);
-      console.log(`🔥 PSYCHOPATH: LifeTrackerDB.getAll() result for ${storeName}:`, {
-        count: result.length,
-        items: result.length > 0 ? result.map((item: any) => ({ 
-          id: item.id, 
-          userId: item.userId,
-          type: typeof item,
-          keys: Object.keys(item).slice(0, 5) // Show first 5 keys
-        })) : 'No items returned',
-        firstItem: result.length > 0 ? JSON.stringify(result[0], null, 2) : 'No first item'
-      });
+      console.log(`✅ db.getAll SUCCESS for ${storeName}: ${result.length} items`);
       return result as T[];
     } catch (error) {
-      console.error(`❌ PSYCHOPATH: LifeTrackerDB.getAll() ERROR for ${storeName}:`, {
-        error: error,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : 'No stack trace',
-        adapterType: this.adapter?.constructor?.name,
-        useFirebase: this.useFirebase
-      });
+      console.error(`❌ db.getAll ERROR for ${storeName}:`, error);
       throw error;
     }
   }
 
   async getByIndex<T>(storeName: string, indexName: string, value: any): Promise<T[]> {
+    await this.ensureReady();
     return this.adapter.getByIndex(storeName, indexName, value);
   }
 
@@ -1054,7 +1174,7 @@ class LifeTrackerDB {
     return this.adapter.enableOnline();
   }
 
-  // Specific methods for common queries (keep existing implementation)
+  // Specific methods for common queries
   async getActiveSessions(userId: string): Promise<Session[]> {
     return this.getByIndex<Session>('sessions', 'status', 'active');
   }
@@ -1065,10 +1185,8 @@ class LifeTrackerDB {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Adapter-agnostic fallback: get all timeBlocks and filter in JS
     const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
     
-    // Filter for today's blocks and matching userId
     const todayBlocks = allTimeBlocks.filter(block => {
       if (block.userId !== userId) return false;
       
@@ -1080,17 +1198,14 @@ class LifeTrackerDB {
     return todayBlocks;
   }
 
-  // 🚀 P0 OPTIMIZATION: Get timeBlocks for a specific date
   async getTimeBlocksForDate(userId: string, date: Date): Promise<TimeBlock[]> {
     const dayStart = new Date(date);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
 
-    // Adapter-agnostic fallback: get all timeBlocks and filter in JS
     const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
     
-    // Filter for the specific date and matching userId
     const dateBlocks = allTimeBlocks.filter(block => {
       if (block.userId !== userId) return false;
       
@@ -1102,7 +1217,6 @@ class LifeTrackerDB {
     return dateBlocks;
   }
 
-  // Helper to safely convert various date formats to Date
   private toDateSafe(value: any): Date | undefined {
     if (value instanceof Date) return value;
     if (value && typeof value.toDate === 'function') return value.toDate();
@@ -1134,13 +1248,11 @@ class LifeTrackerDB {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Get today's completed sessions
     const sessions = await this.getByIndex<Session>('sessions', 'userId', userId);
     const todaySessions = sessions.filter(session => 
       session.startTime >= today && session.startTime < tomorrow && session.status === 'completed'
     );
 
-    // Get today's time blocks
     const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
     const timeBlocks = allTimeBlocks.filter(block => 
       block.userId === userId && 
@@ -1148,12 +1260,10 @@ class LifeTrackerDB {
       new Date(block.startTime) < tomorrow
     );
     
-    // Calculate focus minutes
     const focusMinutes = todaySessions
       .filter(session => session.tags.includes('focus'))
-      .reduce((total, session) => total + (session.duration || 0), 0);
+      .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
-    // Calculate plan vs actual
     const plannedMinutes = timeBlocks.reduce((total, block) => 
       total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60), 0
     );
@@ -1164,7 +1274,6 @@ class LifeTrackerDB {
       );
     const planVsActual = plannedMinutes > 0 ? (actualMinutes / plannedMinutes) * 100 : 0;
 
-    // Get active streaks
     const habits = await this.getActiveHabits(userId);
     const activeStreaks = habits.filter(habit => habit.streakCount > 0).length;
 
@@ -1172,7 +1281,7 @@ class LifeTrackerDB {
       focusMinutes: Math.round(focusMinutes),
       planVsActual: Math.round(planVsActual),
       activeStreaks,
-      keyResultsProgress: 0, // TODO: Calculate from goals
+      keyResultsProgress: 0,
       mood: todaySessions.find(s => s.mood !== undefined)?.mood,
       energy: todaySessions.find(s => s.energy !== undefined)?.energy,
     };
@@ -1196,7 +1305,6 @@ class LifeTrackerDB {
       const dayEnd = new Date(d);
       dayEnd.setHours(23, 59, 59, 999);
 
-      // Get all time blocks for this day
       const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
       const dayTimeBlocks = allTimeBlocks.filter(block => 
         block.userId === userId &&
@@ -1204,14 +1312,12 @@ class LifeTrackerDB {
         new Date(block.startTime) <= dayEnd
       );
 
-      // Calculate planned hours
       const plannedMinutes = dayTimeBlocks.reduce((total, block) => {
         const startTime = new Date(block.startTime);
         const endTime = new Date(block.endTime);
         return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
       }, 0);
 
-      // 🚀 ENHANCED: Calculate actual hours from Sessions + TimeBlocks
       let actualMinutes = dayTimeBlocks.reduce((total, block) => {
         if (block.actualStartTime && block.actualEndTime) {
           const actualStart = new Date(block.actualStartTime);
@@ -1221,7 +1327,6 @@ class LifeTrackerDB {
         return total;
       }, 0);
       
-      // 🎯 INTELLIGENCE: Also include session data for more accurate tracking
       const allSessions = await this.getAll<Session>('sessions');
       const daySessions = allSessions.filter(session => 
         session.userId === userId &&
@@ -1231,12 +1336,10 @@ class LifeTrackerDB {
         session.duration
       );
       
-      // Use session data if more accurate than timeblock data
       const sessionMinutes = daySessions.reduce((total, session) => {
-        return total + (session.duration || 0) / 60; // Convert seconds to minutes
+        return total + (session.duration || 0) / 60;
       }, 0);
       
-      // Use the higher value (more accurate tracking)
       if (sessionMinutes > actualMinutes) {
         actualMinutes = sessionMinutes;
       }
@@ -1265,11 +1368,9 @@ class LifeTrackerDB {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get all domains
     const allDomains = await this.getAll<Domain>('domains');
     const userDomains = allDomains.filter(d => d.userId === userId);
 
-    // Get all sessions in the period
     const allSessions = await this.getAll<Session>('sessions');
     const periodSessions = allSessions.filter(session => 
       session.userId === userId &&
@@ -1278,28 +1379,24 @@ class LifeTrackerDB {
       session.status === 'completed'
     );
 
-    // Default colors for domains
     const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
 
     const domainHours = new Map<string, number>();
 
-    // Calculate hours per domain
     for (const session of periodSessions) {
       const domain = userDomains.find(d => d.id === session.domainId);
       const domainName = domain?.name || 'Uncategorized';
-      const hours = (session.duration || 0) / 3600; // Convert seconds to hours
+      const hours = (session.duration || 0) / 3600;
 
       domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
     }
 
-    // Convert to array format
     const result = Array.from(domainHours.entries()).map(([domain, hours], index) => ({
       domain,
       hours: Number(hours.toFixed(1)),
       color: userDomains.find(d => d.name === domain)?.color || defaultColors[index % defaultColors.length]
     }));
 
-    // Sort by hours descending
     return result.sort((a, b) => b.hours - a.hours);
   }
 
@@ -1321,7 +1418,6 @@ class LifeTrackerDB {
       const dayEnd = new Date(d);
       dayEnd.setHours(23, 59, 59, 999);
 
-      // Get all sessions for this day
       const allSessions = await this.getAll<Session>('sessions');
       const daySessions = allSessions.filter(session => 
         session.userId === userId &&
@@ -1330,12 +1426,10 @@ class LifeTrackerDB {
         session.status === 'completed'
       );
 
-      // Calculate focus minutes
       const focusMinutes = daySessions
         .filter(session => session.tags.includes('focus'))
         .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
-      // Calculate average mood and energy
       const moodSessions = daySessions.filter(s => s.mood !== undefined);
       const energySessions = daySessions.filter(s => s.energy !== undefined);
 
@@ -1367,24 +1461,21 @@ class LifeTrackerDB {
     const focusTrend = await this.calculateFocusTrend(userId, days);
     
     if (focusTrend.length < 3) {
-      return []; // Need at least 3 data points for correlation
+      return [];
     }
 
     const correlations = [];
 
-    // Calculate correlation between mood and focus
     const moodFocusCorr = this.calculatePearsonCorrelation(
       focusTrend.map(d => d.mood),
       focusTrend.map(d => d.focusMinutes)
     );
 
-    // Calculate correlation between energy and focus
     const energyFocusCorr = this.calculatePearsonCorrelation(
       focusTrend.map(d => d.energy),
       focusTrend.map(d => d.focusMinutes)
     );
 
-    // Calculate correlation between mood and energy
     const moodEnergyCorr = this.calculatePearsonCorrelation(
       focusTrend.map(d => d.mood),
       focusTrend.map(d => d.energy)
@@ -1449,10 +1540,6 @@ class LifeTrackerDB {
     insights: string[];
     nextWeekGoals: string[];
   }> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 7);
-
     const planVsActual = await this.calculatePlanVsActualData(userId, 7);
     const timeAllocation = await this.calculateTimeAllocation(userId, 7);
     const focusTrend = await this.calculateFocusTrend(userId, 7);
@@ -1462,7 +1549,6 @@ class LifeTrackerDB {
     const insights = [];
     const nextWeekGoals = [];
 
-    // Analyze adherence
     const avgAdherence = planVsActual.reduce((sum, day) => sum + day.adherence, 0) / planVsActual.length;
     if (avgAdherence >= 90) {
       highlights.push('Excellent planning adherence this week');
@@ -1471,7 +1557,6 @@ class LifeTrackerDB {
       nextWeekGoals.push('Improve time estimation accuracy');
     }
 
-    // Analyze focus time
     const totalFocusHours = focusTrend.reduce((sum, day) => sum + day.focusMinutes, 0) / 60;
     if (totalFocusHours >= 20) {
       highlights.push('Strong focus time this week');
@@ -1480,14 +1565,12 @@ class LifeTrackerDB {
       nextWeekGoals.push('Schedule more deep focus blocks');
     }
 
-    // Analyze domain balance
     const topDomain = timeAllocation[0];
     if (topDomain && topDomain.hours > timeAllocation.reduce((sum, d) => sum + d.hours, 0) * 0.6) {
       insights.push(`${topDomain.domain} dominated this week - consider better balance`);
       nextWeekGoals.push('Diversify time allocation across domains');
     }
 
-    // Default content if nothing specific found
     if (highlights.length === 0) highlights.push('Keep building consistent habits');
     if (challenges.length === 0) challenges.push('Continue monitoring time allocation');
     if (insights.length === 0) insights.push('Track mood and energy for better patterns');
@@ -1496,7 +1579,6 @@ class LifeTrackerDB {
     return { highlights, challenges, insights, nextWeekGoals };
   }
 
-  // Public method to reset IndexedDB - only for guest users in recovery scenarios
   async resetLocalDatabase(): Promise<void> {
     if (this.useFirebase) {
       throw new Error('Database reset not available in logged mode - data is stored in Firebase');
@@ -1508,18 +1590,15 @@ class LifeTrackerDB {
 
     await (this.adapter as any).resetDatabase();
     
-    // Reinitialize after reset
     this.configureAdapter();
     await this.init();
   }
 
-  // Check if there's a database error from initialization
   getDatabaseError(): { type: string; message: string; canReset: boolean } | null {
     if (typeof window === 'undefined') return null;
     return (window as any).__lifeTrackerDBError || null;
   }
 
-  // Clear database error (after user handles it)
   clearDatabaseError(): void {
     if (typeof window !== 'undefined') {
       delete (window as any).__lifeTrackerDBError;

@@ -1,3 +1,4 @@
+import { sanitizeForStorage } from './database';
 import {
   collection,
   doc,
@@ -60,12 +61,17 @@ export class FirebaseAdapter implements DatabaseAdapter {
   private userId: string | null = null;
   private unsubscribers: Map<string, () => void> = new Map();
 
+  constructor() {
+    // 🔥 CRITICAL FIX: Restore userId immediately in constructor
+    this.restoreUserId();
+  }
+
   async init(): Promise<void> {
-    // ⚠️ FIX: CRITICAL - Restore userId SEMPRE, anche se già inizializzato (può essere perso dopo refresh)
+    // 🔥 CRITICAL: Always try to restore userId first
     this.restoreUserId();
     
     if (this.isInitialized) {
-      // Se già inizializzato, solo restore userId e return
+      console.log('✅ FirebaseAdapter already initialized, userId:', this.userId);
       return;
     }
     
@@ -75,65 +81,73 @@ export class FirebaseAdapter implements DatabaseAdapter {
     }
     
     try {
-      // Test connection
       await enableNetwork(firestore);
       this.isInitialized = true;
-      console.log('✅ Firebase adapter initialized successfully', {
-        userId: this.userId || 'not set'
+      console.log('✅ Firebase adapter initialized successfully:', {
+        userId: this.userId || 'not set',
+        isInitialized: this.isInitialized
       });
     } catch (error) {
       console.error('❌ Failed to initialize Firebase adapter:', error);
-      // Don't throw - let the system fall back to IndexedDB
       return;
     }
   }
 
   setUserId(userId: string): void {
-    console.log('🔥 PSYCHOPATH: setUserId called with:', userId);
+    console.log('🔥 setUserId called:', userId);
     this.userId = userId;
-    // ⚠️ FIX: Persist userId in sessionStorage per sopravvivere a refresh
+    
+    // Persist to sessionStorage for refresh survival
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('firebase_userId', userId);
-      console.log('💾 userId persisted to sessionStorage');
+      console.log('💾 userId persisted to sessionStorage:', userId);
     }
-    console.log('🔥 PSYCHOPATH: userId set to:', this.userId);
   }
 
-  // ⚠️ FIX: Restore userId da sessionStorage
+  // 🔥 CRITICAL: Restore userId from sessionStorage
   private restoreUserId(): void {
-    if (typeof window !== 'undefined') {
-      const savedUserId = sessionStorage.getItem('firebase_userId');
-      if (savedUserId && !this.userId) {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
+    const savedUserId = sessionStorage.getItem('firebase_userId');
+    
+    if (savedUserId) {
+      if (!this.userId) {
         this.userId = savedUserId;
         console.log('💾 userId restored from sessionStorage:', this.userId);
+      } else if (this.userId !== savedUserId) {
+        console.warn('⚠️ userId mismatch - current:', this.userId, 'saved:', savedUserId);
+        // Trust the sessionStorage value (more recent)
+        this.userId = savedUserId;
       }
     }
   }
 
+  // 🔥 NEW: Public method to get current userId
+  getUserId(): string | null {
+    this.restoreUserId();
+    return this.userId;
+  }
+
   private getUserCollection(collectionName: string): string {
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere (può essere perso dopo refresh)
+    // 🔥 CRITICAL: Always restore before accessing
     this.restoreUserId();
     
-    console.log('🔥 PSYCHOPATH: getUserCollection called with:', {
-      collectionName,
-      userId: this.userId
-    });
-    
     if (!this.userId) {
-      const error = 'User ID not set. Call setUserId() first.';
-      console.error('❌ PSYCHOPATH: getUserCollection failed:', error);
+      const error = 'User ID not set. Call setUserId() first or ensure sessionStorage has firebase_userId.';
+      console.error('❌ getUserCollection failed:', error);
       throw new Error(error);
     }
     
     const path = `users/${this.userId}/${collectionName}`;
-    console.log('🔥 PSYCHOPATH: Collection path generated:', path);
     return path;
   }
 
   async create<T extends { id?: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
-    console.log('🔥 PSYCHOPATH: Firebase create() called with:', {
+    console.log('📝 Firebase create():', {
       collectionName,
       userId: this.userId,
       dataId: data.id,
@@ -142,22 +156,16 @@ export class FirebaseAdapter implements DatabaseAdapter {
     });
     
     if (!firestore || !this.isInitialized) {
-      const error = 'Firebase Firestore not initialized';
-      console.error('❌ PSYCHOPATH: Firebase create failed:', error);
-      throw new Error(error);
+      throw new Error('Firebase Firestore not initialized');
     }
     
     if (!this.userId) {
-      const error = 'Firebase userId not set';
-      console.error('❌ PSYCHOPATH: Firebase create failed:', error);
-      throw new Error(error);
+      throw new Error('Firebase userId not set');
     }
     
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
-      
-      console.log('🔥 PSYCHOPATH: Firebase collection path:', collectionPath);
       
       // Prepare data with timestamps
       const dataWithTimestamps: any = {
@@ -169,30 +177,24 @@ export class FirebaseAdapter implements DatabaseAdapter {
       // Convert date fields to Timestamps
       this.convertDatesToTimestamps(dataWithTimestamps);
       
-      console.log('🔥 PSYCHOPATH: Data prepared for Firebase:', dataWithTimestamps);
-      
       if (data.id) {
-        // Use custom ID - FIX: Use setDoc instead of updateDoc
+        // Use custom ID with setDoc
         const docRef = doc(collectionRef, data.id);
-        console.log('🔥 PSYCHOPATH: Using setDoc for custom ID:', data.id);
-        await setDoc(docRef, dataWithTimestamps);
-        console.log('🔥 PSYCHOPATH: ✅ setDoc SUCCESS for:', data.id);
+        await setDoc(docRef, sanitizeForStorage(dataWithTimestamps));
+        console.log('✅ Firebase setDoc SUCCESS:', data.id);
         return this.convertTimestampsToDates({ ...data, ...dataWithTimestamps }) as T;
       } else {
         // Auto-generate ID
-        console.log('🔥 PSYCHOPATH: Using addDoc for auto-generated ID');
-        const docRef = await addDoc(collectionRef, dataWithTimestamps);
-        console.log('🔥 PSYCHOPATH: ✅ addDoc SUCCESS with ID:', docRef.id);
+        const docRef = await addDoc(collectionRef, sanitizeForStorage(dataWithTimestamps));
+        console.log('✅ Firebase addDoc SUCCESS:', docRef.id);
         const newData = { ...data, id: docRef.id, ...dataWithTimestamps };
         return this.convertTimestampsToDates(newData) as T;
       }
     } catch (error: any) {
-      console.error('❌ PSYCHOPATH: Firebase create FAILED:', {
+      console.error('❌ Firebase create FAILED:', {
         collectionName,
-        error: error,
-        errorMessage: error?.message,
-        errorCode: error?.code,
-        errorStack: error?.stack
+        error: error?.message,
+        code: error?.code
       });
       throw error;
     }
@@ -200,9 +202,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
 
   async read<T>(collectionName: string, id: string): Promise<T | null> {
     await this.init();
-    
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere
-    this.restoreUserId();
     
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
@@ -233,9 +232,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async update<T extends { id: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
     
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere
-    this.restoreUserId();
-    
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -253,22 +249,22 @@ export class FirebaseAdapter implements DatabaseAdapter {
         updatedAt: serverTimestamp(),
       };
       
-      // Convert date fields to Timestamps
       this.convertDatesToTimestamps(dataWithTimestamps);
       
-      await updateDoc(docRef, dataWithTimestamps);
+      await updateDoc(docRef, sanitizeForStorage(dataWithTimestamps));
       return this.convertTimestampsToDates(dataWithTimestamps) as T;
-    } catch (error) {
-      console.error(`Failed to update document in ${collectionName}:`, error);
+    } catch (error: any) {
+      console.error('❌ Firebase update FAILED:', {
+        collectionName,
+        error: error?.message,
+        code: error?.code
+      });
       throw error;
     }
   }
 
   async delete(collectionName: string, id: string): Promise<void> {
     await this.init();
-    
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere
-    this.restoreUserId();
     
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
@@ -282,6 +278,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
       const collectionPath = this.getUserCollection(collectionName);
       const docRef = doc(firestore, collectionPath, id);
       await deleteDoc(docRef);
+      console.log('✅ Firebase delete SUCCESS:', id);
     } catch (error) {
       console.error(`Failed to delete document from ${collectionName}:`, error);
       throw error;
@@ -291,7 +288,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
     
-    console.log('🔥 PSYCHOPATH: FirebaseAdapter.getAll() called with:', {
+    console.log('📖 Firebase getAll():', {
       collectionName,
       userId: this.userId,
       firestore: !!firestore,
@@ -299,40 +296,34 @@ export class FirebaseAdapter implements DatabaseAdapter {
     });
     
     if (!firestore) {
-      const error = 'Firebase Firestore not initialized';
-      console.error('❌ PSYCHOPATH: FirebaseAdapter.getAll() ERROR:', error);
-      throw new Error(error);
+      throw new Error('Firebase Firestore not initialized');
+    }
+    
+    // 🔥 CRITICAL: If no userId, return empty array (don't crash)
+    if (!this.userId) {
+      console.warn('⚠️ Firebase getAll: userId not set, returning empty array');
+      return [];
     }
     
     try {
       const collectionPath = this.getUserCollection(collectionName);
-      console.log('🔥 PSYCHOPATH: Firebase collection path:', collectionPath);
-      
       const collectionRef = collection(firestore, collectionPath);
-      console.log('🔥 PSYCHOPATH: Firebase collection reference created');
       
       const querySnapshot = await getDocs(collectionRef);
-      console.log('🔥 PSYCHOPATH: Firebase query executed, docs found:', querySnapshot.size);
+      console.log('📖 Firebase query result:', {
+        collectionName,
+        count: querySnapshot.size
+      });
       
       const results: T[] = [];
       querySnapshot.forEach(doc => {
-        console.log('🔥 PSYCHOPATH: Processing doc:', {
-          id: doc.id,
-          data: doc.data()
-        });
         const data = { id: doc.id, ...doc.data() };
         results.push(this.convertTimestampsToDates(data) as T);
       });
       
-      console.log('🔥 PSYCHOPATH: FirebaseAdapter.getAll() SUCCESS:', {
-        collectionName,
-        totalResults: results.length,
-        results: results.map((item: any) => ({ id: item.id, userId: item.userId }))
-      });
-      
       return results;
     } catch (error) {
-      console.error(`❌ PSYCHOPATH: Failed to get all documents from ${collectionName}:`, error);
+      console.error(`❌ Failed to get all documents from ${collectionName}:`, error);
       throw error;
     }
   }
@@ -340,20 +331,12 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async getByIndex<T>(collectionName: string, field: string, value: any): Promise<T[]> {
     await this.init();
     
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere
-    this.restoreUserId();
-    
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
     
-    // ⚠️ FIX: CRITICAL - Se userId non è settato, restituisci array vuoto invece di errore
     if (!this.userId) {
-      console.warn('⚠️ FirebaseAdapter.getByIndex: userId not set, returning empty array', {
-        collectionName,
-        field,
-        value
-      });
+      console.warn('⚠️ FirebaseAdapter.getByIndex: userId not set, returning empty array');
       return [];
     }
     
@@ -379,9 +362,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
   async query<T>(collectionName: string, constraints: QueryConstraint[]): Promise<T[]> {
     await this.init();
     
-    // ⚠️ FIX: CRITICAL - Restore userId prima di procedere
-    this.restoreUserId();
-    
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
     }
@@ -395,7 +375,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
       
-      // Build query constraints
       const queryConstraints: any[] = [];
       
       constraints.forEach(constraint => {
@@ -440,6 +419,11 @@ export class FirebaseAdapter implements DatabaseAdapter {
       return () => {};
     }
     
+    if (!this.userId) {
+      console.warn('Firebase userId not set - cannot subscribe');
+      return () => {};
+    }
+    
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
@@ -453,7 +437,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
         callback(results);
       });
       
-      // Store unsubscriber
       const key = `${this.userId}-${collectionName}`;
       this.unsubscribers.set(key, unsubscribe);
       
@@ -503,13 +486,10 @@ export class FirebaseAdapter implements DatabaseAdapter {
     Object.keys(converted).forEach(key => {
       if (converted[key] && typeof converted[key] === 'object') {
         if (converted[key].toDate && typeof converted[key].toDate === 'function') {
-          // It's a Firestore Timestamp
           converted[key] = converted[key].toDate();
         } else if (Array.isArray(converted[key])) {
-          // It's an array, convert each item
           converted[key] = converted[key].map((item: any) => this.convertTimestampsToDates(item));
         } else {
-          // It's a nested object, recurse
           converted[key] = this.convertTimestampsToDates(converted[key]);
         }
       }
@@ -517,10 +497,19 @@ export class FirebaseAdapter implements DatabaseAdapter {
     return converted;
   }
 
+  // 🔥 NEW: Clear stored userId (for logout)
+  clearUserId(): void {
+    this.userId = null;
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('firebase_userId');
+      console.log('🗑️ userId cleared from sessionStorage');
+    }
+  }
+
   destroy(): void {
-    // Unsubscribe from all listeners
     this.unsubscribers.forEach(unsubscribe => unsubscribe());
     this.unsubscribers.clear();
+    this.clearUserId();
   }
 }
 

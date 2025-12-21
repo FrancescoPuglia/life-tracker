@@ -1,12 +1,14 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator, enableNetwork, disableNetwork, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
+import { initializeFirestore, connectFirestoreEmulator, enableNetwork, disableNetwork, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { firebaseConfig } from '../config/firebaseConfig';
 
 // Initialize Firebase directly - no lazy loading needed with hardcoded config
+
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const firestore = getFirestore(app);
+// Initialize Firestore with ignoreUndefinedProperties: true
+export const firestore = initializeFirestore(app, { ignoreUndefinedProperties: true });
 
 console.log('✅ Firebase initialized successfully with hardcoded config');
 

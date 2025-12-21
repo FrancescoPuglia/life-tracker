@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Session, TimeBlock, KPI, Goal, KeyResult, Project, Task, 
   Habit, HabitLog, AnalyticsData 
 } from '@/types';
+import { computeDurationMinutes } from '@/utils/dateUtils';
 import { SessionManager } from '@/utils/sessionManager';
-import { db } from '@/lib/database';
+import { db, buildHabitLogPayload, sanitizeForStorage } from '@/lib/database';
 import { useAuth, AuthUser } from '@/lib/auth';
 
 import NowBar from '@/components/NowBar';
@@ -27,14 +28,133 @@ import RealTimeAdaptation from '@/components/RealTimeAdaptation';
 import MicroCoachDashboard from '@/components/MicroCoachDashboard';
 import { audioManager } from '@/lib/audioManager';
 
-// Build ID for deploy verification
-const BUILD_ID = `2025-12-19-${Date.now().toString(36)}`;
+// ============================================================================
+// CONSTANTS & TYPES
+// ============================================================================
+
+const BUILD_ID = `2025-12-21-fix2-${Date.now().toString(36)}`;
+const DEBUG_INIT = process.env.NODE_ENV === 'development';
+const DEBUG_UI = process.env.NEXT_PUBLIC_DEBUG_INIT === '1';
+
+type AuthStatus = 'unknown' | 'signedOut' | 'signedIn';
+type InitStatus = 'idle' | 'loading' | 'ready' | 'error';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges';
+
+// ============================================================================
+// UTILITIES
+// ============================================================================
+
+function generateId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+type TimeBlockStatus = TimeBlock["status"];
+
+function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
+  const s = String(input ?? "").trim().toLowerCase();
+  if (["completed", "complete", "done"].includes(s)) return "completed";
+  if (["in_progress", "in-progress", "inprogress"].includes(s)) return "in_progress";
+  if (["cancelled", "canceled", "cancel"].includes(s)) return "cancelled";
+  if (["overrun"].includes(s)) return "overrun";
+  return "planned";
+}
+
+function toDateSafe(value: unknown, fallback?: Date): Date {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+  if (value && typeof value === 'object' && 'toDate' in value) {
+    try {
+      const d = (value as { toDate: () => Date }).toDate();
+      if (d instanceof Date && !isNaN(d.getTime())) return d;
+    } catch { /* ignore */ }
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return fallback ?? new Date();
+}
+
+function deserializeTimeBlock(block: any): TimeBlock {
+  return {
+    ...block,
+    startTime: toDateSafe(block.startTime),
+    endTime: toDateSafe(block.endTime),
+    createdAt: toDateSafe(block.createdAt),
+    updatedAt: toDateSafe(block.updatedAt),
+    actualStartTime: block.actualStartTime ? toDateSafe(block.actualStartTime) : undefined,
+    actualEndTime: block.actualEndTime ? toDateSafe(block.actualEndTime) : undefined,
+    status: normalizeTimeBlockStatus(block.status),
+  };
+}
+
+function deserializeGoal(goal: any): Goal {
+  return {
+    ...goal,
+    targetDate: toDateSafe(goal.targetDate),
+    createdAt: toDateSafe(goal.createdAt),
+    updatedAt: toDateSafe(goal.updatedAt),
+  };
+}
+
+function deserializeProject(project: any): Project {
+  return {
+    ...project,
+    dueDate: project.dueDate ? toDateSafe(project.dueDate) : undefined,
+    createdAt: toDateSafe(project.createdAt),
+    updatedAt: toDateSafe(project.updatedAt),
+  };
+}
+
+function deserializeTask(task: any): Task {
+  return {
+    ...task,
+    dueDate: task.dueDate ? toDateSafe(task.dueDate) : undefined,
+    deadline: task.deadline ? toDateSafe(task.deadline) : undefined,
+    completedAt: task.completedAt ? toDateSafe(task.completedAt) : undefined,
+    createdAt: toDateSafe(task.createdAt),
+    updatedAt: toDateSafe(task.updatedAt),
+  };
+}
+
+function deserializeKeyResult(kr: any): KeyResult {
+  return {
+    ...kr,
+    createdAt: toDateSafe(kr.createdAt),
+    updatedAt: toDateSafe(kr.updatedAt),
+  };
+}
+
+function deserializeHabit(habit: any): Habit {
+  return {
+    ...habit,
+    createdAt: toDateSafe(habit.createdAt),
+    updatedAt: toDateSafe(habit.updatedAt),
+  };
+}
+
+function deserializeHabitLog(log: any): HabitLog {
+  return {
+    ...log,
+    date: toDateSafe(log.date),
+    createdAt: toDateSafe(log.createdAt),
+  };
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 
 export default function HomePage() {
   const auth = useAuth();
+  
+  // ========== AUTH STATE ==========
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [authReady, setAuthReady] = useState(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('unknown');
+  const [initStatus, setInitStatus] = useState<InitStatus>('idle');
+  const [lastStep, setLastStep] = useState<string>('Starting...');
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // ========== SESSION STATE ==========
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [currentTimeBlock, setCurrentTimeBlock] = useState<TimeBlock | null>(null);
   const [todayKPIs, setTodayKPIs] = useState<KPI>({
@@ -44,7 +164,7 @@ export default function HomePage() {
     keyResultsProgress: 0,
   });
 
-  // Data states
+  // ========== DATA STATE ==========
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [keyResults, setKeyResults] = useState<KeyResult[]>([]);
@@ -54,6 +174,16 @@ export default function HomePage() {
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  
+  // 🔥 NEW: Track if data has been loaded for current user
+  const [dataLoadedForUser, setDataLoadedForUser] = useState<string | null>(null);
+
+  // ========== UI STATE ==========
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [activeTab, setActiveTab] = useState<ActiveTab>('planner');
+  const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
+  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
+  const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
   const [userStats, setUserStats] = useState({
     maxStreak: 0,
     totalFocusMinutes: 0,
@@ -66,415 +196,251 @@ export default function HomePage() {
     eveningSessionsCount: 0,
     weeklyFocusMinutes: 0
   });
-  const [showBadges, setShowBadges] = useState(false);
 
-  // UI states
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges'>('planner');
-  const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
-  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
-  const [isLoading, setIsLoading] = useState(true);
-  const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
-  const adapterInfo = db.getAdapterDebugInfo();
-  const lastLoadedUserId = useRef<string | null>(null);
-  const hasInitialized = useRef(false);
-  
-  // 🔥 P0 FIX: Deterministic init guards  
-  const initInFlightRef = useRef(false);
-  const hasInitializedForUserRef = useRef<string | null>(null);
+  // ========== REFS ==========
+  const t0 = useRef(performance.now());
+  const runId = useRef(`run-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`);
 
   const sessionManager = SessionManager.getInstance();
 
-  // 🔥 FIX: Effective userId for both logged and guest users
+  // ========== DERIVED STATE ==========
+  
   const effectiveUserId = useMemo(() => {
-    if (currentUser?.uid) return currentUser.uid;
-    // For guest users, use a persistent ID from localStorage
-    if (typeof window !== 'undefined') {
-      let guestId = localStorage.getItem('lifeTracker_guestId');
-      if (!guestId) {
-        guestId = `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        localStorage.setItem('lifeTracker_guestId', guestId);
-      }
-      return guestId;
+    if (authStatus !== 'signedIn' || !currentUser?.uid) {
+      return undefined;
     }
-    return 'guest-temp'; // Fallback for SSR
-  }, [currentUser?.uid]);
+    return currentUser.uid;
+  }, [authStatus, currentUser?.uid]);
 
-  // Initialize auth state listener - DETERMINISTIC GATE
+  const filteredGoals = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return goals.filter(g => !g.deleted && g.userId === effectiveUserId);
+  }, [goals, effectiveUserId]);
+
+  const filteredProjects = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return projects.filter(p => !p.deleted && p.userId === effectiveUserId);
+  }, [projects, effectiveUserId]);
+
+  const filteredTasks = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return tasks.filter(t => !t.deleted && t.userId === effectiveUserId);
+  }, [tasks, effectiveUserId]);
+
+  const filteredTimeBlocks = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return timeBlocks.filter(tb => tb.userId === effectiveUserId);
+  }, [timeBlocks, effectiveUserId]);
+
+  const filteredKeyResults = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return keyResults.filter(kr => !kr.deleted && kr.userId === effectiveUserId);
+  }, [keyResults, effectiveUserId]);
+
+  const filteredHabits = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return habits.filter(h => !h.deleted && h.userId === effectiveUserId);
+  }, [habits, effectiveUserId]);
+
+  const filteredHabitLogs = useMemo(() => {
+    if (!effectiveUserId) return [];
+    return habitLogs.filter(log => log.userId === effectiveUserId);
+  }, [habitLogs, effectiveUserId]);
+
+  // ========== LOGGING ==========
+  const trace = useCallback((...args: any[]) => {
+    if (!DEBUG_INIT) return;
+    console.log(`[${runId.current}][${Math.round(performance.now() - t0.current)}ms]`, ...args);
+  }, []);
+
+  // ========== AUTH STATE MACHINE ==========
   useEffect(() => {
-    console.time('AUTH_READY');
-    const unsubscribe = auth.onAuthStateChange((user) => {
-      console.timeEnd('AUTH_READY');
-      setCurrentUser(user);
-      setAuthReady(true); // Auth is definitively ready after first callback
-    });
-
-    return unsubscribe;
-  }, [auth]);
-
-  // DETERMINISTIC INIT: Only run after auth is definitively ready
-  useEffect(() => {
-    if (!authReady || typeof window === 'undefined') return;
+    trace('AUTH:start', 'Setting up auth state listener');
     
-    // 🔥 P0 FIX: Deterministic guard - prevent multiple init runs
-    const userKey = currentUser?.uid || 'guest';
-    if (initInFlightRef.current || hasInitializedForUserRef.current === userKey) {
-      console.log('🔥 INIT SKIPPED:', { 
-        initInFlight: initInFlightRef.current,
-        alreadyInitialized: hasInitializedForUserRef.current === userKey,
-        userKey 
-      });
+    // 🔥 INCREASED TIMEOUT: 5 seconds instead of 2.5
+    const authTimeout = setTimeout(() => {
+      trace('AUTH:timeout', 'Auth state timeout - assuming signed out');
+      setCurrentUser(null);
+      setAuthStatus('signedOut');
+      setLastStep('AUTH:timeout');
+    }, 5000);
+    
+    const unsubscribe = auth.onAuthStateChange((user) => {
+      trace('AUTH:resolved', user ? `SIGNED_IN uid=${user.uid}` : 'SIGNED_OUT');
+      clearTimeout(authTimeout);
+      setCurrentUser(user);
+      setAuthStatus(user ? 'signedIn' : 'signedOut');
+      setLastStep(user ? 'AUTH:signedIn' : 'AUTH:signedOut');
+    });
+    
+    return () => {
+      clearTimeout(authTimeout);
+      unsubscribe();
+    };
+  }, []);
+
+  // ========== 🔥 CRITICAL FIX: SEPARATE DATA LOADING EFFECT ==========
+  useEffect(() => {
+    if (!effectiveUserId) {
+      trace('DATA:skip', 'No effectiveUserId yet');
       return;
     }
-
-    const run = async () => {
-      initInFlightRef.current = true;
-      console.time('TOTAL_INIT');
-      const timings: Record<string, number> = {};
-      const startTotal = performance.now();
-
-      setIsLoading(true);
+    
+    // Skip if already loaded for this user
+    if (dataLoadedForUser === effectiveUserId) {
+      trace('DATA:skip', 'Data already loaded for this user');
+      return;
+    }
+    
+    trace('DATA:load:start', `Loading data for user ${effectiveUserId}`);
+    setInitStatus('loading');
+    setLastStep('DATA:loading');
+    
+    const loadAllData = async () => {
       try {
-        // Phase 1: Critical blocking init only
-        console.time('DB_INIT');
-        const dbStart = performance.now();
-        await db.init(); // Configure adapter -> IndexedDB default in browser
-        timings.DB_INIT = performance.now() - dbStart;
-        console.timeEnd('DB_INIT');
-
-        // Determine mode and essential data only
-        if (currentUser?.uid) {
-          // LOGGED IN MODE: Use Firebase
-          console.time('FIREBASE_SWITCH');
-          const fbStart = performance.now();
+        // Step 1: Ensure database is initialized
+        trace('DB:init:start', 'Initializing database');
+        await db.init();
+        trace('DB:init:ok', 'Database initialized');
+        
+        // Step 2: Switch to Firebase
+        trace('FIREBASE:switch:start', 'Switching to Firebase');
+        try {
           const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
           
-          // 🔥 P0 FIX: Firebase persistence NON-BLOCCANTE con warning
           try {
             await ensureFirestorePersistence(firestore);
-          } catch (error: any) {
-            console.warn('⚠️ Firebase persistence failed but continuing:', error?.message || error);
-            // NON rethrow - continua senza persistence
+          } catch (e: any) {
+            trace('FIREBASE:persistence:warn', e?.message);
           }
           
-          await db.switchToFirebase(currentUser.uid);
-          timings.FIREBASE_SWITCH = performance.now() - fbStart;
-          console.timeEnd('FIREBASE_SWITCH');
-
-          console.time('ESSENTIAL_DATA_LOAD');
-          const dataStart = performance.now();
-          await loadEssentialDataLogged(); // Load only what's needed for first render
-          timings.ESSENTIAL_DATA_LOAD = performance.now() - dataStart;
-          console.timeEnd('ESSENTIAL_DATA_LOAD');
-        } else {
-          // GUEST MODE: Use IndexedDB for local persistence
-          console.time('GUEST_LOAD');
-          const guestStart = performance.now();
-          await loadEssentialDataGuest(); // Load only essential guest data
-          timings.GUEST_LOAD = performance.now() - guestStart;
-          console.timeEnd('GUEST_LOAD');
-          setShowAuthModal(true);
+          await db.switchToFirebase(effectiveUserId);
+          trace('FIREBASE:switch:ok', 'Switched to Firebase');
+        } catch (error: any) {
+          trace('FIREBASE:switch:error', error.message);
         }
-
-        // Phase 2: Non-blocking background init using requestIdleCallback when available
-        const runBackgroundInit = () => {
-          console.time('BACKGROUND_INIT');
-          const backgroundStart = performance.now();
-          Promise.all([
-            audioManager.init().catch(e => console.warn('Audio init failed:', e)),
-            currentUser?.uid ? loadSecondaryDataLogged() : loadSecondaryDataGuest(),
-            loadAnalyticsData().catch(e => console.warn('Analytics load failed:', e))
-          ]).then(() => {
-            timings.BACKGROUND_INIT = performance.now() - backgroundStart;
-            console.timeEnd('BACKGROUND_INIT');
-            console.log('🚀 BACKGROUND_INIT completed');
-          });
-        };
-
-        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-          window.requestIdleCallback(runBackgroundInit);
-        } else {
-          setTimeout(runBackgroundInit, 0);
-        }
-
-      } catch (error) {
-        console.error('INIT_ERROR', error);
-        timings.ERROR = performance.now() - startTotal;
-      } finally {
-        timings.TOTAL_INIT = performance.now() - startTotal;
-        console.timeEnd('TOTAL_INIT');
         
-        // Print performance summary
-        const criticalPathMs = timings.DB_INIT + (timings.FIREBASE_SWITCH || 0) + (timings.ESSENTIAL_DATA_LOAD || timings.GUEST_LOAD || 0);
+        // Step 3: Load all data in parallel
+        trace('DATA:fetch:start', 'Fetching all data');
         
-        console.log('🚀 PERF_SUMMARY:', {
-          mode: currentUser?.uid ? 'LOGGED' : 'GUEST',
-          effectiveUserId: effectiveUserId,
-          criticalPathMs: Math.round(criticalPathMs),
-          totalMs: Math.round(timings.TOTAL_INIT),
-          timings: Object.fromEntries(Object.entries(timings).map(([k, v]) => [k, Math.round(v)])),
-          buildId: BUILD_ID
+        const [
+          allTimeBlocks,
+          allGoals,
+          allProjects,
+          allTasks,
+          allKeyResults,
+          allHabits,
+          allHabitLogs,
+        ] = await Promise.all([
+          db.getAll<TimeBlock>('timeBlocks').catch(() => []),
+          db.getAll<Goal>('goals').catch(() => []),
+          db.getAll<Project>('projects').catch(() => []),
+          db.getAll<Task>('tasks').catch(() => []),
+          db.getAll<KeyResult>('keyResults').catch(() => []),
+          db.getAll<Habit>('habits').catch(() => []),
+          db.getAll<HabitLog>('habitLogs').catch(() => []),
+        ]);
+        
+        trace('DATA:fetch:ok', {
+          timeBlocks: allTimeBlocks.length,
+          goals: allGoals.length,
+          projects: allProjects.length,
+          tasks: allTasks.length,
         });
         
-        // 🔥 P0 FIX: Mark as initialized for this user
-        hasInitializedForUserRef.current = userKey;
-        initInFlightRef.current = false;
-        setIsLoading(false);
+        // Step 4: Deserialize and filter by userId
+        const userTimeBlocks = allTimeBlocks
+          .map(deserializeTimeBlock)
+          .filter(tb => tb.userId === effectiveUserId);
+        
+        const userGoals = allGoals
+          .map(deserializeGoal)
+          .filter(g => g.userId === effectiveUserId);
+        
+        const userProjects = allProjects
+          .map(deserializeProject)
+          .filter(p => p.userId === effectiveUserId);
+        
+        const userTasks = allTasks
+          .map(deserializeTask)
+          .filter(t => t.userId === effectiveUserId);
+        
+        const userKeyResults = allKeyResults
+          .map(deserializeKeyResult)
+          .filter(kr => kr.userId === effectiveUserId);
+        
+        const userHabits = allHabits
+          .map(deserializeHabit)
+          .filter(h => h.userId === effectiveUserId);
+        
+        const userHabitLogs = allHabitLogs
+          .map(deserializeHabitLog)
+          .filter(log => log.userId === effectiveUserId);
+        
+        trace('DATA:filtered', {
+          timeBlocks: userTimeBlocks.length,
+          goals: userGoals.length,
+        });
+        
+        // Step 5: Update state
+        setTimeBlocks(userTimeBlocks);
+        setGoals(userGoals);
+        setProjects(userProjects);
+        setTasks(userTasks);
+        setKeyResults(userKeyResults);
+        setHabits(userHabits);
+        setHabitLogs(userHabitLogs);
+        
+        // Mark as loaded
+        setDataLoadedForUser(effectiveUserId);
+        setInitStatus('ready');
+        setLastStep('DATA:ready');
+        
+        trace('DATA:load:complete', 'All data loaded successfully');
+        
+        // Background: Load KPIs
+        try {
+          const kpis = await db.calculateTodayKPIs(effectiveUserId);
+          setTodayKPIs(kpis);
+        } catch (e) {
+          trace('KPI:error', e);
+        }
+        
+        // Init audio in background
+        audioManager.init().catch(() => {});
+        
+      } catch (error: any) {
+        trace('DATA:load:error', error.message);
+        console.error('Failed to load data:', error);
+        setLastStep(`DATA:error:${error.message}`);
+        setInitStatus('ready'); // Still show UI
       }
     };
-
-    run();
-  }, [authReady, currentUser?.uid]);
-
-  // ESSENTIAL DATA LOGGED: Load only what's needed for first render
-  const loadEssentialDataLogged = async () => {
-    if (!currentUser?.uid) {
-      console.error('loadEssentialDataLogged called without currentUser.uid');
-      return;
-    }
     
-    console.log('📊 loadEssentialDataLogged() START - Firebase mode');
-    
-    // 🚀 P0 OPTIMIZATION: Load only TODAY's timeBlocks + goals + projects (minimal for UI unlock)
-    const [
-      todayTimeBlocks, allGoals, allProjects
-    ] = await Promise.all([
-      db.getTodayTimeBlocks(currentUser.uid), // Only today's blocks for fast init
-      db.getAll<Goal>('goals'),
-      db.getAll<Project>('projects')
-    ]);
+    loadAllData();
+  }, [effectiveUserId, dataLoadedForUser]);
 
-    // Deserialize essential data
-    const deserializedTimeBlocks = todayTimeBlocks.map((block: any) => ({
-      ...block,
-      startTime: new Date(block.startTime),
-      endTime: new Date(block.endTime),
-      createdAt: block.createdAt ? new Date(block.createdAt) : new Date(),
-      updatedAt: block.updatedAt ? new Date(block.updatedAt) : new Date(),
-      actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-      actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-      status: normalizeTimeBlockStatus(block.status),
-    }));
-
-    const deserializedGoals = allGoals.map(goal => ({
-      ...goal,
-      targetDate: new Date(goal.targetDate),
-      createdAt: new Date(goal.createdAt),
-      updatedAt: new Date(goal.updatedAt)
-    }));
-
-    const deserializedProjects = allProjects.map(project => ({
-      ...project,
-      dueDate: project.dueDate ? new Date(project.dueDate) : undefined,
-      createdAt: new Date(project.createdAt),
-      updatedAt: new Date(project.updatedAt)
-    }));
-
-    // Set essential data immediately
-    setTimeBlocks(deserializedTimeBlocks);
-    setGoals(deserializedGoals);
-    setProjects(deserializedProjects);
-
-    console.log('📊 loadEssentialDataLogged() COMPLETE - Essential data loaded', {
-      timeBlocks: deserializedTimeBlocks.length,
-      goals: deserializedGoals.length,
-      projects: deserializedProjects.length
-    });
-  };
-
-  // SECONDARY DATA LOGGED: Load remaining data in background
-  const loadSecondaryDataLogged = async () => {
-    console.log('📊 loadSecondaryDataLogged() START - Firebase mode');
-    
-    const [
-      allKeyResults, allTasks, allHabits, allHabitLogs
-    ] = await Promise.all([
-      db.getAll<KeyResult>('keyResults'),
-      db.getAll<Task>('tasks'),
-      db.getAll<Habit>('habits'),
-      db.getAll<HabitLog>('habitLogs')
-    ]);
-
-    // Deserialize secondary data
-    const deserializedKeyResults = allKeyResults.map(kr => ({
-      ...kr,
-      createdAt: new Date(kr.createdAt),
-      updatedAt: new Date(kr.updatedAt)
-    }));
-
-    const deserializedTasks = allTasks.map(task => ({
-      ...task,
-      dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-      deadline: task.deadline ? new Date(task.deadline) : undefined,
-      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
-      createdAt: new Date(task.createdAt),
-      updatedAt: new Date(task.updatedAt)
-    }));
-
-    const deserializedHabits = allHabits.map(habit => ({
-      ...habit,
-      createdAt: new Date(habit.createdAt),
-      updatedAt: new Date(habit.updatedAt)
-    }));
-
-    const deserializedHabitLogs = allHabitLogs.map(log => ({
-      ...log,
-      date: new Date(log.date),
-      createdAt: new Date(log.createdAt)
-    }));
-
-    // Set secondary data
-    setKeyResults(deserializedKeyResults);
-    setTasks(deserializedTasks);
-    setHabits(deserializedHabits);
-    setHabitLogs(deserializedHabitLogs);
-
-    console.log('📊 loadSecondaryDataLogged() COMPLETE', {
-      keyResults: deserializedKeyResults.length,
-      tasks: deserializedTasks.length,
-      habits: deserializedHabits.length,
-      habitLogs: deserializedHabitLogs.length
-    });
-  };
-
-  // ESSENTIAL DATA GUEST: Load only what's needed for first render  
-  const loadEssentialDataGuest = async () => {
-    console.log('📊 loadEssentialDataGuest() START - IndexedDB mode');
-    
-    // 🚀 P0 OPTIMIZATION: Load only TODAY's timeBlocks + goals + projects (minimal for UI unlock)
-    const [
-      todayTimeBlocks, allGoals, allProjects
-    ] = await Promise.all([
-      db.getTodayTimeBlocks(effectiveUserId), // Only today's blocks for fast init
-      db.getAll<Goal>('goals'),
-      db.getAll<Project>('projects')
-    ]);
-
-    // Deserialize essential data
-    const deserializedTimeBlocks = todayTimeBlocks.map((block: any) => ({
-  ...block,
-  startTime: new Date(block.startTime),
-  endTime: new Date(block.endTime),
-  createdAt: block.createdAt ? new Date(block.createdAt) : new Date(),
-  updatedAt: block.updatedAt ? new Date(block.updatedAt) : new Date(),
-  actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-  actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-  status: normalizeTimeBlockStatus(block.status),
-}));
-
-
-    const deserializedGoals = allGoals.map(goal => ({
-      ...goal,
-      targetDate: new Date(goal.targetDate),
-      createdAt: new Date(goal.createdAt),
-      updatedAt: new Date(goal.updatedAt)
-    }));
-
-    const deserializedProjects = allProjects.map(project => ({
-      ...project,
-      dueDate: project.dueDate ? new Date(project.dueDate) : undefined,
-      createdAt: new Date(project.createdAt),
-      updatedAt: new Date(project.updatedAt)
-    }));
-
-    // Set essential data immediately
-    setTimeBlocks(deserializedTimeBlocks);
-    setGoals(deserializedGoals);
-    setProjects(deserializedProjects);
-
-    console.log('📊 loadEssentialDataGuest() COMPLETE - Essential data loaded', {
-      timeBlocks: deserializedTimeBlocks.length,
-      goals: deserializedGoals.length,
-      projects: deserializedProjects.length
-    });
-  };
-
-  // SECONDARY DATA GUEST: Load remaining data in background
-  const loadSecondaryDataGuest = async () => {
-    console.log('📊 loadSecondaryDataGuest() START - IndexedDB mode');
-    
-    const [
-      allKeyResults, allTasks, allHabits, allHabitLogs
-    ] = await Promise.all([
-      db.getAll<KeyResult>('keyResults'),
-      db.getAll<Task>('tasks'),
-      db.getAll<Habit>('habits'),
-      db.getAll<HabitLog>('habitLogs')
-    ]);
-
-    // Deserialize secondary data
-    const deserializedKeyResults = allKeyResults.map(kr => ({
-      ...kr,
-      createdAt: new Date(kr.createdAt),
-      updatedAt: new Date(kr.updatedAt)
-    }));
-
-    const deserializedTasks = allTasks.map(task => ({
-      ...task,
-      dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-      deadline: task.deadline ? new Date(task.deadline) : undefined,
-      completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
-      createdAt: new Date(task.createdAt),
-      updatedAt: new Date(task.updatedAt)
-    }));
-
-    const deserializedHabits = allHabits.map(habit => ({
-      ...habit,
-      createdAt: new Date(habit.createdAt),
-      updatedAt: new Date(habit.updatedAt)
-    }));
-
-    const deserializedHabitLogs = allHabitLogs.map(log => ({
-      ...log,
-      date: new Date(log.date),
-      createdAt: new Date(log.createdAt)
-    }));
-
-    // Set secondary data
-    setKeyResults(deserializedKeyResults);
-    setTasks(deserializedTasks);
-    setHabits(deserializedHabits);
-    setHabitLogs(deserializedHabitLogs);
-
-    console.log('📊 loadSecondaryDataGuest() COMPLETE', {
-      keyResults: deserializedKeyResults.length,
-      tasks: deserializedTasks.length,
-      habits: deserializedHabits.length,
-      habitLogs: deserializedHabitLogs.length
-    });
-  };
-
-  // Update KPIs periodically
+  // ========== KPI & CURRENT BLOCK UPDATES ==========
   useEffect(() => {
+    if (!effectiveUserId) return;
+    
     const updateKPIs = async () => {
       try {
-        if (currentUser) {
-          const kpis = await db.calculateTodayKPIs(currentUser.uid);
-          setTodayKPIs(kpis);
-        }
+        const kpis = await db.calculateTodayKPIs(effectiveUserId);
+        setTodayKPIs(kpis);
       } catch (error) {
         console.error('Failed to update KPIs:', error);
       }
     };
 
-    updateKPIs();
-    const interval = setInterval(updateKPIs, 60000); // Update every minute
-
+    const interval = setInterval(updateKPIs, 60000);
     return () => clearInterval(interval);
-  }, [currentSession, currentUser]);
+  }, [effectiveUserId, currentSession]);
 
-  // Reload analytics when timeRange changes
-  useEffect(() => {
-    if (!isLoading && analyticsData && authReady) {
-      loadAnalyticsData();
-    }
-  }, [timeRange, isLoading, authReady]);
-
-  // Update current time block
   useEffect(() => {
     const updateCurrentTimeBlock = () => {
       const now = new Date();
-      const activeBlock = timeBlocks.find(block => 
+      const activeBlock = filteredTimeBlocks.find(block => 
         block.startTime <= now && 
         block.endTime >= now && 
         block.status !== 'completed'
@@ -483,41 +449,34 @@ export default function HomePage() {
     };
 
     updateCurrentTimeBlock();
-    const interval = setInterval(updateCurrentTimeBlock, 10000); // Update every 10 seconds
-
+    const interval = setInterval(updateCurrentTimeBlock, 10000);
     return () => clearInterval(interval);
-  }, [timeBlocks]);
+  }, [filteredTimeBlocks]);
 
-  // 🚀 P0 OPTIMIZATION: Load timeBlocks for selected date on-demand
+  // Load timeBlocks for selected date on-demand
   useEffect(() => {
+    if (!effectiveUserId) return;
+    
     const loadTimeBlocksForDate = async () => {
-      if (!authReady || !hasInitializedForUserRef.current) return;
-      
       const selectedDateStr = selectedDate.toDateString();
+      const todayStr = new Date().toDateString();
+      
+      if (selectedDateStr === todayStr) return;
+      
       const hasBlocksForDate = timeBlocks.some(block => 
         new Date(block.startTime).toDateString() === selectedDateStr
       );
       
-      // If we don't have blocks for this date, load them
-      if (!hasBlocksForDate && selectedDateStr !== new Date().toDateString()) {
-        console.log('📅 Loading timeBlocks for date:', selectedDateStr);
+      if (!hasBlocksForDate) {
         try {
-          const userId = currentUser?.uid || effectiveUserId;
-          const dateBlocks = await db.getTimeBlocksForDate(userId, selectedDate);
+          const dateBlocks = await db.getTimeBlocksForDate(effectiveUserId, selectedDate);
+          const deserializedBlocks = dateBlocks.map(deserializeTimeBlock);
           
-          const deserializedBlocks = dateBlocks.map(block => ({
-            ...block,
-            startTime: new Date(block.startTime),
-            endTime: new Date(block.endTime),
-            createdAt: new Date(block.createdAt),
-            updatedAt: new Date(block.updatedAt),
-            actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-            actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-            status: normalizeTimeBlockStatus(block.status), // Normalize status
-          }));
-          
-          setTimeBlocks(prev => [...prev, ...deserializedBlocks]);
-          console.log(`📅 Loaded ${deserializedBlocks.length} blocks for ${selectedDateStr}`);
+          setTimeBlocks(prev => {
+            const existingIds = new Set(prev.map(b => b.id));
+            const newBlocks = deserializedBlocks.filter(b => !existingIds.has(b.id));
+            return [...prev, ...newBlocks];
+          });
         } catch (error) {
           console.warn('Failed to load blocks for date:', error);
         }
@@ -525,347 +484,52 @@ export default function HomePage() {
     };
 
     loadTimeBlocksForDate();
-  }, [selectedDate, authReady, hasInitializedForUserRef.current, currentUser?.uid, effectiveUserId]);
+  }, [selectedDate, effectiveUserId]);
 
-  const loadData = async () => {
-    if (typeof window === 'undefined') {
-      console.warn('Skipping loadData on server environment');
-      return;
-    }
+  // Reload analytics when timeRange changes
+  useEffect(() => {
+    if (!effectiveUserId || initStatus !== 'ready') return;
     
-    // ⚠️ FIX: CRITICAL - Verifica che adapter sia pronto prima di procedere
-    const adapterInfo = db.getAdapterDebugInfo();
-    const currentUserId = currentUser?.uid;
-    
-    // Se user loggato ma adapter non è Firebase o userId non settato, NON procedere
-    if (currentUserId) {
-      if (!db.isUsingFirebase) {
-        console.warn('⚠️ loadData() SKIPPED: User logged in but adapter is not Firebase', {
-          adapterType: adapterInfo.adapterType,
-          useFirebase: db.isUsingFirebase
-        });
-        return; // ⚠️ NON sovrascrivere state con []
-      }
-      
-      if (adapterInfo.userId !== currentUserId) {
-        console.warn('⚠️ loadData() SKIPPED: Adapter userId mismatch', {
-          adapterUserId: adapterInfo.userId,
-          currentUserId
-        });
-        return; // ⚠️ NON sovrascrivere state con []
-      }
-    }
-    
-    try {
-      // ⚠️ FIX: Logging chirurgico per debug adapter e userId
-      console.log('📊 loadData() START', {
-        adapterType: adapterInfo.adapterType,
-        useFirebase: db.isUsingFirebase,
-        adapterUserId: adapterInfo.userId,
-        currentUserId: currentUserId,
-        adapterInitialized: adapterInfo.isInitialized,
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log('🔥 PSYCHOPATH: === STARTING loadData() ===');
-      console.log('🔥 PSYCHOPATH: Database info:', {
-        isUsingFirebase: db.isUsingFirebase,
-        currentUser: currentUserId
-      });
-      
-      const [
-        allTimeBlocks,
-        allGoals,
-        allKeyResults,
-        allProjects,
-        allTasks,
-        allHabits,
-        allHabitLogs
-      ] = await Promise.all([
-        db.getAll<TimeBlock>('timeBlocks'),
-        db.getAll<Goal>('goals'),
-        db.getAll<KeyResult>('keyResults'),
-        db.getAll<Project>('projects'),
-        db.getAll<Task>('tasks'),
-        db.getAll<Habit>('habits'),
-        db.getAll<HabitLog>('habitLogs')
-      ]);
-      
-      // ⚠️ FIX: Logging chirurgico per verificare dati recuperati
-      console.log('📊 loadData() RETRIEVED', {
-        adapterUsed: adapterInfo.adapterType,
-        totalTimeBlocks: allTimeBlocks.length,
-        totalGoals: allGoals.length,
-        totalKeyResults: allKeyResults.length,
-        totalProjects: allProjects.length,
-        totalTasks: allTasks.length,
-        totalHabits: allHabits.length,
-        totalHabitLogs: allHabitLogs.length,
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log('🔥 PSYCHOPATH: Raw data retrieved from database:', {
-        timeBlocks: allTimeBlocks.length,
-        goals: allGoals.length,
-        keyResults: allKeyResults.length,
-        projects: allProjects.length,
-        tasks: allTasks.length,
-        habits: allHabits.length,
-        habitLogs: allHabitLogs.length
-      });
+    const loadAnalytics = async () => {
+      try {
+        setAnalyticsLoading(true);
+        const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
 
-      // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL data by userId
-      const filterUserId = currentUserId || 'user-1';
-      
-      // 🔧 FIX: Deserialize dates from IndexedDB (dates are stored as strings) AND FILTER BY USER
-      const deserializedTimeBlocks = allTimeBlocks
-        .filter(block => block.userId === filterUserId) // 🔥 CRITICAL: Filter by user
-        .map(block => ({
-          ...block,
-          startTime: new Date(block.startTime),
-          endTime: new Date(block.endTime),
-          createdAt: new Date(block.createdAt),
-          updatedAt: new Date(block.updatedAt),
-          actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
-          actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
-          status: normalizeTimeBlockStatus(block.status), // Normalize status
-        }));
+        const [planVsActual, timeAllocation, focusTrend, correlations, weeklyReview] = await Promise.all([
+          db.calculatePlanVsActualData(effectiveUserId, days),
+          db.calculateTimeAllocation(effectiveUserId, days),
+          db.calculateFocusTrend(effectiveUserId, days),
+          db.calculateCorrelations(effectiveUserId, days),
+          db.generateWeeklyReview(effectiveUserId),
+        ]);
 
-      // 🔥 PSYCHOPATH CRITICAL FIX: Filter ALL collections by userId
-      const userGoals = allGoals.filter(item => item.userId === filterUserId);
-      const userKeyResults = allKeyResults.filter(item => item.userId === filterUserId);
-      const userProjects = allProjects.filter(item => item.userId === filterUserId);
-      const userTasks = allTasks.filter(item => item.userId === filterUserId);
-      const userHabits = allHabits.filter(item => item.userId === filterUserId);
-      const userHabitLogs = allHabitLogs.filter(item => item.userId === filterUserId);
-
-      console.log('🔥 PSYCHOPATH: Data loaded and filtered:', {
-        totalTimeBlocks: allTimeBlocks.length,
-        userTimeBlocks: deserializedTimeBlocks.length,
-        totalGoals: allGoals.length,
-        userGoals: userGoals.length,
-        currentUserId
-      });
-
-      // 🔥 PSICOPATICO DEBUG: Let's see what's in the goals!
-      console.log('🔥 PSICOPATICO GOALS DEBUG:', {
-        allGoalsDetailed: allGoals.map(g => ({ id: g.id, title: g.title, userId: g.userId })),
-        userGoalsDetailed: userGoals.map(g => ({ id: g.id, title: g.title, userId: g.userId })),
-        currentUserIdType: typeof currentUserId,
-        currentUserIdValue: currentUserId
-      });
-
-      setTimeBlocks(deserializedTimeBlocks);
-      setGoals(userGoals);
-      setKeyResults(userKeyResults);
-      setProjects(userProjects);
-      setTasks(userTasks);
-      setHabits(userHabits);
-      setHabitLogs(userHabitLogs);
-
-      // Load current session
-      // ⚠️ FIX: CRITICAL - Verifica che adapter sia pronto prima di chiamare getActiveSessions
-      if (currentUser && db.isUsingFirebase) {
-        const adapterInfo = db.getAdapterDebugInfo();
-        if (adapterInfo.userId === currentUser.uid) {
-          try {
-            const activeSessions = await db.getActiveSessions(currentUser.uid);
-            if (activeSessions.length > 0) {
-              setCurrentSession(activeSessions[0]);
-            }
-          } catch (error) {
-            console.warn('⚠️ Failed to load active sessions:', error);
-            // Non bloccare il resto del caricamento
-          }
-        }
-      }
-
-      // Load analytics data and user stats
-      if (currentUser) {
-        await loadAnalyticsData();
-        await calculateUserStats();
-      }
-    } catch (error) {
-      console.error('Failed to load data:', error);
-    }
-  };
-
-  const calculateUserStats = async () => {
-    try {
-      // SAFE: Use effectiveUserId for stats calculation
-      if (!currentUser?.uid && !effectiveUserId) {
-        console.log('STATS_SKIP: No valid user ID available');
-        return;
-      }
-      
-      const userId = currentUser?.uid || effectiveUserId;
-      const allSessions = await db.getAll<Session>('sessions');
-      const userSessions = allSessions.filter(s => s.userId === userId);
-      
-      // Calculate max streak from habits (real data)
-      const maxStreak = habits.reduce((max, habit) => Math.max(max, habit.streakCount || 0), 0);
-      
-      // Calculate total focus minutes from actual sessions
-      const focusSessions = userSessions.filter(s => s.tags && s.tags.includes('focus'));
-      const totalFocusMinutes = focusSessions.reduce((total, s) => total + (s.duration || 0), 0) / 60;
-
-      // Calculate goals completed and created (real data)
-      const goalsCompleted = goals.filter(g => g.status === 'completed').length;
-      const goalsCreated = goals.length;
-
-      // Calculate total sessions and time blocks created (real data)
-      const totalSessions = userSessions.length;
-      const timeBlocksCreated = timeBlocks.length;
-
-      // Calculate REAL days tracked based on actual data
-      const uniqueDays = new Set();
-      userSessions.forEach(session => {
-        const day = new Date(session.startTime).toDateString();
-        uniqueDays.add(day);
-      });
-      // Include today if user has used the app today
-      if (userSessions.some(s => new Date(s.startTime).toDateString() === new Date().toDateString()) || 
-          timeBlocks.length > 0 || goals.length > 0 || habits.length > 0) {
-        uniqueDays.add(new Date().toDateString());
-      }
-      const daysTracked = uniqueDays.size;
-
-      // Early sessions (before 8 AM) - real data
-      const earlySessionsCount = userSessions.filter(s => {
-        const hour = new Date(s.startTime).getHours();
-        return hour < 8;
-      }).length;
-
-      // Evening sessions (after 6 PM) - real data  
-      const eveningSessionsCount = userSessions.filter(s => {
-        const hour = new Date(s.startTime).getHours();
-        return hour >= 18;
-      }).length;
-
-      // Weekly focus minutes (real data from last 7 days)
-      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const recentFocusSessions = userSessions.filter(s => 
-        new Date(s.startTime) >= oneWeekAgo && 
-        s.tags && s.tags.includes('focus')
-      );
-      const weeklyFocusMinutes = recentFocusSessions.reduce((total, s) => total + (s.duration || 0), 0) / 60;
-
-      setUserStats({
-        maxStreak,
-        totalFocusMinutes,
-        goalsCompleted,
-        goalsCreated,
-        totalSessions,
-        timeBlocksCreated,
-        daysTracked,
-        earlySessionsCount,
-        eveningSessionsCount,
-        weeklyFocusMinutes
-      });
-    } catch (error) {
-      console.error('Failed to calculate user stats:', error);
-    }
-  };
-
-  const loadAnalyticsData = async () => {
-    try {
-      setAnalyticsLoading(true);
-      
-      // SAFE: Use effectiveUserId instead of currentUser!.uid
-      const userId = currentUser?.uid ?? effectiveUserId;
-      const isLoggedUser = !!currentUser?.uid;
-      
-      console.log('ANALYTICS_START', { 
-        mode: isLoggedUser ? 'logged' : 'guest', 
-        uid: userId, 
-        authReady 
-      });
-      
-      // If no valid userId available, skip analytics gracefully
-      if (!userId || userId === 'guest-temp') {
-        console.log('ANALYTICS_SKIP', 'no valid userId available');
-        setAnalyticsData(null);
-        setAnalyticsLoading(false);
-        return;
-      }
-      
-      const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
-
-      const [
-        planVsActual,
-        timeAllocation,
-        focusTrend,
-        correlations,
-        weeklyReview
-      ] = await Promise.all([
-        db.calculatePlanVsActualData(userId, days),
-        db.calculateTimeAllocation(userId, days),
-        db.calculateFocusTrend(userId, days),
-        db.calculateCorrelations(userId, days),
-        db.generateWeeklyReview(userId)
-      ]);
-
-      // Check if we have enough data
-      const hasEnoughData = planVsActual.length > 0 || timeAllocation.length > 0 || focusTrend.length > 0;
-
-      if (!hasEnoughData) {
-        // Show empty state instead of fake data
-        setAnalyticsData({
-          planVsActual: [],
-          timeAllocation: [],
-          focusTrend: [],
-          correlations: [],
-          weeklyReview: {
-            highlights: ['Start tracking to see your patterns'],
-            challenges: ['No data available yet'],
-            insights: ['Create time blocks and sessions to generate insights'],
-            nextWeekGoals: ['Begin using the Life Tracker consistently']
-          }
-        });
-      } else {
         setAnalyticsData({
           planVsActual,
           timeAllocation,
           focusTrend,
           correlations,
-          weeklyReview
+          weeklyReview,
         });
+      } catch (error) {
+        console.error('Analytics loading failed:', error);
+      } finally {
+        setAnalyticsLoading(false);
       }
+    };
+    
+    loadAnalytics();
+  }, [timeRange, effectiveUserId, initStatus]);
 
-      setAnalyticsLoading(false);
-    } catch (error) {
-      console.error('ANALYTICS_ERROR', error);
-      setAnalyticsLoading(false);
-    }
-  };
-
-  // Session management functions
-  // 🚀 ENHANCED: Session management with TimeBlock integration
+  // ========== SESSION HANDLERS ==========
   const handleStartSession = async (taskId?: string, timeBlockId?: string) => {
+    if (!effectiveUserId) return;
+    
     try {
-      const session = await sessionManager.startSession(
-        taskId, 
-        timeBlockId, 
-        'default',
-        currentUser?.uid || 'guest-user'
-      );
+      const session = await sessionManager.startSession(taskId, timeBlockId, 'default', effectiveUserId);
       setCurrentSession(session);
-      
-      // 🎮 GAMING: Session start sound
       audioManager.buttonFeedback();
-      
-      console.log(`🚀 SESSION: Started${timeBlockId ? ' from TimeBlock' : ''}`);
     } catch (error) {
       console.error('Failed to start session:', error);
-    }
-  };
-  
-  // 🚀 NEW: Start session directly from TimeBlock
-  const handleStartTimeBlockSession = async (timeBlockId: string) => {
-    try {
-      await handleStartSession(undefined, timeBlockId);
-    } catch (error) {
-      console.error('Failed to start timeblock session:', error);
     }
   };
 
@@ -883,11 +547,8 @@ export default function HomePage() {
       const completedSession = await sessionManager.stopSession();
       setCurrentSession(null);
       
-      // 🚀 PERFORMANCE: Direct state update instead of full reload
-      if (completedSession && (currentUser?.uid || effectiveUserId)) {
-        // Update KPIs immediately with new session data
-        const userId = currentUser?.uid || effectiveUserId;
-        const updatedKPIs = await db.calculateTodayKPIs(userId);
+      if (completedSession && effectiveUserId) {
+        const updatedKPIs = await db.calculateTodayKPIs(effectiveUserId);
         setTodayKPIs(updatedKPIs);
       }
     } catch (error) {
@@ -895,539 +556,482 @@ export default function HomePage() {
     }
   };
 
-  // Time block management
-  const handleCreateTimeBlock = async (blockData: Partial<TimeBlock>) => {
-    console.log('🔥 PSYCHOPATH: === STARTING handleCreateTimeBlock ===');
-    console.log('🔥 PSYCHOPATH: Input data:', blockData);
-    setTimeBlockError(null);
-    let blockToCreate: TimeBlock | null = null;
-    
-    try {
-      console.log('🔥 PSYCHOPATH: Database adapter type:', db.isUsingFirebase ? 'Firebase' : 'IndexedDB');
-      const adapterInfo = db.getAdapterDebugInfo();
-      if (adapterInfo.useFirebase && !currentUser?.uid) {
-        console.warn('⚠️ Firebase adapter active without user. Falling back to IndexedDB for time block creation.');
-        await db.switchToIndexedDB();
-      }
-
-      const startTime = blockData.startTime ? new Date(blockData.startTime) : new Date();
-      const endTime = blockData.endTime ? new Date(blockData.endTime) : new Date(startTime.getTime() + 60 * 60 * 1000);
-      const createdAt = blockData.createdAt ? new Date(blockData.createdAt) : new Date();
-      const updatedAt = blockData.updatedAt ? new Date(blockData.updatedAt) : new Date();
-      const userId = currentUser?.uid; // No fallback - use real userId or undefined for guest
-      
-      // 🔥 PSYCHOPATH FIX: Ensure proper data structure with unique ID
-      blockToCreate = {
-        ...blockData,
-        id: `timeblock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId, // 🔥 FIX: Use real userId
-        domainId: blockData.domainId || 'domain-1',
-        startTime,
-        endTime,
-        createdAt,
-        updatedAt,
-      } as TimeBlock;
-      const optimisticBlock = blockToCreate as TimeBlock;
-      
-      console.log('🔥 PSYCHOPATH: About to create block with:', optimisticBlock);
-      // Optimistic UI update
-      setTimeBlocks(prev => [...prev, optimisticBlock]);
-      
-      // 🔥 ACTUAL DATABASE CALL WITH PROPER ERROR HANDLING
-      const createdBlock = await db.create<TimeBlock>('timeBlocks', optimisticBlock);
-      console.log('🔥 PSYCHOPATH: ✅ Database create SUCCESS:', createdBlock);
-      
-      // 🔥 PSYCHOPATH CRITICAL FIX: Deserialize dates for newly created block
-      const deserializedBlock = {
-        ...createdBlock,
-        startTime: new Date(createdBlock.startTime),
-        endTime: new Date(createdBlock.endTime),
-        createdAt: new Date(createdBlock.createdAt),
-        updatedAt: new Date(createdBlock.updatedAt),
-        actualStartTime: createdBlock.actualStartTime ? new Date(createdBlock.actualStartTime) : undefined,
-        actualEndTime: createdBlock.actualEndTime ? new Date(createdBlock.actualEndTime) : undefined,
-      };
-      
-      // Update state with the created block
-      setTimeBlocks(prev => prev.map(block => block.id === optimisticBlock.id ? deserializedBlock : block));
-      console.log('🔥 PSYCHOPATH: Updating state. Old count:', timeBlocks.length, 'New count:', timeBlocks.length);
-      console.log('🔥 PSYCHOPATH: New block dates:', {
-        startTime: deserializedBlock.startTime,
-        endTime: deserializedBlock.endTime,
-        startTimeType: typeof deserializedBlock.startTime,
-        endTimeType: typeof deserializedBlock.endTime
-      });
-      console.log('🔥 PSYCHOPATH: ✅ State updated successfully');
-      
-      // 🚀 PERFORMANCE: Direct state update - NO MORE FORCE RELOAD!
-      console.log('🚀 PERFORMANCE: TimeBlock created, updating state directly');
-      
-      // 🎮 GAMING: Celebrate successful time block creation
-      audioManager.taskCompleted();
-      
-    } catch (error: any) {
-      console.error('❌ PSYCHOPATH: CRITICAL ERROR in handleCreateTimeBlock:', error);
-      console.error('❌ PSYCHOPATH: Error details:', {
-        name: error?.name,
-        message: error?.message,
-        stack: error?.stack
-      });
-      const tempId = blockToCreate ? blockToCreate.id : null;
-      setTimeBlocks(prev => tempId ? prev.filter(block => block.id !== tempId) : prev);
-      setTimeBlockError(error?.message || 'Unable to save the time block. Please try again or check your connection.');
+  // ========== TIMEBLOCK HANDLERS ==========
+  const handleCreateTimeBlock = useCallback(async (blockData: Partial<TimeBlock>) => {
+    if (!effectiveUserId) {
+      console.error('Cannot create time block: user not authenticated');
+      setTimeBlockError('Please sign in to create time blocks');
+      return;
     }
+
+    setTimeBlockError(null);
     
-    console.log('🔥 PSYCHOPATH: === ENDING handleCreateTimeBlock ===');
-  };
+    const startTime = blockData.startTime ? toDateSafe(blockData.startTime) : new Date();
+    const endTime = blockData.endTime ? toDateSafe(blockData.endTime) : new Date(startTime.getTime() + 60 * 60 * 1000);
+    const now = new Date();
+    
+    const blockToCreate: TimeBlock = {
+      ...blockData,
+      id: generateId('timeblock'),
+      userId: effectiveUserId,
+      domainId: blockData.domainId || 'domain-1',
+      startTime,
+      endTime,
+      status: normalizeTimeBlockStatus(blockData.status || 'planned'),
+      createdAt: now,
+      updatedAt: now,
+    } as TimeBlock;
 
-  // --- Normalization helpers ---
-  type TimeBlockStatus = TimeBlock["status"];
+    setTimeBlocks(prev => [...prev, blockToCreate]);
 
-function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
-  const s = String(input ?? "").trim().toLowerCase();
-  if (["completed", "complete", "done"].includes(s)) return "completed";
-  if (["in_progress", "in-progress", "inprogress"].includes(s)) return "in_progress";
-  if (["cancelled", "canceled", "cancel"].includes(s)) return "cancelled";
-  if (["overrun"].includes(s)) return "overrun";
-  if (["planned", "pending", "todo", "missed"].includes(s)) return "planned";
-  return "planned";
-}
+    try {
+      const createdBlock = await db.create<TimeBlock>('timeBlocks', blockToCreate);
+      const deserializedBlock = deserializeTimeBlock(createdBlock);
+      
+      setTimeBlocks(prev => prev.map(block => 
+        block.id === blockToCreate.id ? deserializedBlock : block
+      ));
+      
+      audioManager.taskCompleted();
+    } catch (error: any) {
+      console.error('Failed to create time block:', error);
+      setTimeBlocks(prev => prev.filter(block => block.id !== blockToCreate.id));
+      setTimeBlockError(error?.message || 'Failed to save time block');
+    }
+  }, [effectiveUserId]);
 
-  function toDateSafe(value: unknown, fallback: Date): Date {
-    if (value instanceof Date) return value;
-    const d = new Date(value as any);
-    return Number.isFinite(d.getTime()) ? d : fallback;
-  }
-
-  function buildUpdatedTimeBlock(oldBlock: TimeBlock, updates: Partial<TimeBlock>): TimeBlock {
-    const merged = { ...oldBlock, ...updates };
-    return {
-      ...merged,
-      status: normalizeTimeBlockStatus((updates as any).status ?? oldBlock.status),
-      startTime: toDateSafe(merged.startTime, oldBlock.startTime),
-      endTime: toDateSafe(merged.endTime, oldBlock.endTime),
-      actualStartTime: merged.actualStartTime
-        ? toDateSafe(merged.actualStartTime, oldBlock.actualStartTime ?? oldBlock.startTime)
-        : undefined,
-      actualEndTime: merged.actualEndTime
-        ? toDateSafe(merged.actualEndTime, oldBlock.actualEndTime ?? oldBlock.endTime)
-        : undefined,
-      updatedAt: new Date(),
-    };
-  }
-
-  const handleUpdateTimeBlock = async (id: string, updates: Partial<TimeBlock>): Promise<void> => {
+  const handleUpdateTimeBlock = useCallback(async (id: string, updates: Partial<TimeBlock>): Promise<void> => {
     const existingBlock = timeBlocks.find(b => b.id === id);
     if (!existingBlock) return;
-    const updatedBlock = buildUpdatedTimeBlock(existingBlock, updates);
-    setTimeBlocks(prev => prev.map(b => (b.id === id ? updatedBlock : b)));
+    
+    const updatedBlock: TimeBlock = {
+      ...existingBlock,
+      ...updates,
+      status: normalizeTimeBlockStatus(updates.status ?? existingBlock.status),
+      startTime: updates.startTime ? toDateSafe(updates.startTime) : existingBlock.startTime,
+      endTime: updates.endTime ? toDateSafe(updates.endTime) : existingBlock.endTime,
+      actualStartTime: updates.actualStartTime ? toDateSafe(updates.actualStartTime) : existingBlock.actualStartTime,
+      actualEndTime: updates.actualEndTime ? toDateSafe(updates.actualEndTime) : existingBlock.actualEndTime,
+      updatedAt: new Date(),
+    };
+    
+    setTimeBlocks(prev => prev.map(b => b.id === id ? updatedBlock : b));
+    
     try {
-      await db.update("timeBlocks", updatedBlock);
+      await db.update('timeBlocks', sanitizeForStorage(updatedBlock));
+      
+      if (updates.status && updates.status !== existingBlock.status && effectiveUserId) {
+        const updatedKPIs = await db.calculateTodayKPIs(effectiveUserId);
+        setTodayKPIs(updatedKPIs);
+      }
     } catch (error) {
-      console.error("Failed to update time block:", error);
-      // Optionally: reload from DB or rollback
+      console.error('Failed to update time block:', error);
+      setTimeBlocks(prev => prev.map(b => b.id === id ? existingBlock : b));
     }
-  };
+  }, [timeBlocks, effectiveUserId]);
 
-  const handleDeleteTimeBlock = async (id: string) => {
+  const handleDeleteTimeBlock = useCallback(async (id: string) => {
+    const existingBlock = timeBlocks.find(b => b.id === id);
+    if (!existingBlock) return;
+    
+    setTimeBlocks(prev => prev.filter(b => b.id !== id));
+    
     try {
       await db.delete('timeBlocks', id);
-      setTimeBlocks(timeBlocks.filter(b => b.id !== id));
     } catch (error) {
       console.error('Failed to delete time block:', error);
+      setTimeBlocks(prev => [...prev, existingBlock]);
     }
-  };
+  }, [timeBlocks]);
 
-  // Habit management
-  const handleCreateHabit = async (habitData: Partial<Habit>) => {
-    try {
-      console.log('🔥 PSYCHOPATH: Creating habit:', habitData);
-      const newHabit = await db.create<Habit>('habits', habitData as Habit);
-      console.log('🔥 PSYCHOPATH: Habit created successfully:', newHabit);
-      
-      // 🔥 PSYCHOPATH FIX: Deserialize dates
-      const deserializedHabit = {
-        ...newHabit,
-        createdAt: new Date(newHabit.createdAt),
-        updatedAt: new Date(newHabit.updatedAt)
-      };
-      
-      const updatedHabits = [...habits, deserializedHabit];
-      console.log('🔥 PSYCHOPATH: Habits count before:', habits.length, 'after:', updatedHabits.length);
-      setHabits(updatedHabits);
-      
-      // 🚀 PERFORMANCE: State already updated above - no reload needed
-      console.log('🚀 PERFORMANCE: Habit created and state updated efficiently');
-      
-      // 🎮 GAMING: New habit created sound
-      audioManager.play('achievementUnlock');
-    } catch (error) {
-      console.error('Failed to create habit:', error);
-    }
-  };
-
-  const handleUpdateHabit = async (id: string, updates: Partial<Habit>) => {
-    try {
-      const existingHabit = habits.find(h => h.id === id);
-      if (existingHabit) {
-        const updatedHabit = { ...existingHabit, ...updates, updatedAt: new Date() };
-        await db.update('habits', updatedHabit);
-        setHabits(habits.map(h => h.id === id ? updatedHabit : h));
-      }
-    } catch (error) {
-      console.error('Failed to update habit:', error);
-    }
-  };
-
-  const handleDeleteHabit = async (id: string) => {
-    try {
-      await db.delete('habits', id);
-      setHabits(habits.filter(h => h.id !== id));
-    } catch (error) {
-      console.error('Failed to delete habit:', error);
-    }
-  };
-
-  const handleLogHabit = async (habitId: string, completed: boolean, value?: number, notes?: string) => {
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      // Check if log already exists for today
-      const existingLog = habitLogs.find(log => 
-        log.habitId === habitId && 
-        new Date(log.date).toDateString() === today.toDateString()
-      );
-
-      if (existingLog) {
-        const updatedLog = { ...existingLog, completed, value, notes, createdAt: new Date() };
-        await db.update('habitLogs', updatedLog);
-        setHabitLogs(habitLogs.map(log => log.id === existingLog.id ? updatedLog : log));
-      } else {
-        const newLog: HabitLog = {
-          id: `log-${Date.now()}`,
-          habitId,
-          userId: currentUser?.uid || 'guest-user',
-          date: today,
-          completed,
-          value,
-          notes,
-          createdAt: new Date(),
-        };
-        await db.create('habitLogs', newLog);
-        setHabitLogs([...habitLogs, newLog]);
-      }
-    } catch (error) {
-      console.error('Failed to log habit:', error);
-    }
-  };
-
-  // OKR management functions
-  const handleCreateGoal = async (goalData: Partial<Goal>) => {
-    if (!currentUser?.uid) {
+  // ========== GOAL HANDLERS ==========
+  const handleCreateGoal = useCallback(async (goalData: Partial<Goal>): Promise<string | undefined> => {
+    if (!effectiveUserId) {
       console.error('Cannot create goal: user not authenticated');
-      return;
+      return undefined;
     }
 
+    const now = new Date();
+    const goalToCreate: Goal = {
+      ...goalData,
+      id: generateId('goal'),
+      userId: effectiveUserId,
+      domainId: goalData.domainId || 'domain-1',
+      status: goalData.status || 'active',
+      priority: goalData.priority || 'medium',
+      targetDate: goalData.targetDate ? toDateSafe(goalData.targetDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      keyResults: [],
+      timeAllocationTarget: goalData.timeAllocationTarget || 0,
+      category: goalData.category || 'important_not_urgent',
+      complexity: goalData.complexity || 'moderate',
+      createdAt: now,
+      updatedAt: now,
+    } as Goal;
+
+    setGoals(prev => [...prev, goalToCreate]);
+
     try {
-      console.log('🔥 PSYCHOPATH: Creating goal:', goalData);
+      const savedGoal = await db.create<Goal>('goals', goalToCreate);
+      const deserializedGoal = deserializeGoal(savedGoal);
       
-      // 🔥 PSICOPATICO CRITICAL FIX: Ensure userId is properly set
-      const goalToCreate: Goal = {
-        ...goalData,
-        id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: currentUser.uid,
-        domainId: goalData.domainId || 'domain-1',
-        status: goalData.status || 'active',
-        targetDate: goalData.targetDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days from now
-        keyResults: [],
-        timeAllocationTarget: goalData.timeAllocationTarget || 0,
-        priority: goalData.priority || 'medium',
-        category: goalData.category || 'important_not_urgent',
-        complexity: goalData.complexity || 'moderate',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      } as Goal;
+      setGoals(prev => prev.map(g => g.id === goalToCreate.id ? deserializedGoal : g));
       
-      console.log('🔥 PSICOPATICO GOAL CREATION DEBUG:', {
-        goalToCreateUserId: goalToCreate.userId,
-        expectedUserId: currentUser.uid,
-        userIdMatch: goalToCreate.userId === currentUser.uid,
-        goalTitle: goalToCreate.title,
-        goalToCreate: goalToCreate
-      });
-      
-      const newGoal = await db.create<Goal>('goals', goalToCreate);
-      console.log('🔥 PSYCHOPATH: Goal created successfully:', newGoal);
-      
-      // 🔥 PSYCHOPATH FIX: Deserialize dates
-      const deserializedGoal = {
-        ...newGoal,
-        targetDate: new Date(newGoal.targetDate),
-        createdAt: new Date(newGoal.createdAt),
-        updatedAt: new Date(newGoal.updatedAt)
-      };
-      
-      // ⚠️ FIX: CRITICAL - Usa functional update per evitare state stale
-      setGoals(prevGoals => {
-        // Verifica che goal non esista già (evita duplicati)
-        if (prevGoals.find(g => g.id === deserializedGoal.id)) {
-          console.warn('⚠️ Goal already exists in state, updating instead');
-          return prevGoals.map(g => g.id === deserializedGoal.id ? deserializedGoal : g);
-        }
-        const updatedGoals = [...prevGoals, deserializedGoal];
-        console.log('🔥 PSYCHOPATH: Goals count before:', prevGoals.length, 'after:', updatedGoals.length);
-        return updatedGoals;
-      });
-      
-      // 🚀 PERFORMANCE: State already updated above - no reload needed
-      console.log('🚀 PERFORMANCE: Goal created and state updated efficiently');
+      return deserializedGoal.id;
     } catch (error) {
-      console.error('❌ PSYCHOPATH: Failed to create goal:', error);
+      console.error('Failed to create goal:', error);
+      setGoals(prev => prev.filter(g => g.id !== goalToCreate.id));
+      return undefined;
     }
-  };
+  }, [effectiveUserId]);
 
-  const handleUpdateGoal = async (id: string, updates: Partial<Goal>) => {
+  const handleUpdateGoal = useCallback(async (id: string, updates: Partial<Goal>) => {
+    const existingGoal = goals.find(g => g.id === id);
+    if (!existingGoal) return;
+
+    const updatedGoal = { ...existingGoal, ...updates, updatedAt: new Date() };
+    setGoals(prev => prev.map(g => g.id === id ? updatedGoal : g));
+
     try {
-      const existingGoal = goals.find(g => g.id === id);
-      if (existingGoal) {
-        const updatedGoal = { ...existingGoal, ...updates, updatedAt: new Date() };
-        await db.update('goals', updatedGoal);
-        setGoals(goals.map(g => g.id === id ? updatedGoal : g));
-      }
+      await db.update('goals', updatedGoal);
     } catch (error) {
       console.error('Failed to update goal:', error);
+      setGoals(prev => prev.map(g => g.id === id ? existingGoal : g));
     }
-  };
+  }, [goals]);
 
-  const handleCreateKeyResult = async (keyResultData: Partial<KeyResult>) => {
-    if (!currentUser?.uid) {
-      console.error('Cannot create key result: user not authenticated');
-      return;
-    }
+  const handleDeleteGoal = useCallback(async (id: string) => {
+    const existingGoal = goals.find(g => g.id === id);
+    if (!existingGoal) return;
+
+    setGoals(prev => prev.map(g => g.id === id ? { ...g, deleted: true } : g));
 
     try {
-      console.log('🔥 PSYCHOPATH: Creating key result:', keyResultData);
-      
-      // 🔥 PSICOPATICO CRITICAL FIX: Ensure KeyResult has all required fields
-      const keyResultToCreate: KeyResult = {
-        ...keyResultData,
-        id: `keyresult-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: currentUser.uid,
-        goalId: keyResultData.goalId || '',
-        currentValue: keyResultData.currentValue || 0,
-        progress: 0, // Start at 0%
-        status: keyResultData.status || 'active',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      } as KeyResult;
-      
-      const newKeyResult = await db.create<KeyResult>('keyResults', keyResultToCreate);
-      console.log('🔥 PSYCHOPATH: Key Result created successfully:', newKeyResult);
-      
-      const updatedKeyResults = [...keyResults, newKeyResult];
-      setKeyResults(updatedKeyResults);
-      
-      // 🚀 PERFORMANCE: State already updated above - no reload needed
-      console.log('🚀 PERFORMANCE: KeyResult created and state updated efficiently');
+      await db.update('goals', { ...existingGoal, deleted: true, updatedAt: new Date() });
     } catch (error) {
-      console.error('❌ PSYCHOPATH: Failed to create key result:', error);
+      console.error('Failed to delete goal:', error);
+      setGoals(prev => prev.map(g => g.id === id ? existingGoal : g));
     }
-  };
+  }, [goals]);
 
-  const handleUpdateKeyResult = async (id: string, updates: Partial<KeyResult>) => {
+  // ========== KEY RESULT HANDLERS ==========
+  const handleCreateKeyResult = useCallback(async (krData: Partial<KeyResult>): Promise<string | undefined> => {
+    if (!effectiveUserId) {
+      console.error('Cannot create key result: user not authenticated');
+      return undefined;
+    }
+
+    const now = new Date();
+    const krToCreate: KeyResult = {
+      ...krData,
+      id: generateId('keyresult'),
+      userId: effectiveUserId,
+      goalId: krData.goalId || '',
+      currentValue: krData.currentValue || 0,
+      targetValue: krData.targetValue || 100,
+      progress: 0,
+      status: krData.status || 'active',
+      createdAt: now,
+      updatedAt: now,
+    } as KeyResult;
+
+    setKeyResults(prev => [...prev, krToCreate]);
+
     try {
-      console.log('🔥 PSYCHOPATH: Updating key result:', { id, updates });
+      const savedKR = await db.create<KeyResult>('keyResults', krToCreate);
+      const deserializedKR = deserializeKeyResult(savedKR);
       
-      const existingKR = keyResults.find(kr => kr.id === id);
-      if (existingKR) {
-        const updatedKR = { ...existingKR, ...updates, updatedAt: new Date() };
-        await db.update('keyResults', updatedKR);
-        
-        const updatedKeyResults = keyResults.map(kr => kr.id === id ? updatedKR : kr);
-        setKeyResults(updatedKeyResults);
-        
-        console.log('🔥 PSYCHOPATH: Key Result updated successfully:', {
-          oldProgress: existingKR.progress,
-          newProgress: updatedKR.progress,
-          oldStatus: existingKR.status,
-          newStatus: updatedKR.status
-        });
-        
-        // 🎮 GAMING: Play progress sound based on achievement
-        if (updatedKR.progress >= 100 && existingKR.progress < 100) {
-          audioManager.perfectDay(); // Goal completed!
-        } else if (updatedKR.progress > existingKR.progress) {
-          audioManager.taskCompleted(); // Progress made!
-        }
-        
-        // 🚀 PERFORMANCE: Goal percentages will auto-update on next render
-        // No need to reload - React state management handles this efficiently
+      setKeyResults(prev => prev.map(kr => kr.id === krToCreate.id ? deserializedKR : kr));
+      
+      return deserializedKR.id;
+    } catch (error) {
+      console.error('Failed to create key result:', error);
+      setKeyResults(prev => prev.filter(kr => kr.id !== krToCreate.id));
+      return undefined;
+    }
+  }, [effectiveUserId]);
+
+  const handleUpdateKeyResult = useCallback(async (id: string, updates: Partial<KeyResult>) => {
+    const existingKR = keyResults.find(kr => kr.id === id);
+    if (!existingKR) return;
+
+    const updatedKR = { ...existingKR, ...updates, updatedAt: new Date() };
+    setKeyResults(prev => prev.map(kr => kr.id === id ? updatedKR : kr));
+
+    try {
+      await db.update('keyResults', updatedKR);
+      
+      if (updatedKR.progress >= 100 && existingKR.progress < 100) {
+        audioManager.perfectDay();
+      } else if ((updatedKR.progress || 0) > (existingKR.progress || 0)) {
+        audioManager.taskCompleted();
       }
     } catch (error) {
-      console.error('❌ PSYCHOPATH: Failed to update key result:', error);
+      console.error('Failed to update key result:', error);
+      setKeyResults(prev => prev.map(kr => kr.id === id ? existingKR : kr));
     }
-  };
+  }, [keyResults]);
 
-  const handleCreateProject = async (projectData: Partial<Project>) => {
-    // 🔥 OPTIMISTIC UPDATE: Create project with proper ID
+  const handleDeleteKeyResult = useCallback(async (id: string) => {
+    const existingKR = keyResults.find(kr => kr.id === id);
+    if (!existingKR) return;
+
+    setKeyResults(prev => prev.map(kr => kr.id === id ? { ...kr, deleted: true } : kr));
+
+    try {
+      await db.update('keyResults', { ...existingKR, deleted: true, updatedAt: new Date() });
+    } catch (error) {
+      console.error('Failed to delete key result:', error);
+      setKeyResults(prev => prev.map(kr => kr.id === id ? existingKR : kr));
+    }
+  }, [keyResults]);
+
+  // ========== PROJECT HANDLERS ==========
+  const handleCreateProject = useCallback(async (projectData: Partial<Project>): Promise<string | undefined> => {
+    if (!effectiveUserId) {
+      console.error('Cannot create project: user not authenticated');
+      return undefined;
+    }
+
+    const now = new Date();
     const projectToCreate: Project = {
       ...projectData,
-      id: `project-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      userId: effectiveUserId, // Use effectiveUserId for both logged and guest
+      id: generateId('project'),
+      userId: effectiveUserId,
       domainId: projectData.domainId || 'domain-1',
+      goalId: projectData.goalId || '',
       status: projectData.status || 'active',
       priority: projectData.priority || 'medium',
-      createdAt: new Date(),
-      updatedAt: new Date()
+      createdAt: now,
+      updatedAt: now,
     } as Project;
-    
-    try {
-      console.log('CREATE_PROJECT_START', projectData);
-      console.log('CREATE_PROJECT_OPTIMISTIC', projectToCreate.id);
-      
-      // Immediately update UI
-      setProjects(prevProjects => {
-        if (prevProjects.find(p => p.id === projectToCreate.id)) {
-          console.warn('⚠️ Project already exists in state, updating instead');
-          return prevProjects.map(p => p.id === projectToCreate.id ? projectToCreate : p);
-        }
-        return [...prevProjects, projectToCreate];
-      });
-      
-      // Persist to database
-      const savedProject = await db.create<Project>('projects', projectToCreate);
-      console.log('CREATE_PROJECT_SUCCESS', savedProject);
-      
-      // Update state with persisted version if needed
-      setProjects(prevProjects => 
-        prevProjects.map(p => p.id === projectToCreate.id ? {
-          ...savedProject,
-          dueDate: savedProject.dueDate ? new Date(savedProject.dueDate) : undefined,
-          createdAt: new Date(savedProject.createdAt),
-          updatedAt: new Date(savedProject.updatedAt)
-        } : p)
-      );
-    } catch (error) {
-      console.error('❌ CREATE_PROJECT_ERROR:', error);
-      // Rollback optimistic update
-      setProjects(prevProjects => prevProjects.filter(p => p.id !== projectToCreate.id));
-    }
-  };
 
-  const handleUpdateProject = async (id: string, updates: Partial<Project>) => {
+    setProjects(prev => [...prev, projectToCreate]);
+
     try {
-      const existingProject = projects.find(p => p.id === id);
-      if (existingProject) {
-        const updatedProject = { ...existingProject, ...updates, updatedAt: new Date() };
-        await db.update('projects', updatedProject);
-        setProjects(projects.map(p => p.id === id ? updatedProject : p));
-      }
+      const savedProject = await db.create<Project>('projects', projectToCreate);
+      const deserializedProject = deserializeProject(savedProject);
+      
+      setProjects(prev => prev.map(p => p.id === projectToCreate.id ? deserializedProject : p));
+      
+      return deserializedProject.id;
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      setProjects(prev => prev.filter(p => p.id !== projectToCreate.id));
+      return undefined;
+    }
+  }, [effectiveUserId]);
+
+  const handleUpdateProject = useCallback(async (id: string, updates: Partial<Project>) => {
+    const existingProject = projects.find(p => p.id === id);
+    if (!existingProject) return;
+
+    const updatedProject = { ...existingProject, ...updates, updatedAt: new Date() };
+    setProjects(prev => prev.map(p => p.id === id ? updatedProject : p));
+
+    try {
+      await db.update('projects', updatedProject);
     } catch (error) {
       console.error('Failed to update project:', error);
+      setProjects(prev => prev.map(p => p.id === id ? existingProject : p));
     }
-  };
+  }, [projects]);
 
-  const handleDeleteProject = async (id: string) => {
-    // Get project and associated tasks before deletion
-    const projectToDelete = projects.find(p => p.id === id);
-    const projectTasks = tasks.filter(t => t.projectId === id);
+  const handleDeleteProject = useCallback(async (id: string) => {
+    const existingProject = projects.find(p => p.id === id);
+    if (!existingProject) return;
     
+    const projectTasks = tasks.filter(t => t.projectId === id);
+
+    setProjects(prev => prev.filter(p => p.id !== id));
+    setTasks(prev => prev.filter(t => t.projectId !== id));
+
     try {
-      console.log('DELETE_PROJECT_START', id);
-      console.log('DELETE_PROJECT_OPTIMISTIC', { projectId: id, tasksCount: projectTasks.length });
-      
-      // Immediately update UI (optimistic)
-      setProjects(prevProjects => prevProjects.filter(p => p.id !== id));
-      setTasks(prevTasks => prevTasks.filter(t => t.projectId !== id));
-      
-      // Delete from database
       await db.delete('projects', id);
-      
-      // Delete associated tasks from database
       for (const task of projectTasks) {
         await db.delete('tasks', task.id);
       }
-      
-      console.log(`✅ DELETE_PROJECT_SUCCESS: Deleted project ${id} and ${projectTasks.length} associated tasks`);
     } catch (error) {
-      console.error('❌ DELETE_PROJECT_ERROR:', error);
-      // Rollback optimistic updates
-      if (projectToDelete) {
-        setProjects(prevProjects => [...prevProjects, projectToDelete]);
-        setTasks(prevTasks => [...prevTasks, ...projectTasks]);
-      }
+      console.error('Failed to delete project:', error);
+      setProjects(prev => [...prev, existingProject]);
+      setTasks(prev => [...prev, ...projectTasks]);
     }
-  };
+  }, [projects, tasks]);
 
-  const handleBadgeUnlocked = (badge: any) => {
-    // Show celebration toast or animation
-    console.log('Badge unlocked:', badge.name);
-  };
+  // ========== TASK HANDLERS ==========
+  const handleCreateTask = useCallback(async (taskData: Partial<Task>): Promise<string | undefined> => {
+    if (!effectiveUserId) {
+      console.error('Cannot create task: user not authenticated');
+      return undefined;
+    }
 
-  const handleCreateTask = async (taskData: Partial<Task>) => {
-    // 🔥 OPTIMISTIC UPDATE: Create task with proper ID
+    const now = new Date();
     const taskToCreate: Task = {
       ...taskData,
-      id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      userId: effectiveUserId, // Use effectiveUserId for both logged and guest
+      id: generateId('task'),
+      userId: effectiveUserId,
       domainId: taskData.domainId || 'domain-1',
+      projectId: taskData.projectId || '',
       status: taskData.status || 'pending',
       priority: taskData.priority || 'medium',
       estimatedMinutes: taskData.estimatedMinutes || 60,
-      createdAt: new Date(),
-      updatedAt: new Date()
+      createdAt: now,
+      updatedAt: now,
     } as Task;
-    
-    try {
-      console.log('CREATE_TASK_START', taskData);
-      console.log('CREATE_TASK_OPTIMISTIC', taskToCreate.id);
-      
-      // Immediately update UI
-      setTasks(prevTasks => {
-        if (prevTasks.find(t => t.id === taskToCreate.id)) {
-          console.warn('⚠️ Task already exists in state, updating instead');
-          return prevTasks.map(t => t.id === taskToCreate.id ? taskToCreate : t);
-        }
-        return [...prevTasks, taskToCreate];
-      });
-      
-      // Persist to database
-      const savedTask = await db.create<Task>('tasks', taskToCreate);
-      console.log('CREATE_TASK_SUCCESS', savedTask);
-      
-      // Update state with persisted version if needed
-      setTasks(prevTasks => 
-        prevTasks.map(t => t.id === taskToCreate.id ? {
-          ...savedTask,
-          dueDate: savedTask.dueDate ? new Date(savedTask.dueDate) : undefined,
-          deadline: savedTask.deadline ? new Date(savedTask.deadline) : undefined,
-          completedAt: savedTask.completedAt ? new Date(savedTask.completedAt) : undefined,
-          createdAt: new Date(savedTask.createdAt),
-          updatedAt: new Date(savedTask.updatedAt)
-        } : t)
-      );
-    } catch (error) {
-      console.error('❌ CREATE_TASK_ERROR:', error);
-      // Rollback optimistic update
-      setTasks(prevTasks => prevTasks.filter(t => t.id !== taskToCreate.id));
-    }
-  };
 
-  const handleUpdateTask = async (id: string, updates: Partial<Task>) => {
+    setTasks(prev => [...prev, taskToCreate]);
+
     try {
-      const existingTask = tasks.find(t => t.id === id);
-      if (existingTask) {
-        const updatedTask = { ...existingTask, ...updates, updatedAt: new Date() };
-        await db.update('tasks', updatedTask);
-        setTasks(tasks.map(t => t.id === id ? updatedTask : t));
-      }
+      const savedTask = await db.create<Task>('tasks', taskToCreate);
+      const deserializedTask = deserializeTask(savedTask);
+      
+      setTasks(prev => prev.map(t => t.id === taskToCreate.id ? deserializedTask : t));
+      
+      return deserializedTask.id;
+    } catch (error) {
+      console.error('Failed to create task:', error);
+      setTasks(prev => prev.filter(t => t.id !== taskToCreate.id));
+      return undefined;
+    }
+  }, [effectiveUserId]);
+
+  const handleUpdateTask = useCallback(async (id: string, updates: Partial<Task>) => {
+    const existingTask = tasks.find(t => t.id === id);
+    if (!existingTask) return;
+
+    const updatedTask = { ...existingTask, ...updates, updatedAt: new Date() };
+    setTasks(prev => prev.map(t => t.id === id ? updatedTask : t));
+
+    try {
+      await db.update('tasks', updatedTask);
     } catch (error) {
       console.error('Failed to update task:', error);
+      setTasks(prev => prev.map(t => t.id === id ? existingTask : t));
     }
+  }, [tasks]);
+
+  const handleDeleteTask = useCallback(async (id: string) => {
+    const existingTask = tasks.find(t => t.id === id);
+    if (!existingTask) return;
+
+    setTasks(prev => prev.filter(t => t.id !== id));
+
+    try {
+      await db.delete('tasks', id);
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      setTasks(prev => [...prev, existingTask]);
+    }
+  }, [tasks]);
+
+  // ========== HABIT HANDLERS ==========
+  const handleCreateHabit = useCallback(async (habitData: Partial<Habit>) => {
+    if (!effectiveUserId) return;
+
+    const now = new Date();
+    const habitToCreate: Habit = {
+      ...habitData,
+      id: generateId('habit'),
+      userId: effectiveUserId,
+      createdAt: now,
+      updatedAt: now,
+    } as Habit;
+
+    setHabits(prev => [...prev, habitToCreate]);
+
+    try {
+      const savedHabit = await db.create<Habit>('habits', habitToCreate);
+      setHabits(prev => prev.map(h => h.id === habitToCreate.id ? deserializeHabit(savedHabit) : h));
+      audioManager.play('achievementUnlock');
+    } catch (error) {
+      console.error('Failed to create habit:', error);
+      setHabits(prev => prev.filter(h => h.id !== habitToCreate.id));
+    }
+  }, [effectiveUserId]);
+
+  const handleUpdateHabit = useCallback(async (id: string, updates: Partial<Habit>) => {
+    const existingHabit = habits.find(h => h.id === id);
+    if (!existingHabit) return;
+
+    const updatedHabit = { ...existingHabit, ...updates, updatedAt: new Date() };
+    setHabits(prev => prev.map(h => h.id === id ? updatedHabit : h));
+
+    try {
+      await db.update('habits', updatedHabit);
+    } catch (error) {
+      console.error('Failed to update habit:', error);
+      setHabits(prev => prev.map(h => h.id === id ? existingHabit : h));
+    }
+  }, [habits]);
+
+  const handleDeleteHabit = useCallback(async (id: string) => {
+    const existingHabit = habits.find(h => h.id === id);
+    if (!existingHabit) return;
+
+    setHabits(prev => prev.filter(h => h.id !== id));
+
+    try {
+      await db.delete('habits', id);
+    } catch (error) {
+      console.error('Failed to delete habit:', error);
+      setHabits(prev => [...prev, existingHabit]);
+    }
+  }, [habits]);
+
+  const handleLogHabit = useCallback(async (habitId: string, completed: boolean, value?: number, notes?: string) => {
+    if (!effectiveUserId) return;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const existingLog = habitLogs.find(log => 
+      log.habitId === habitId && 
+      new Date(log.date).toDateString() === today.toDateString()
+    );
+
+    const logData: HabitLog = {
+      id: existingLog?.id || generateId('habitlog'),
+      habitId,
+      userId: effectiveUserId,
+      date: today,
+      completed,
+      value: value !== undefined ? value : existingLog?.value,
+      notes: notes || existingLog?.notes || '',
+      createdAt: existingLog?.createdAt || new Date(),
+    } as HabitLog;
+
+    if (existingLog) {
+      setHabitLogs(prev => prev.map(log => log.id === existingLog.id ? logData : log));
+    } else {
+      setHabitLogs(prev => [...prev, logData]);
+    }
+
+    try {
+      if (existingLog) {
+        await db.update('habitLogs', logData);
+      } else {
+        await db.create('habitLogs', logData);
+      }
+      
+      if (completed) {
+        audioManager.taskCompleted();
+      }
+    } catch (error) {
+      console.error('Failed to log habit:', error);
+      if (existingLog) {
+        setHabitLogs(prev => prev.map(log => log.id === existingLog.id ? existingLog : log));
+      } else {
+        setHabitLogs(prev => prev.filter(log => log.id !== logData.id));
+      }
+    }
+  }, [effectiveUserId, habitLogs]);
+
+  // ========== OTHER HANDLERS ==========
+  const handleBadgeUnlocked = (badge: any) => {
+    console.log('Badge unlocked:', badge.name);
+    audioManager.play('achievementUnlock');
   };
 
-  // Default empty analytics data for loading state
+  // ========== RENDER HELPERS ==========
   const emptyAnalyticsData: AnalyticsData = {
     planVsActual: [],
     timeAllocation: [],
@@ -1441,84 +1045,81 @@ function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
     },
   };
 
-  // 🔥 P0 FIX: AuthGate - Solo login screen pulita prima dell'auth
-  if (!authReady) {
+  // ========== RENDER: AUTH STATES ==========
+  
+  if (authStatus === 'unknown') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+      <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
           <div className="w-20 h-20 mx-auto mb-8">
-            <div className="w-20 h-20 border-4 border-blue-200 rounded-full border-r-blue-600" style={{ animation: 'spin 1s linear infinite' }}></div>
+            <div className="w-20 h-20 border-4 border-blue-200 rounded-full border-r-blue-600 animate-spin" />
           </div>
           <h2 className="text-3xl font-bold text-white mb-4">Life Tracker</h2>
-          <p className="text-slate-300 text-lg">
-            Checking authentication...
-          </p>
+          <p className="text-slate-300 text-lg">Checking authentication...</p>
         </div>
       </div>
     );
   }
 
-  // 🔥 P0.1 FIX: TRUE AUTH GATE - No app UI visible until auth complete
-  if (!currentUser) {
+  if (authStatus === 'signedOut') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-900">
-        {/* Full-screen auth overlay - NO app UI underneath */}
-        <AuthModal 
-          isOpen={true}
-          onClose={() => {}} 
-        />
-        {/* Fallback background */}
+        <AuthModal isOpen={true} onClose={() => {}} />
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
           <div className="text-center">
-            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">
-              Life Tracker
-            </h1>
-            <p className="text-xl text-slate-300 max-w-2xl mx-auto">
-              Please sign in to continue
-            </p>
+            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">Life Tracker</h1>
+            <p className="text-xl text-slate-300 max-w-2xl mx-auto">Please sign in to continue</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // 🔥 P0 FIX: Check for database errors (VersionError recovery)
-  const dbError = db.getDatabaseError();
+  if (authStatus === 'signedIn' && initStatus === 'loading') {
+    return (
+      <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-20 h-20 mx-auto mb-8">
+            <div className="w-20 h-20 border-4 border-blue-200 rounded-full border-r-blue-600 animate-spin" />
+          </div>
+          <h2 className="text-3xl font-bold text-white mb-4">Life Tracker</h2>
+          <p className="text-slate-300 text-lg">Loading your data...</p>
+          {DEBUG_UI && (
+            <div className="mt-4 bg-black/40 border border-white/20 rounded-lg p-3 text-left max-w-sm mx-auto">
+              <div className="text-sm text-white">Step: {lastStep}</div>
+              <div className="text-sm text-green-300">User: {effectiveUserId?.slice(0, 8)}...</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const dbError = db.getDatabaseError?.();
   if (dbError && dbError.type === 'VersionError') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="max-w-md mx-auto text-center p-8 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl">
           <div className="text-6xl mb-6">⚠️</div>
           <h2 className="text-2xl font-bold text-white mb-4">Database Version Conflict</h2>
-          <p className="text-slate-300 mb-6 leading-relaxed">
-            {dbError.message}
-          </p>
+          <p className="text-slate-300 mb-6">{dbError.message}</p>
           
           {dbError.canReset && (
-            <div className="space-y-4">
-              <button
-                onClick={async () => {
-                  try {
-                    await db.resetLocalDatabase();
-                    db.clearDatabaseError();
-                    window.location.reload();
-                  } catch (error) {
-                    console.error('Reset failed:', error);
-                  }
-                }}
-                className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition-all duration-200"
-              >
-                Reset Local Database
-              </button>
-              <p className="text-xs text-slate-400">
-                ⚠️ This will delete your local data. Cloud data remains safe.
-              </p>
-            </div>
+            <button
+              onClick={async () => {
+                await db.resetLocalDatabase?.();
+                db.clearDatabaseError?.();
+                window.location.reload();
+              }}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg mb-4"
+            >
+              Reset Local Database
+            </button>
           )}
           
           <button
             onClick={() => window.location.reload()}
-            className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-all duration-200"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg"
           >
             Refresh Page
           </button>
@@ -1527,48 +1128,27 @@ function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
     );
   }
 
-  // 🔥 P0 FIX: Loading state SOLO per utenti loggati durante init
-  if (isLoading) {
+  if (authStatus !== 'signedIn' || !currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+      <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-20 h-20 mx-auto mb-8">
-            <div className="w-20 h-20 border-4 border-blue-200 rounded-full border-r-blue-600" style={{ animation: 'spin 1s linear infinite' }}></div>
-          </div>
-          <h2 className="text-3xl font-bold text-white mb-4">Life Tracker</h2>
-          <p className="text-slate-300 text-lg">Initializing system...</p>
-          <div className="mt-6 flex justify-center space-x-2">
-            {[...Array(3)].map((_, i) => (
-              <div 
-                key={i}
-                className="w-3 h-3 rounded-full bg-blue-500"
-                style={{ animation: 'pulse 1.5s ease-in-out infinite', animationDelay: `${i * 0.3}s` }}
-              />
-            ))}
-          </div>
+          <h2 className="text-xl font-bold text-white mb-4">Loading...</h2>
+          <p className="text-slate-300">Auth: {authStatus}</p>
         </div>
       </div>
     );
   }
 
+  // ========== RENDER: MAIN APP ==========
   return (
-    <div className="min-h-screen">
-      {/* 🎮 GAMING EFFECTS OVERLAY */}
+    <div className="min-h-screen" data-testid="app-ready">
       <GamingEffects />
-      
-      {/* Auth Modal */}
-      <AuthModal 
-        isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)} 
-      />
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      <DailyMotivation />
 
-      {/* Daily Motivation */}
-      {currentUser && <DailyMotivation />}
-
-      {/* NOW Bar - Professional Header */}
+      {/* Header */}
       <div className="bg-white/90 backdrop-blur-md border-b border-neutral-200 shadow-lg fixed top-0 left-0 right-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          {/* Logo/Brand */}
           <div className="flex items-center space-x-4">
             <div className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               ⚡ LifeTracker
@@ -1578,7 +1158,6 @@ function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
             </div>
           </div>
           
-          {/* Center - NOW Bar */}
           <div className="flex-1 mx-8">
             <NowBar
               currentSession={currentSession}
@@ -1589,298 +1168,270 @@ function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
             />
           </div>
           
-          {/* Right side - User controls */}
           <div className="flex items-center space-x-4 ml-4">
-            {currentUser ? (
-              <div className="flex items-center space-x-4">
-                {/* Sync status indicator */}
-                <SyncStatusIndicator />
-                
-                {/* User info */}
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold">
-                    {(currentUser.displayName && currentUser.displayName[0]) || (currentUser.email && currentUser.email[0]) || 'U'}
-                  </div>
-                  <div className="hidden md:block">
-                    <div className="text-sm font-medium text-neutral-900">
-                      {currentUser.displayName || 'User'}
-                    </div>
-                    <div className="text-xs text-neutral-500">
-                      {currentUser.email}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      auth.signOut();
-                      audioManager.buttonFeedback();
-                    }}
-                    onMouseEnter={() => audioManager.buttonHover()}
-                    className="btn btn-outline text-xs px-3 py-1"
-                  >
-                    Sign Out
-                  </button>
-                </div>
+            <SyncStatusIndicator />
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold">
+                {(currentUser.displayName?.[0]) || (currentUser.email?.[0]) || 'U'}
               </div>
-            ) : (
+              <div className="hidden md:block">
+                <div className="text-sm font-medium text-neutral-900">
+                  {currentUser.displayName || 'User'}
+                </div>
+                <div className="text-xs text-neutral-500">{currentUser.email}</div>
+              </div>
               <button
                 onClick={() => {
-                  setShowAuthModal(true);
+                  auth.signOut();
+                  setDataLoadedForUser(null);
                   audioManager.buttonFeedback();
                 }}
-                onMouseEnter={() => audioManager.buttonHover()}
-                className="btn btn-primary text-sm px-6 py-3"
+                className="btn btn-outline text-xs px-3 py-1"
               >
-                Sign In
+                Sign Out
               </button>
-            )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content - Professional 2-Column Layout with Modern Background */}
+      {/* Main Content */}
       <div className="pt-24 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
         <div className="container mx-auto">
           <div className="grid-responsive gap-6">
-              {/* LEFT SIDEBAR - Control Panel */}
-              <div className="space-y-6">
-                {/* AI Brain - Compact & Clean */}
-                <div className="card-elevated card-body hover-lift transition-smooth">
-                  <div className="mb-4">
-                    <h3 className="heading-3 flex items-center gap-3">
-                      🧠 AI Assistant
-                      <span className="badge badge-primary text-xs">AI</span>
-                    </h3>
-                    <p className="text-small">
-                      Create tasks and blocks with natural language
-                    </p>
-                  </div>
-                  <AIInputBar
-                    onCreateTimeBlock={handleCreateTimeBlock}
-                    onCreateTask={handleCreateTask}
-                    onCreateGoal={handleCreateGoal}
-                    onCreateHabit={handleCreateHabit}
-                    goals={goals}
-                    existingTasks={tasks}
-                    userPreferences={{}}
-                    className="w-full"
-                    currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId
+            {/* Left Sidebar */}
+            <div className="space-y-6">
+              {/* AI Assistant */}
+              <div className="card-elevated card-body hover-lift transition-smooth">
+                <div className="mb-4">
+                  <h3 className="heading-3 flex items-center gap-3">
+                    🧠 AI Assistant
+                    <span className="badge badge-primary text-xs">AI</span>
+                  </h3>
+                  <p className="text-small">Create tasks and blocks with natural language</p>
+                </div>
+                <AIInputBar
+                  onCreateTimeBlock={handleCreateTimeBlock}
+                  onCreateTask={handleCreateTask}
+                  onCreateGoal={handleCreateGoal}
+                  onCreateHabit={handleCreateHabit}
+                  goals={filteredGoals}
+                  existingTasks={filteredTasks}
+                  userPreferences={{}}
+                  className="w-full"
+                  currentUserId={effectiveUserId}
+                />
+              </div>
+
+              {/* KPI Dashboard */}
+              <div className="card-elevated hover-lift transition-smooth">
+                <div className="card-header">
+                  <h3 className="heading-3">Today's Progress</h3>
+                </div>
+                <div className="card-body">
+                  <KPIDashboard 
+                    kpis={todayKPIs}
+                    onRefresh={async () => {
+                      if (effectiveUserId) {
+                        const updatedKPIs = await db.calculateTodayKPIs(effectiveUserId);
+                        setTodayKPIs(updatedKPIs);
+                      }
+                    }}
                   />
-                </div>
-
-                {/* KPI Dashboard - Clean Cards */}
-                <div className="card-elevated hover-lift transition-smooth">
-                  <div className="card-header">
-                    <h3 className="heading-3">Today's Progress</h3>
-                  </div>
-                  <div className="card-body">
-                    <KPIDashboard 
-                      kpis={todayKPIs}
-                      onRefresh={loadData}
-                    />
-                  </div>
-                </div>
-
-                {/* Module Navigation - Professional Cards */}
-                <div className="card-elevated hover-lift transition-smooth">
-                  <div className="card-header">
-                    <h3 className="heading-3">Modules</h3>
-                  </div>
-                  <div className="card-body">
-                    <div className="module-grid">
-                      {[
-                        { id: 'planner', label: 'Time Planner', icon: '📅', description: 'Plan and schedule your day' },
-                        { id: 'smart_scheduler', label: 'Auto Scheduler', icon: '⚡', description: 'AI-powered scheduling' },
-                        { id: 'adaptation', label: 'Auto-Replan', icon: '🔄', description: 'Real-time adaptation' },
-                        { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights' },
-                        { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track daily habits' },
-                        { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives' },
-                        { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data' },
-                        { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights' },
-                        { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Track milestones' },
-                      ].map(({ id, label, icon, description }) => (
-                        <div
-                          key={id}
-                          onClick={() => {
-                            setActiveTab(id as any);
-                            audioManager.buttonFeedback();
-                          }}
-                          className={`module-card ${
-                            activeTab === id ? 'active' : ''
-                          }`}
-                        >
-                          <span className="module-icon">{icon}</span>
-                          <h4 className="module-title">{label}</h4>
-                          <p className="module-description">{description}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
 
-              {/* RIGHT MAIN CONTENT - Focus Area */}
-              <div className="card-elevated shadow-xl">
+              {/* Module Navigation */}
+              <div className="card-elevated hover-lift transition-smooth">
                 <div className="card-header">
-                  <h2 className="heading-2">
-                    {activeTab === 'planner' && '📅 Time Planner'}
-                    {activeTab === 'smart_scheduler' && '⚡ Auto Scheduler'}
-                    {activeTab === 'adaptation' && '🔄 Auto Replan'}
-                    {activeTab === 'micro_coach' && '🧠 AI Coach'}
-                    {activeTab === 'habits' && '🔥 Habits Tracker'}
-                    {activeTab === 'okr' && '🎯 Goals & Projects'}
-                    {activeTab === 'analytics' && '📊 Analytics Dashboard'}
-                    {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
-                    {activeTab === 'badges' && '🏆 Achievements'}
-                  </h2>
+                  <h3 className="heading-3">Modules</h3>
                 </div>
                 <div className="card-body">
+                  <div className="module-grid">
+                    {[
+                      { id: 'planner', label: 'Time Planner', icon: '📅', description: 'Plan your day' },
+                      { id: 'smart_scheduler', label: 'Auto Scheduler', icon: '⚡', description: 'AI scheduling' },
+                      { id: 'adaptation', label: 'Auto-Replan', icon: '🔄', description: 'Real-time adaptation' },
+                      { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights' },
+                      { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track habits' },
+                      { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives' },
+                      { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data' },
+                      { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights' },
+                      { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones' },
+                    ].map(({ id, label, icon, description }) => (
+                      <div
+                        key={id}
+                        onClick={() => {
+                          setActiveTab(id as ActiveTab);
+                          audioManager.buttonFeedback();
+                        }}
+                        className={`module-card ${activeTab === id ? 'active' : ''}`}
+                      >
+                        <span className="module-icon">{icon}</span>
+                        <h4 className="module-title">{label}</h4>
+                        <p className="module-description">{description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
 
-                  {/* Module Content */}
-              {activeTab === 'planner' && (
-                <>
-                  {timeBlockError && (
-                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      {timeBlockError}
-                    </div>
-                  )}
-                  {process.env.NODE_ENV !== 'production' && (
-                    <div className="mb-3 text-xs text-gray-500">
-                      Adapter: {adapterInfo.adapterType} | Mode: {adapterInfo.useFirebase ? 'Firebase' : 'IndexedDB'} | Adapter user: {(adapterInfo as any).userId || 'n/a'} | Active user: {currentUser?.uid || 'anon'} | Store: timeBlocks
-                    </div>
-                  )}
-                  <TimeBlockPlanner
-                    timeBlocks={timeBlocks}
-                    tasks={tasks}
-                    projects={projects}
-                    goals={goals}
-                    onCreateTimeBlock={handleCreateTimeBlock}
-                    onUpdateTimeBlock={handleUpdateTimeBlock}
-                    onDeleteTimeBlock={handleDeleteTimeBlock}
-                    selectedDate={selectedDate}
-                    onDateChange={setSelectedDate}
-                    currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId (works for both logged and guest)
-                    isReady={true} // 🔥 FIX: Always ready since we have effectiveUserId
-                  />
-                </>
-              )}
+            {/* Main Content Area */}
+            <div className="card-elevated shadow-xl">
+              <div className="card-header">
+                <h2 className="heading-2">
+                  {activeTab === 'planner' && '📅 Time Planner'}
+                  {activeTab === 'smart_scheduler' && '⚡ Auto Scheduler'}
+                  {activeTab === 'adaptation' && '🔄 Auto Replan'}
+                  {activeTab === 'micro_coach' && '🧠 AI Coach'}
+                  {activeTab === 'habits' && '🔥 Habits Tracker'}
+                  {activeTab === 'okr' && '🎯 Goals & Projects'}
+                  {activeTab === 'analytics' && '📊 Analytics Dashboard'}
+                  {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
+                  {activeTab === 'badges' && '🏆 Achievements'}
+                </h2>
+              </div>
+              <div className="card-body">
+                {activeTab === 'planner' && (
+                  <>
+                    {timeBlockError && (
+                      <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {timeBlockError}
+                      </div>
+                    )}
+                    <TimeBlockPlanner
+                      timeBlocks={filteredTimeBlocks}
+                      tasks={filteredTasks}
+                      projects={filteredProjects}
+                      goals={filteredGoals}
+                      onCreateTimeBlock={handleCreateTimeBlock}
+                      onUpdateTimeBlock={handleUpdateTimeBlock}
+                      onDeleteTimeBlock={handleDeleteTimeBlock}
+                      selectedDate={selectedDate}
+                      onDateChange={setSelectedDate}
+                      currentUserId={effectiveUserId}
+                      isReady={initStatus === 'ready'}
+                    />
+                  </>
+                )}
 
-              {activeTab === 'smart_scheduler' && (
-                <SmartScheduler
-                  tasks={tasks}
-                  existingTimeBlocks={timeBlocks}
-                  goals={goals}
-                  onScheduleGenerated={(schedule) => {
-                    console.log('📅 New schedule generated:', schedule);
-                    // You could update the timeBlocks state here if needed
-                  }}
-                  onTimeBlocksCreated={async (blocks) => {
-                    console.log('⚡ Creating', blocks.length, 'time blocks from smart scheduler');
-                    for (const block of blocks) {
-                      await handleCreateTimeBlock(block);
-                    }
-                    audioManager.perfectDay();
-                  }}
-                  userPreferences={{}}
-                />
-              )}
-
-              {activeTab === 'adaptation' && (
-  <RealTimeAdaptation
-    currentSchedule={timeBlocks}
-    tasks={tasks}
-    goals={goals}
-    currentSession={currentSession}
-    userEnergyLevel={0.7} // Could be dynamic based on user input or ML
-    onScheduleAdapted={async (newSchedule, changes) => {
-      console.log('🔄 SCHEDULE ADAPTED:', changes.length, 'changes');
-      // Update time blocks with the adapted schedule
-      setTimeBlocks(newSchedule);
-      audioManager.perfectDay();
-    }}
-  />
-)}
-
-
-              {activeTab === 'micro_coach' && (
-                <MicroCoachDashboard
-                  goals={goals}
-                  keyResults={keyResults}
-                  tasks={tasks}
-                  sessions={[]} // Pass actual sessions here when available
-                  habitLogs={habitLogs}
-                  timeBlocks={timeBlocks}
-                  onInsightAction={(action, insight) => {
-                    console.log('🧠 INSIGHT ACTION:', action, insight.title);
-                    if (action === 'implement') {
+                {activeTab === 'smart_scheduler' && (
+                  <SmartScheduler
+                    tasks={filteredTasks}
+                    existingTimeBlocks={filteredTimeBlocks}
+                    goals={filteredGoals}
+                    onScheduleGenerated={(schedule) => console.log('Schedule generated:', schedule)}
+                    onTimeBlocksCreated={async (blocks) => {
+                      for (const block of blocks) {
+                        await handleCreateTimeBlock(block);
+                      }
                       audioManager.perfectDay();
-                      // Could show implementation modal or guide
-                    }
-                  }}
-                />
-              )}
+                    }}
+                    userPreferences={{}}
+                  />
+                )}
 
-              {activeTab === 'habits' && (
-                <HabitsTracker
-                  habits={habits}
-                  habitLogs={habitLogs}
-                  onCreateHabit={handleCreateHabit}
-                  onUpdateHabit={handleUpdateHabit}
-                  onDeleteHabit={handleDeleteHabit}
-                  onLogHabit={handleLogHabit}
-                  currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId
-                />
-              )}
+                {activeTab === 'adaptation' && (
+                  <RealTimeAdaptation
+                    currentSchedule={filteredTimeBlocks}
+                    tasks={filteredTasks}
+                    goals={filteredGoals}
+                    currentSession={currentSession}
+                    userEnergyLevel={0.7}
+                    onScheduleAdapted={async (newSchedule, changes) => {
+                      setTimeBlocks(newSchedule);
+                      audioManager.perfectDay();
+                    }}
+                  />
+                )}
 
-              {activeTab === 'okr' && (
-                <OKRManager
-                  goals={goals}
-                  keyResults={keyResults}
-                  projects={projects}
-                  tasks={tasks}
-                  timeBlocks={timeBlocks}
-                  onCreateGoal={handleCreateGoal}
-                  onUpdateGoal={handleUpdateGoal}
-                  onCreateKeyResult={handleCreateKeyResult}
-                  onUpdateKeyResult={handleUpdateKeyResult}
-                  onCreateProject={handleCreateProject}
-                  onUpdateProject={handleUpdateProject}
-                  onDeleteProject={handleDeleteProject}
-                  onCreateTask={handleCreateTask}
-                  onUpdateTask={handleUpdateTask}
-                  currentUserId={effectiveUserId} // 🔥 FIX: Use effective userId
-                />
-              )}
+                {activeTab === 'micro_coach' && (
+                  <MicroCoachDashboard
+                    goals={filteredGoals}
+                    keyResults={filteredKeyResults}
+                    tasks={filteredTasks}
+                    sessions={[]}
+                    habitLogs={filteredHabitLogs}
+                    timeBlocks={filteredTimeBlocks}
+                    onInsightAction={(action, insight) => {
+                      if (action === 'implement') {
+                        audioManager.perfectDay();
+                      }
+                    }}
+                  />
+                )}
 
-              {activeTab === 'analytics' && (
-                <AnalyticsDashboard
-                  data={analyticsData || emptyAnalyticsData}
-                  timeRange={timeRange}
-                  onTimeRangeChange={setTimeRange}
-                />
-              )}
+                {activeTab === 'habits' && (
+                  <HabitsTracker
+                    habits={filteredHabits}
+                    habitLogs={filteredHabitLogs}
+                    onCreateHabit={handleCreateHabit}
+                    onUpdateHabit={handleUpdateHabit}
+                    onDeleteHabit={handleDeleteHabit}
+                    onLogHabit={handleLogHabit}
+                    currentUserId={effectiveUserId}
+                  />
+                )}
 
-              {activeTab === 'goal_analytics' && (
-                <GoalAnalyticsDashboard
-                  goals={goals}
-                  userId={currentUser?.uid || 'guest-user'}
-                  selectedGoalId={selectedGoalId}
-                  onGoalSelect={setSelectedGoalId}
-                />
-              )}
+                {activeTab === 'okr' && (
+                  <OKRManager
+                    goals={filteredGoals}
+                    keyResults={filteredKeyResults}
+                    projects={filteredProjects}
+                    tasks={filteredTasks}
+                    timeBlocks={filteredTimeBlocks}
+                    currentUserId={effectiveUserId}
+                    isLoading={initStatus === 'loading'}
+                    
+                    onCreateGoal={handleCreateGoal}
+                    onUpdateGoal={handleUpdateGoal}
+                    onDeleteGoal={handleDeleteGoal}
+                    
+                    onCreateKeyResult={handleCreateKeyResult}
+                    onUpdateKeyResult={handleUpdateKeyResult}
+                    onDeleteKeyResult={handleDeleteKeyResult}
+                    
+                    onCreateProject={handleCreateProject}
+                    onUpdateProject={handleUpdateProject}
+                    onDeleteProject={handleDeleteProject}
+                    
+                    onCreateTask={handleCreateTask}
+                    onUpdateTask={handleUpdateTask}
+                    onDeleteTask={handleDeleteTask}
+                  />
+                )}
 
-              {activeTab === 'badges' && (
-                <BadgeSystem
-                  userStats={userStats}
-                  onBadgeUnlocked={handleBadgeUnlocked}
-                />
-              )}
+                {activeTab === 'analytics' && (
+                  <AnalyticsDashboard
+                    data={analyticsData || emptyAnalyticsData}
+                    timeRange={timeRange}
+                    onTimeRangeChange={setTimeRange}
+                  />
+                )}
+
+                {activeTab === 'goal_analytics' && (
+                  <GoalAnalyticsDashboard
+                    goals={filteredGoals}
+                    userId={effectiveUserId || ''}
+                    selectedGoalId={selectedGoalId}
+                    onGoalSelect={setSelectedGoalId}
+                  />
+                )}
+
+                {activeTab === 'badges' && (
+                  <BadgeSystem
+                    userStats={userStats}
+                    onBadgeUnlocked={handleBadgeUnlocked}
+                  />
+                )}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Build Info Footer - Deploy Verification */}
+      {/* Footer */}
       <footer className="border-t border-neutral-200 bg-neutral-50 py-3">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex justify-between items-center text-xs text-neutral-500">

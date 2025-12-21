@@ -1,3 +1,33 @@
+// src/types/index.ts
+// Tipi centrali del progetto (Life Tracker)
+
+export type Theme = 'light' | 'dark' | 'auto';
+
+// ====== COMMON ======
+export interface BaseEntity {
+  id: string;
+  userId: string;
+  domainId?: string;
+  deleted?: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// ====== OKR / STATUS ======
+export type GoalStatus = 'active' | 'completed' | 'paused' | 'at_risk' | 'archived';
+export type Priority = 'critical' | 'high' | 'medium' | 'low';
+
+export type KeyResultStatus = 'active' | 'completed' | 'at_risk';
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'todo';
+
+export type TimeBlockStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'overrun';
+export type SessionStatus = 'active' | 'paused' | 'completed';
+export type HabitFrequency = 'daily' | 'weekly' | 'monthly';
+
+// ============================================================================
+// CORE USER / DOMAIN
+// ============================================================================
+
 export interface User {
   id: string;
   name: string;
@@ -13,35 +43,39 @@ export interface UserPreferences {
     start: string;
     end: string;
   };
-  theme: 'light' | 'dark' | 'auto';
+  theme: Theme;
   notifications: boolean;
   focusMode: boolean;
 }
 
-export interface Domain {
-  id: string;
+export interface Domain extends BaseEntity {
   name: string;
   color: string;
   icon: string;
-  userId: string;
-  createdAt: Date;
+  domainId?: never; // per evitare confusione: Domain NON ha domainId
 }
 
-export interface Goal {
-  id: string;
+// ============================================================================
+// OKR: GOAL / KEY RESULT / PROJECT / TASK
+// ============================================================================
+
+export interface Goal extends BaseEntity {
   title: string;
-  description: string;
-  domainId: string;
-  userId: string;
-  status: 'active' | 'completed' | 'paused';
+  description?: string;
+
+  domainId: string; // qui è obbligatorio nel tuo progetto
+  status: GoalStatus;
+  priority: Priority;
+
   targetDate: Date;
   deadline?: Date; // Alias for targetDate for AI compatibility
-  createdAt: Date;
-  updatedAt: Date;
+
+  targetHours?: number; // utile per OKRManager
+  timeAllocationTarget: number; // Hours per week target
+
   keyResults: KeyResult[];
+
   // ===== GOAL-CENTRIC ANALYTICS ENHANCEMENTS =====
-  timeAllocationTarget: number;  // Hours per week target
-  priority: 'critical' | 'high' | 'medium' | 'low';
   category: 'urgent_important' | 'important_not_urgent' | 'urgent_not_important' | 'neither';
   complexity: 'simple' | 'moderate' | 'complex' | 'expert';
   estimatedHours?: number; // Total hours estimated to complete
@@ -49,136 +83,166 @@ export interface Goal {
   progressVelocity?: number; // Progress per hour (calculated)
 }
 
-export interface KeyResult {
-  id: string;
+export interface KeyResult extends BaseEntity {
+  // Nota: in alcuni dati legacy userId può mancare,
+  // ma nel TUO file era required. Qui lo teniamo required via BaseEntity.
   goalId: string;
-  userId: string; // 🔥 PSYCHOPATH FIX: Add missing userId
   title: string;
-  description: string;
+  description?: string;
+
   targetValue: number;
   currentValue: number;
-  unit: string;
-  progress: number;
-  status: 'active' | 'completed' | 'at_risk';
-  createdAt: Date;
-  updatedAt: Date;
+
+  unit?: string;
+  progress?: number;
+
+  status: KeyResultStatus;
 }
 
-export interface Project {
-  id: string;
+export interface Project extends BaseEntity {
   name: string;
-  description: string;
-  goalId?: string;
+  description?: string;
+
+  // 🔥 CRITICO: per OKRManager dev’essere OBBLIGATORIO
+  goalId: string;
+
   domainId: string;
-  userId: string;
-  status: 'active' | 'completed' | 'paused';
-  priority: 'low' | 'medium' | 'high';
+
+  status: GoalStatus;
+  priority: Priority;
+
   dueDate?: Date;
   weeklyHoursTarget?: number;
   totalHoursTarget?: number;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
-export interface Task {
-  id: string;
+export interface Task extends BaseEntity {
   title: string;
-  description: string;
-  projectId?: string;
+  description?: string;
+
+  // 🔥 CRITICO: per OKRManager dev’essere OBBLIGATORIO
+  projectId: string;
+
   goalId?: string;
   goalIds?: string[]; // For AI multi-goal support
+
   domainId: string;
-  userId: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'todo';
-  priority: 'low' | 'medium' | 'high' | 'critical';
+
+  status: TaskStatus;
+  priority: Priority;
+
   estimatedMinutes: number;
   estimatedDuration?: number; // Alias for estimatedMinutes for AI compatibility
   actualMinutes?: number;
+
   dueDate?: Date;
   deadline?: Date; // Alias for dueDate for AI compatibility
   completedAt?: Date;
+
   ifThenPlan?: string;
   why?: string;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
-export interface TimeBlock {
-  id: string;
+// ============================================================================
+// TIME / SESSION
+// ============================================================================
+
+export interface TimeBlock extends BaseEntity {
   title: string;
   description?: string;
+
   taskId?: string;
   taskIds?: string[]; // For AI multi-task support
+
   projectId?: string;
   goalId?: string;
+
   domainId: string;
-  userId: string;
+
   startTime: Date;
   endTime: Date;
+
   actualStartTime?: Date;
   actualEndTime?: Date;
-  status: 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'overrun';
-  type: 'work' | 'break' | 'buffer' | 'travel' | 'meeting' | 'focus' | 'admin' | 'deep' | 'shallow';
+
+  status: TimeBlockStatus;
+  type:
+    | 'work'
+    | 'break'
+    | 'buffer'
+    | 'travel'
+    | 'meeting'
+    | 'focus'
+    | 'admin'
+    | 'deep'
+    | 'shallow';
+
   color?: string; // Custom hex color override (e.g., #3b82f6)
   location?: string;
   notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
   // ===== GOAL-CENTRIC ANALYTICS ENHANCEMENTS =====
-  goalIds?: string[];        // Multiple goals per time block
-  goalAllocation?: {         // Time percentage allocation per goal
+  goalIds?: string[]; // Multiple goals per time block
+  goalAllocation?: {
     [goalId: string]: number; // 0-100% how much of this time block is for each goal
   };
-  expectedImpact?: {         // Expected progress impact per goal
+  expectedImpact?: {
     [goalId: string]: number; // 0-100 estimated progress points
   };
 }
 
-export interface Session {
-  id: string;
+export interface Session extends BaseEntity {
   timeBlockId?: string;
   taskId?: string;
   projectId?: string;
+
   domainId: string;
-  userId: string;
+
   startTime: Date;
   endTime?: Date;
+
   duration?: number;
-  status: 'active' | 'paused' | 'completed';
+  status: SessionStatus;
+
   tags: string[];
   notes?: string;
+
   mood?: number;
   energy?: number;
   energyLevel?: number; // Alias for energy for AI compatibility
   focus?: number;
-  createdAt: Date;
-  updatedAt: Date;
+
   // ===== GOAL-CENTRIC ANALYTICS ENHANCEMENTS =====
-  goalIds?: string[];        // Multiple goals per session
-  goalContribution?: {       // Actual contribution scoring
-    [goalId: string]: number; // 0-100% how much this session helped each goal
+  goalIds?: string[];
+  goalContribution?: {
+    [goalId: string]: number;
   };
-  progressMade?: {           // Actual progress made per goal
-    [goalId: string]: number; // Progress points achieved
+  progressMade?: {
+    [goalId: string]: number;
   };
-  learnings?: string[];      // Key learnings/insights from this session
-  blockers?: string[];       // What blocked progress (for analytics)
+  learnings?: string[];
+  blockers?: string[];
 }
 
-export interface Habit {
-  id: string;
+// ============================================================================
+// HABITS
+// ============================================================================
+
+export interface Habit extends BaseEntity {
   name: string;
   description?: string;
+
   domainId: string;
-  userId: string;
-  frequency: 'daily' | 'weekly' | 'monthly';
+
+  frequency: HabitFrequency;
+
   targetValue?: number;
   unit?: string;
+
   isActive: boolean;
+
   streakCount: number;
   bestStreak: number;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 export interface HabitLog {
@@ -191,6 +255,10 @@ export interface HabitLog {
   notes?: string;
   createdAt: Date;
 }
+
+// ============================================================================
+// METRICS / CALENDAR / DEADLINES / JOURNAL / INSIGHTS / ACHIEVEMENTS
+// ============================================================================
 
 export interface Metric {
   id: string;
@@ -238,7 +306,7 @@ export interface Deadline {
   title: string;
   description?: string;
   dueDate: Date;
-  priority: 'low' | 'medium' | 'high' | 'critical';
+  priority: Priority;
   status: 'pending' | 'completed' | 'overdue';
   projectId?: string;
   goalId?: string;
@@ -291,6 +359,10 @@ export interface Achievement {
   data?: any;
 }
 
+// ============================================================================
+// KPI / DASHBOARD / ANALYTICS
+// ============================================================================
+
 export interface KPI {
   focusMinutes: number;
   planVsActual: number;
@@ -342,16 +414,16 @@ export interface GoalROI {
   progressAchieved: number;
   progressPerHour: number;
   efficiency: 'exceptional' | 'high' | 'medium' | 'low' | 'critical';
-  benchmarkComparison: number; // vs average for similar goals
+  benchmarkComparison: number;
   trendDirection: 'improving' | 'stable' | 'declining';
-  optimalSessionLength: number; // hours
+  optimalSessionLength: number;
 }
 
 export interface GoalCompletion {
   currentProgress: number;
   estimatedCompletionDate: Date;
   onTrackStatus: 'ahead' | 'on_track' | 'behind' | 'critical';
-  confidence: number; // 0-100%
+  confidence: number;
   bottlenecks: Array<{ type: string; impact: number; solution: string }>;
   milestones: Array<{ date: Date; target: number; actual?: number }>;
   riskFactors: Array<{ factor: string; probability: number; impact: number }>;
@@ -360,7 +432,7 @@ export interface GoalCompletion {
 export interface GoalEfficiency {
   sessionsCount: number;
   averageSessionLength: number;
-  optimalTimeBlocks: string[]; // time of day when most productive
+  optimalTimeBlocks: string[];
   moodImpactCorrelation: number;
   energyImpactCorrelation: number;
   focusImpactCorrelation: number;
@@ -378,10 +450,10 @@ export interface GoalTrends {
 
 export interface GoalRecommendation {
   type: 'time_allocation' | 'scheduling' | 'priority' | 'strategy' | 'tools';
-  priority: 'critical' | 'high' | 'medium' | 'low';
+  priority: Priority;
   title: string;
   description: string;
-  expectedImpact: number; // 0-100%
+  expectedImpact: number;
   effort: 'low' | 'medium' | 'high';
   timeline: string;
   actions: string[];
@@ -391,7 +463,7 @@ export interface GoalRecommendation {
 export interface StrategicAllocation {
   currentAllocation: Array<{ goalId: string; hours: number; percentage: number; priority: string }>;
   recommendedAllocation: Array<{ goalId: string; hours: number; reason: string; impact: number }>;
-  misalignmentScore: number; // 0-100, 0 = perfect alignment
+  misalignmentScore: number;
   rebalancingSuggestions: Array<{
     fromGoal: string;
     toGoal: string;

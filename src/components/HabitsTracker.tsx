@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Habit, HabitLog } from '@/types';
+import { formatDateSafe, formatDateStringSafe } from '@/utils/dateUtils';
 import { CheckCircle, Circle, Flame, Calendar, Plus, Edit, Trash2 } from 'lucide-react';
 
 interface HabitsTrackerProps {
@@ -55,12 +56,12 @@ export default function HabitsTracker({
   }, []);
 
   const today = new Date();
-  const isToday = selectedDate.toDateString() === today.toDateString();
+  const isToday = formatDateStringSafe(selectedDate) === formatDateStringSafe(today);
 
   const getTodayLogs = () => {
-    const dateStr = selectedDate.toDateString();
+    const dateStr = formatDateStringSafe(selectedDate);
     return habitLogs.filter(log => 
-      new Date(log.date).toDateString() === dateStr
+      formatDateStringSafe(log.date) === dateStr && dateStr !== 'Invalid Date'
     );
   };
 
@@ -156,23 +157,33 @@ export default function HabitsTracker({
     }
   };
 
-  const handleToggleHabit = (habit: Habit) => {
+  const handleToggleHabit = async (habit: Habit) => {
     const existingLog = getHabitLog(habit.id);
     const newCompleted = !existingLog?.completed;
-    
-    onLogHabit(habit.id, newCompleted);
-    
-    // Update streak count
-    if (newCompleted) {
-      const newStreak = calculateStreak(habit) + 1;
-      onUpdateHabit(habit.id, {
-        streakCount: newStreak,
-        bestStreak: Math.max(habit.bestStreak, newStreak),
-      });
-    } else {
-      onUpdateHabit(habit.id, {
-        streakCount: Math.max(0, habit.streakCount - 1),
-      });
+    // Optimistic UI update
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let rollback = false;
+    let logId = existingLog?.id || `log-${Date.now()}`;
+    // Use onLogHabit directly - optimistic updates are handled in parent component (page.tsx)
+    try {
+      await onLogHabit(habit.id, newCompleted, existingLog?.value, existingLog?.notes ?? '');
+      
+      // Update streak count
+      if (newCompleted) {
+        const newStreak = calculateStreak(habit) + 1;
+        onUpdateHabit(habit.id, {
+          streakCount: newStreak,
+          bestStreak: Math.max(habit.bestStreak, newStreak),
+        });
+      } else {
+        onUpdateHabit(habit.id, {
+          streakCount: Math.max(0, habit.streakCount - 1),
+        });
+      }
+    } catch (error) {
+      // Error feedback - optimistic rollback handled in parent
+      console.error('Failed to log habit:', error);
     }
   };
 
@@ -452,11 +463,11 @@ export default function HabitsTracker({
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Habits Tracker</h2>
           <p className="text-sm text-gray-600">
-            {selectedDate.toLocaleDateString('en-US', { 
+            {formatDateSafe(selectedDate, { 
               weekday: 'long',
               month: 'long',
               day: 'numeric'
-            })}
+            }, 'Invalid Date')}
           </p>
         </div>
         

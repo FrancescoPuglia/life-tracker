@@ -1,1418 +1,2099 @@
-'use client';
+"use client";
 
-import { useState, useCallback, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
-import { Plus, Target, TrendingUp, Calendar, CheckCircle, AlertCircle, Clock } from 'lucide-react';
-import { toDateSafe, getDurationSafe, msToHours, formatHours } from '@/utils/dateUtils';
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+  createContext,
+  useContext,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  Calendar,
+  Clock,
+  Target,
+  Trash2,
+  CheckCircle,
+  AlertCircle,
+  Plus,
+  ChevronRight,
+  Loader2,
+  AlertTriangle,
+  TrendingUp,
+  FolderOpen,
+  ListTodo,
+  Flag,
+  Edit3,
+  X,
+} from "lucide-react";
 
-interface OKRManagerProps {
+// ============================================================================
+// TYPES - Definizioni complete e strict
+// ============================================================================
+
+export type GoalStatus = "active" | "completed" | "paused" | "at_risk" | "archived";
+export type Priority = "critical" | "high" | "medium" | "low";
+export type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
+export type TimeBlockStatus = "planned" | "in_progress" | "completed" | "cancelled";
+
+export interface Goal {
+  id: string;
+  userId: string;
+  domainId?: string;
+  title: string;
+  description?: string;
+  status: GoalStatus;
+  priority: Priority;
+  targetDate?: Date | { toDate: () => Date } | string;
+  targetHours?: number;
+  weeklyHoursTarget?: number;
+  timeAllocationTarget?: number;
+  deleted?: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface KeyResult {
+  id: string;
+  userId?: string;
+  goalId: string;
+  title: string;
+  description?: string;
+  startValue?: number;
+  currentValue: number;
+  targetValue: number;
+  unit?: string;
+  progress?: number;
+  status?: GoalStatus;
+  deleted?: boolean;
+}
+
+export interface Project {
+  id: string;
+  userId: string;
+  goalId: string; // OBBLIGATORIO - specifica punto 3.1
+  name: string;
+  description?: string;
+  status?: GoalStatus;
+  priority?: Priority;
+  dueDate?: Date | { toDate: () => Date } | string;
+  weeklyHoursTarget?: number;
+  totalHoursTarget?: number;
+  deleted?: boolean;
+}
+
+export interface Task {
+  id: string;
+  userId: string;
+  goalId?: string;
+  projectId: string; // OBBLIGATORIO - specifica punto 3.2
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  priority?: Priority;
+  estimatedMinutes?: number;
+  dueDate?: Date | { toDate: () => Date } | string;
+  ifThenPlan?: string;
+  why?: string;
+  deleted?: boolean;
+}
+
+export interface TimeBlock {
+  id?: string;
+  userId?: string;
+  status?: TimeBlockStatus;
+  startTime?: Date | { toDate: () => Date } | string;
+  endTime?: Date | { toDate: () => Date } | string;
+  actualStartTime?: Date | { toDate: () => Date } | string;
+  actualEndTime?: Date | { toDate: () => Date } | string;
+  goalId?: string;
+  goalIds?: string[];
+  projectId?: string;
+  taskId?: string;
+}
+
+export interface OKRManagerProps {
   goals: Goal[];
   keyResults: KeyResult[];
   projects: Project[];
   tasks: Task[];
   timeBlocks?: TimeBlock[];
-  onCreateGoal: (goal: Partial<Goal>) => void;
-  onUpdateGoal: (id: string, updates: Partial<Goal>) => void;
-  onCreateKeyResult: (keyResult: Partial<KeyResult>) => void;
-  onUpdateKeyResult: (id: string, updates: Partial<KeyResult>) => void;
-  onCreateProject: (project: Partial<Project>) => void;
-  onUpdateProject: (id: string, updates: Partial<Project>) => void;
-  onDeleteProject?: (id: string) => void;
-  onCreateTask: (task: Partial<Task>) => void;
-  onUpdateTask: (id: string, updates: Partial<Task>) => void;
-  currentUserId?: string; // 🔥 CRITICAL FIX
+  currentUserId: string | undefined;
+  isLoading?: boolean;
+
+  // Callbacks CRUD
+  onCreateGoal: (goal: Partial<Goal>) => Promise<string | void> | string | void;
+  onUpdateGoal: (id: string, updates: Partial<Goal>) => Promise<void> | void;
+  onDeleteGoal?: (id: string) => Promise<void> | void;
+
+  onCreateKeyResult: (kr: Partial<KeyResult>) => Promise<string | void> | string | void;
+  onUpdateKeyResult: (id: string, updates: Partial<KeyResult>) => Promise<void> | void;
+  onDeleteKeyResult?: (id: string) => Promise<void> | void;
+
+  onCreateProject: (project: Partial<Project>) => Promise<string | void> | string | void;
+  onUpdateProject: (id: string, updates: Partial<Project>) => Promise<void> | void;
+  onDeleteProject?: (id: string) => Promise<void> | void;
+
+  onCreateTask: (task: Partial<Task>) => Promise<string | void> | string | void;
+  onUpdateTask: (id: string, updates: Partial<Task>) => Promise<void> | void;
+  onDeleteTask?: (id: string) => Promise<void> | void;
 }
 
-export default function OKRManager({
-  goals,
-  keyResults,
-  projects,
-  tasks,
-  timeBlocks = [],
-  onCreateGoal,
-  onUpdateGoal,
-  onCreateKeyResult,
-  onUpdateKeyResult,
-  onCreateProject,
-  onUpdateProject,
-  onDeleteProject,
-  onCreateTask,
-  onUpdateTask,
-  currentUserId // 🔥 CRITICAL FIX
-}: OKRManagerProps) {
-  const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState<'goal' | 'keyResult' | 'project' | 'task' | null>(null);
-  const [newItemData, setNewItemData] = useState<any>({});
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  
-  // 🔥 PSICOPATICO ENHANCEMENT: Key Result Editing
-  const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
-  const [showKeyResultModal, setShowKeyResultModal] = useState(false);
-  const [keyResultEditData, setKeyResultEditData] = useState<any>({});
+type CreateModalType = "goal" | "keyResult" | "project" | "task" | null;
+type Mode = "planned" | "actual";
 
-  // Refs to maintain focus
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+// ============================================================================
+// CONTEXT - Per evitare prop drilling
+// ============================================================================
 
-  // Optimized callbacks to prevent re-render issues
-  const handleTitleChange = useCallback((value: string) => {
-    const fieldName = showCreateModal === 'project' ? 'name' : 'title';
-    setNewItemData((prev: any) => ({ ...prev, [fieldName]: value }));
-  }, [showCreateModal]);
+interface OKRContextValue {
+  currentUserId: string | undefined;
+  selectedGoalId: string | null;
+  selectedProjectId: string | null;
+  setSelectedGoalId: (id: string | null) => void;
+  setSelectedProjectId: (id: string | null) => void;
+  timeBlocks: TimeBlock[];
+  projects: Project[];
+  tasks: Task[];
+  keyResults: KeyResult[];
+}
 
-  const handleDescriptionChange = useCallback((value: string) => {
-    setNewItemData((prev: any) => ({ ...prev, description: value }));
-  }, []);
+const OKRContext = createContext<OKRContextValue | null>(null);
 
-  const getGoalKeyResults = (goalId: string) => {
-    return keyResults.filter(kr => kr.goalId === goalId);
-  };
+function useOKRContext() {
+  const ctx = useContext(OKRContext);
+  if (!ctx) throw new Error("useOKRContext must be used within OKRManager");
+  return ctx;
+}
 
-  const getGoalProjects = (goalId: string) => {
-    return projects.filter(p => p.goalId === goalId);
-  };
+// ============================================================================
+// UTILITIES - Funzioni pure e robuste
+// ============================================================================
 
-  const getProjectTasks = (projectId: string) => {
-    return tasks.filter(t => t.projectId === projectId);
-  };
-
-  // 🔥 P1 FIX: Hours calculation utilities with ACTUAL vs PLANNED distinction
-  const calculateProjectPlannedHours = (projectId: string): number => {
-    return timeBlocks
-      .filter(block => block.projectId === projectId)
-      .reduce((total, block) => {
-        const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
-        return total + (durationMs / (1000 * 60 * 60)); // Convert to hours
-      }, 0);
-  };
-
-  // 🔥 P1 FIX: Calculate ACTUAL completed hours for projects using safe date parsing
-  const calculateProjectActualHours = (projectId: string): number => {
-    return timeBlocks
-      .filter(block => block.projectId === projectId && block.status === 'completed')
-      .reduce((total, block) => {
-        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
-        const startTime = block.actualStartTime ? toDateSafe(block.actualStartTime) : toDateSafe(block.startTime);
-        const endTime = block.actualEndTime ? toDateSafe(block.actualEndTime) : toDateSafe(block.endTime);
-        const durationMs = getDurationSafe(startTime, endTime);
-        return total + msToHours(durationMs);
-      }, 0);
-  };
-
-  const calculateGoalPlannedHours = (goalId: string): number => {
-    // Sum from direct goal time blocks
-    const directGoalHours = timeBlocks
-      .filter(block => block.goalId === goalId || (block.goalIds && block.goalIds.includes(goalId)))
-      .reduce((total, block) => {
-        const durationMs = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
-        const hours = durationMs / (1000 * 60 * 60);
-        // If block has goal allocation, use it
-        if (block.goalAllocation && block.goalAllocation[goalId]) {
-          return total + (hours * block.goalAllocation[goalId] / 100);
-        }
-        return total + hours;
-      }, 0);
-    
-    // Sum from project time blocks
-    const goalProjects = getGoalProjects(goalId);
-    const projectHours = goalProjects.reduce((total, project) => {
-      return total + calculateProjectPlannedHours(project.id);
-    }, 0);
-    
-    return directGoalHours + projectHours;
-  };
-
-  // 🔥 P1 FIX: Calculate ACTUAL completed hours for goals
-  const calculateGoalActualHours = (goalId: string): number => {
-    // Sum from direct goal time blocks (completed only)
-    const directGoalHours = timeBlocks
-      .filter(block => 
-        (block.goalId === goalId || (block.goalIds && block.goalIds.includes(goalId))) &&
-        block.status === 'completed'
-      )
-      .reduce((total, block) => {
-        const startTime = block.actualStartTime ? new Date(block.actualStartTime) : new Date(block.startTime);
-        const endTime = block.actualEndTime ? new Date(block.actualEndTime) : new Date(block.endTime);
-        const durationMs = endTime.getTime() - startTime.getTime();
-        const hours = durationMs / (1000 * 60 * 60);
-        // If block has goal allocation, use it
-        if (block.goalAllocation && block.goalAllocation[goalId]) {
-          return total + (hours * block.goalAllocation[goalId] / 100);
-        }
-        return total + hours;
-      }, 0);
-    
-    // Sum from project time blocks (completed only)
-    const goalProjects = getGoalProjects(goalId);
-    const projectHours = goalProjects.reduce((total, project) => {
-      return total + calculateProjectActualHours(project.id);
-    }, 0);
-    
-    return directGoalHours + projectHours;
-  };
-
-  // 🔥 OPTIMIZED: Memoized progress calculation for all goals
-  const goalProgressMap = useMemo(() => {
-    const progressMap = new Map<string, number>();
-    
-    goals.forEach(goal => {
-      const goalKeyResults = getGoalKeyResults(goal.id);
-      const goalProjects = getGoalProjects(goal.id);
-      
-      console.log('🎯 OKR_PROGRESS_DEBUG:', {
-        goalId: goal.id,
-        goalTitle: goal.title,
-        keyResultsCount: goalKeyResults.length,
-        projectsCount: goalProjects.length
-      });
-      
-      // Strategy 1: KeyResults with targetValue
-      const validKeyResults = goalKeyResults.filter(kr => kr.targetValue > 0);
-      if (validKeyResults.length > 0) {
-        const totalProgress = validKeyResults.reduce((sum, kr) => {
-          const krProgress = (kr.currentValue / kr.targetValue) * 100;
-          console.log(`  KeyResult ${kr.title}: ${kr.currentValue}/${kr.targetValue} = ${krProgress}%`);
-          return sum + Math.min(100, krProgress);
-        }, 0);
-        const avgProgress = totalProgress / validKeyResults.length;
-        console.log(`  Traditional KR Progress: ${avgProgress}%`);
-        progressMap.set(goal.id, avgProgress);
-        return;
+function toDateSafe(x: unknown): Date | null {
+  if (!x) return null;
+  if (x instanceof Date) return isNaN(x.getTime()) ? null : x;
+  if (typeof x === "object" && x !== null && "toDate" in x) {
+    const fn = (x as { toDate: () => Date }).toDate;
+    if (typeof fn === "function") {
+      try {
+        const d = fn.call(x);
+        return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+      } catch {
+        return null;
       }
-      
-      // Strategy 2: Hours-based progress using ACTUAL hours vs TARGET hours
-      const actualHours = calculateGoalActualHours(goal.id);
-      const targetHours = goalProjects.reduce((sum, project) => {
-        return sum + (project.totalHoursTarget || 0);
-      }, 0);
-      
-      console.log(`  Hours-based calculation: ${actualHours}h actual / ${targetHours}h target`);
-      
-      if (targetHours > 0) {
-        const hoursProgress = Math.min(100, (actualHours / targetHours) * 100);
-        console.log(`  Hours Progress: ${hoursProgress}%`);
-        progressMap.set(goal.id, hoursProgress);
-        return;
-      }
-      
-      // Strategy 3: If no hours target but projects exist, check individual project progress
-      if (goalProjects.length > 0) {
-        console.log(`  No hours target set, but ${goalProjects.length} projects exist`);
-        progressMap.set(goal.id, 0); // Show 0% to indicate no target
-        return;
-      }
-      
-      // Fallback: Show 0% but log that we have actual hours without targets
-      if (actualHours > 0) {
-        console.log(`  Fallback: ${actualHours}h actual but no targets set`);
-      }
-      
-      progressMap.set(goal.id, 0);
-    });
-    
-    return progressMap;
-  }, [goals, keyResults, projects, timeBlocks]);
-
-  const calculateGoalProgress = (goalId: string): number => {
-    // Use memoized progress calculation
-    return goalProgressMap.get(goalId) || 0;
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return 'text-green-600 bg-green-50';
-      case 'active': return 'text-blue-600 bg-blue-50';
-      case 'at_risk': return 'text-red-600 bg-red-50';
-      case 'paused': return 'text-yellow-600 bg-yellow-50';
-      default: return 'text-gray-600 bg-gray-50';
     }
-  };
+  }
+  if (typeof x === "string" || typeof x === "number") {
+    const d = new Date(x);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'critical': return 'text-red-800 bg-red-100 border border-red-200';
-      case 'high': return 'text-red-600 bg-red-50';
-      case 'medium': return 'text-yellow-600 bg-yellow-50';
-      case 'low': return 'text-green-600 bg-green-50';
-      default: return 'text-gray-600 bg-gray-50';
+function formatDateSafe(x: unknown): string {
+  const d = toDateSafe(x);
+  if (!d) return "—";
+  return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function formatISOSafe(x: unknown): string {
+  const d = toDateSafe(x);
+  return d ? d.toISOString() : "";
+}
+
+function computeDurationMinutes(start: unknown, end: unknown): number {
+  const s = toDateSafe(start);
+  const e = toDateSafe(end);
+  if (!s || !e) return 0;
+  const diff = (e.getTime() - s.getTime()) / 60000;
+  if (!Number.isFinite(diff) || diff < 0) return 0;
+  return Math.round(diff);
+}
+
+function formatHours(h: number): string {
+  if (!Number.isFinite(h) || h < 0) return "0";
+  return (Math.round(h * 10) / 10).toFixed(1);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function generateId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// Status helpers
+function statusAllowed(mode: Mode, status?: string): boolean {
+  if (!status) return false;
+  if (mode === "actual") return status === "completed";
+  return ["planned", "in_progress", "completed"].includes(status);
+}
+
+// ============================================================================
+// AGGREGATION - Calcoli deterministici (core fix anti double-count)
+// ============================================================================
+
+interface AggregationResult {
+  totalMinutes: number;
+  entriesCount: number;
+  debugInfo?: {
+    viaProject: number;
+    directGoal: number;
+    viaTask: number;
+  };
+}
+
+/**
+ * Aggrega i minuti di TimeBlocks per un Goal.
+ * Regola anti-doppio conteggio:
+ * - Se TB ha projectId di un project del goal → conta come "viaProject"
+ * - Se TB ha solo goalId/goalIds → conta come "directGoal"
+ * - Non conta mai lo stesso TB due volte
+ */
+function aggregateGoalMinutes(args: {
+  goalId: string;
+  mode: Mode;
+  timeBlocks: TimeBlock[];
+  projects: Project[];
+  userId: string;
+}): AggregationResult {
+  const { goalId, mode, timeBlocks, projects, userId } = args;
+
+  // Filtra per userId PRIMA di tutto
+  const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+
+  // Project IDs che appartengono a questo goal
+  const goalProjectIds = new Set(
+    projects.filter((p) => !p.deleted && p.goalId === goalId && p.userId === userId).map((p) => p.id)
+  );
+
+  const seen = new Set<string>();
+  let totalMinutes = 0;
+  let viaProject = 0;
+  let directGoal = 0;
+  let viaTask = 0;
+
+  for (const tb of userTimeBlocks) {
+    if (!statusAllowed(mode, tb.status)) continue;
+
+    // Genera chiave unica per dedupe
+    const startISO = formatISOSafe(tb.startTime);
+    const endISO = formatISOSafe(tb.endTime);
+    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.projectId || ""}|${tb.taskId || ""}|${tb.status}`;
+
+    if (seen.has(uniqueKey)) continue;
+
+    const inGoalProject = !!tb.projectId && goalProjectIds.has(tb.projectId);
+    const matchesGoal = tb.goalId === goalId || (Array.isArray(tb.goalIds) && tb.goalIds.includes(goalId));
+
+    // Priorità: viaProject > directGoal (evita double-count)
+    let shouldCount = false;
+    if (inGoalProject) {
+      shouldCount = true;
+      if (tb.taskId) viaTask++;
+      else viaProject++;
+    } else if (matchesGoal) {
+      shouldCount = true;
+      directGoal++;
     }
-  };
 
-  const handleCreateItem = () => {
+    if (!shouldCount) continue;
+
+    seen.add(uniqueKey);
+
+    // Calcola durata
+    let duration: number;
+    if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
+      duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
+    } else {
+      duration = computeDurationMinutes(tb.startTime, tb.endTime);
+    }
+
+    totalMinutes += duration;
+  }
+
+  return {
+    totalMinutes,
+    entriesCount: seen.size,
+    debugInfo: { viaProject, directGoal, viaTask },
+  };
+}
+
+/**
+ * Aggrega i minuti di TimeBlocks per un Project.
+ */
+function aggregateProjectMinutes(args: {
+  projectId: string;
+  mode: Mode;
+  timeBlocks: TimeBlock[];
+  userId: string;
+}): AggregationResult {
+  const { projectId, mode, timeBlocks, userId } = args;
+
+  const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+  const seen = new Set<string>();
+  let totalMinutes = 0;
+
+  for (const tb of userTimeBlocks) {
+    if (!statusAllowed(mode, tb.status)) continue;
+    if (tb.projectId !== projectId) continue;
+
+    const startISO = formatISOSafe(tb.startTime);
+    const endISO = formatISOSafe(tb.endTime);
+    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.taskId || ""}|${tb.status}`;
+
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
+
+    let duration: number;
+    if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
+      duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
+    } else {
+      duration = computeDurationMinutes(tb.startTime, tb.endTime);
+    }
+
+    totalMinutes += duration;
+  }
+
+  return { totalMinutes, entriesCount: seen.size };
+}
+
+/**
+ * Aggrega i minuti di TimeBlocks per una Task.
+ */
+function aggregateTaskMinutes(args: {
+  taskId: string;
+  mode: Mode;
+  timeBlocks: TimeBlock[];
+  userId: string;
+}): AggregationResult {
+  const { taskId, mode, timeBlocks, userId } = args;
+
+  const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+  const seen = new Set<string>();
+  let totalMinutes = 0;
+
+  for (const tb of userTimeBlocks) {
+    if (!statusAllowed(mode, tb.status)) continue;
+    if (tb.taskId !== taskId) continue;
+
+    const startISO = formatISOSafe(tb.startTime);
+    const endISO = formatISOSafe(tb.endTime);
+    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.status}`;
+
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
+
+    let duration: number;
+    if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
+      duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
+    } else {
+      duration = computeDurationMinutes(tb.startTime, tb.endTime);
+    }
+
+    totalMinutes += duration;
+  }
+
+  return { totalMinutes, entriesCount: seen.size };
+}
+
+// ============================================================================
+// HOOKS CUSTOM - Logica riutilizzabile
+// ============================================================================
+
+function useGoalMetrics(goal: Goal) {
+  const { timeBlocks, projects, keyResults, currentUserId } = useOKRContext();
+
+  return useMemo(() => {
     if (!currentUserId) {
-      console.error('Cannot create item: userId not available');
-      return;
+      return { 
+        plannedHours: 0, 
+        actualHours: 0, 
+        targetHours: 0, 
+        weeklyHoursTarget: 0,
+        progress: 0, 
+        krProgress: null 
+      };
     }
 
-    const now = new Date();
-    const baseData = {
-      id: `${showCreateModal}-${Date.now()}`,
+    const plannedResult = aggregateGoalMinutes({
+      goalId: goal.id,
+      mode: "planned",
+      timeBlocks,
+      projects,
       userId: currentUserId,
-      domainId: 'default',
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    switch (showCreateModal) {
-      case 'goal':
-        onCreateGoal({ 
-          ...newItemData, 
-          ...baseData, 
-          status: 'active',
-          // Set default values for new analytics fields
-          timeAllocationTarget: newItemData.timeAllocationTarget || 0,
-          priority: newItemData.priority || 'medium',
-          category: newItemData.category || 'important_not_urgent',
-          complexity: newItemData.complexity || 'moderate',
-          estimatedHours: newItemData.estimatedHours || undefined
-        });
-        break;
-      case 'keyResult':
-        onCreateKeyResult({ 
-          ...newItemData, 
-          ...baseData, 
-          goalId: selectedGoal?.id,
-          currentValue: 0,
-          progress: 0,
-          status: 'active'
-        });
-        break;
-      case 'project':
-        onCreateProject({ 
-          ...newItemData, 
-          ...baseData, 
-          goalId: selectedGoal?.id,
-          status: 'active',
-          priority: 'medium'
-        });
-        break;
-      case 'task':
-        console.log('ADD_TASK_CLICK', { 
-          selectedGoal: selectedGoal?.id, 
-          selectedProject: selectedProject?.id,
-          currentUserId,
-          newItemData 
-        });
-        
-        // 🔥 FIX: Ensure task has proper project and goal IDs
-        const taskData = { 
-          ...newItemData, 
-          ...baseData,
-          projectId: selectedProject?.id || newItemData.projectId,
-          goalId: selectedGoal?.id || newItemData.goalId,
-          status: 'pending',
-          priority: 'medium',
-          estimatedMinutes: 60
-        };
-        
-        console.log('CREATE_TASK_START', taskData);
-        
-        try {
-          onCreateTask(taskData);
-          console.log('CREATE_TASK_SUCCESS', taskData);
-        } catch (error) {
-          console.error('CREATE_TASK_ERROR', error);
-        }
-        break;
-    }
-
-    setShowCreateModal(null);
-    setNewItemData({});
-  };
-
-  const GoalCard = ({ goal }: { goal: Goal }) => {
-    const progress = calculateGoalProgress(goal.id);
-    const goalKeyResults = getGoalKeyResults(goal.id);
-    const goalProjects = getGoalProjects(goal.id);
-    
-    return (
-      <div 
-        className={`bg-white border-2 rounded-lg p-6 cursor-pointer transition-all ${
-          selectedGoal?.id === goal.id ? 'border-blue-500 shadow-md' : 'border-gray-200 hover:border-gray-300'
-        }`}
-        onClick={() => setSelectedGoal(selectedGoal?.id === goal.id ? null : goal)}
-      >
-        {/* Header with title and percentage - responsive layout */}
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4 gap-3">
-          <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2 truncate">{goal.title}</h3>
-            <p className="text-gray-600 text-sm mb-3 line-clamp-2">{goal.description}</p>
-          </div>
-          
-          {/* Progress percentage - always visible, mobile-friendly */}
-          <div className="text-right sm:text-right sm:ml-4 flex-shrink-0">
-            {(() => {
-              const hasKRs = goalKeyResults.filter(kr => kr.targetValue > 0).length > 0;
-              const hasHourTargets = goalProjects.some(p => p.totalHoursTarget && p.totalHoursTarget > 0);
-              const actualHours = calculateGoalActualHours(goal.id);
-              const targetHours = goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0);
-              
-              if (hasKRs) {
-                return (
-                  <>
-                    <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
-                    <div className="text-xs text-gray-500">KR Progress</div>
-                  </>
-                );
-              } else if (hasHourTargets) {
-                return (
-                  <>
-                    <div className="text-2xl font-bold text-blue-600">{Math.round(progress)}%</div>
-                    <div className="text-xs text-gray-500">Hours Progress</div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {formatHours(actualHours)}h / {formatHours(targetHours)}h
-                    </div>
-                  </>
-                );
-              } else {
-                return (
-                  <>
-                    <div className="text-2xl font-bold text-gray-400">—</div>
-                    <div className="text-xs text-gray-500">No Target</div>
-                    {actualHours > 0 && (
-                      <div className="text-xs text-gray-400 mt-1">
-                        {formatHours(actualHours)}h logged
-                      </div>
-                    )}
-                  </>
-                );
-              }
-            })()}
-          </div>
-        </div>
-
-        {/* Badges - responsive wrap */}
-        <div className="flex flex-wrap items-center gap-2 text-sm mb-3">
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(goal.status)}`}>
-            {goal.status}
-          </span>
-          <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(goal.priority)}`}>
-            {goal.priority}
-          </span>
-          <span className="text-gray-500 flex items-center">
-            <Calendar className="w-4 h-4 mr-1" />
-            <span className="text-xs">{goal.targetDate.toLocaleDateString()}</span>
-          </span>
-        </div>
-        
-        {/* Time allocation info */}
-        <div className="space-y-1 mb-4">
-          {goal.timeAllocationTarget > 0 && (
-            <div className="text-xs text-blue-600 flex items-center">
-              <Clock className="w-3 h-3 mr-1" />
-              Target: {goal.timeAllocationTarget}hrs/week
-            </div>
-          )}
-          <div className="text-xs text-green-600 flex items-center">
-            <Target className="w-3 h-3 mr-1" />
-            Planned: {formatHours(calculateGoalPlannedHours(goal.id))}hrs
-          </div>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-          <div
-            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-
-        {/* Key Results & Projects Summary */}
-        <div className="flex items-center justify-between text-sm text-gray-600">
-          <span>{goalKeyResults.length} Key Results</span>
-          <span>{goalProjects.length} Projects</span>
-        </div>
-      </div>
-    );
-  };
-
-  // 🔥 PSICOPATICO ENHANCEMENT: Handle Key Result Update
-  const handleUpdateKeyResultProgress = (keyResult: KeyResult) => {
-    setEditingKeyResult(keyResult);
-    setKeyResultEditData({
-      currentValue: keyResult.currentValue,
-      targetValue: keyResult.targetValue,
-      status: keyResult.status,
-      title: keyResult.title,
-      description: keyResult.description,
-      unit: keyResult.unit
     });
-    setShowKeyResultModal(true);
-  };
 
-  const saveKeyResultUpdate = () => {
-    if (!editingKeyResult) return;
-    
-    // 🧮 Auto-calculate progress percentage
-    const progress = keyResultEditData.targetValue > 0 
-      ? Math.min(100, Math.max(0, (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100))
-      : 0;
-    
-    // 🎯 Auto-update status based on progress
-    let status = keyResultEditData.status;
-    if (progress >= 100) {
-      status = 'completed';
-    } else if (progress >= 70) {
-      status = 'active';
-    } else if (progress < 30) {
-      status = 'at_risk';
+    const actualResult = aggregateGoalMinutes({
+      goalId: goal.id,
+      mode: "actual",
+      timeBlocks,
+      projects,
+      userId: currentUserId,
+    });
+
+    const plannedHours = plannedResult.totalMinutes / 60;
+    const actualHours = actualResult.totalMinutes / 60;
+
+    // Weekly hours target
+    const weeklyHoursTarget = goal.weeklyHoursTarget || 0;
+
+    // Total target hours: priorità goal.targetHours > goal.timeAllocationTarget > somma projects
+    let targetHours = 0;
+    if (goal.targetHours && goal.targetHours > 0) {
+      targetHours = goal.targetHours;
+    } else if (goal.timeAllocationTarget && goal.timeAllocationTarget > 0) {
+      targetHours = goal.timeAllocationTarget;
+    } else {
+      // Fallback: somma target ore dei progetti
+      const goalProjects = projects.filter((p) => !p.deleted && p.goalId === goal.id && p.userId === currentUserId);
+      targetHours = goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0);
     }
-    
-    const updates = {
-      ...keyResultEditData,
+
+    // Progress basato su ore totali
+    const hoursProgress = targetHours > 0 ? clamp((actualHours / targetHours) * 100, 0, 100) : 0;
+
+    // Progress basato su Key Results (se esistono)
+    const goalKRs = keyResults.filter((kr) => !kr.deleted && kr.goalId === goal.id && kr.targetValue > 0);
+    let krProgress: number | null = null;
+
+    if (goalKRs.length > 0) {
+      const avgKR =
+        goalKRs.reduce((sum, kr) => {
+          const start = kr.startValue || 0;
+          const current = kr.currentValue || 0;
+          const target = kr.targetValue || 0;
+          const range = target - start;
+          const pct = range > 0 ? ((current - start) / range) * 100 : 0;
+          return sum + clamp(pct, 0, 100);
+        }, 0) / goalKRs.length;
+
+      krProgress = Math.round(avgKR);
+    }
+
+    // Progress finale: se ci sono KR validi, usa quelli, altrimenti ore
+    const progress = krProgress !== null ? krProgress : Math.round(hoursProgress);
+
+    return { plannedHours, actualHours, targetHours, weeklyHoursTarget, progress, krProgress };
+  }, [goal, timeBlocks, projects, keyResults, currentUserId]);
+}
+
+function useProjectMetrics(project: Project) {
+  const { timeBlocks, tasks, currentUserId } = useOKRContext();
+
+  return useMemo(() => {
+    if (!currentUserId) {
+      return { plannedHours: 0, actualHours: 0, completedTasks: 0, totalTasks: 0, progress: 0 };
+    }
+
+    const plannedResult = aggregateProjectMinutes({
+      projectId: project.id,
+      mode: "planned",
+      timeBlocks,
+      userId: currentUserId,
+    });
+
+    const actualResult = aggregateProjectMinutes({
+      projectId: project.id,
+      mode: "actual",
+      timeBlocks,
+      userId: currentUserId,
+    });
+
+    const projectTasks = tasks.filter(
+      (t) => !t.deleted && t.projectId === project.id && t.userId === currentUserId
+    );
+    const completedTasks = projectTasks.filter((t) => t.status === "completed").length;
+    const totalTasks = projectTasks.length;
+
+    // Progress: combinazione task completion + ore
+    let progress = 0;
+    if (totalTasks > 0) {
+      progress = (completedTasks / totalTasks) * 100;
+    } else if (project.totalHoursTarget && project.totalHoursTarget > 0) {
+      progress = clamp((actualResult.totalMinutes / 60 / project.totalHoursTarget) * 100, 0, 100);
+    }
+
+    return {
+      plannedHours: plannedResult.totalMinutes / 60,
+      actualHours: actualResult.totalMinutes / 60,
+      completedTasks,
+      totalTasks,
       progress: Math.round(progress),
-      status,
-      updatedAt: new Date()
     };
-    
-    console.log('🔥 PSICOPATICO: Updating Key Result:', {
-      keyResultId: editingKeyResult.id,
-      oldProgress: editingKeyResult.progress,
-      newProgress: progress,
-      oldStatus: editingKeyResult.status,
-      newStatus: status
-    });
-    
-    onUpdateKeyResult(editingKeyResult.id, updates);
-    setShowKeyResultModal(false);
-    setEditingKeyResult(null);
-    setKeyResultEditData({});
-  };
+  }, [project, timeBlocks, tasks, currentUserId]);
+}
 
-  const KeyResultCard = ({ keyResult }: { keyResult: KeyResult }) => (
-    <div 
-      className="bg-gray-50 border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-all cursor-pointer group"
-      onClick={() => handleUpdateKeyResultProgress(keyResult)}
-    >
-      <div className="flex items-start justify-between mb-2">
-        <h4 className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{keyResult.title}</h4>
-        <div className="flex items-center space-x-2">
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(keyResult.status)}`}>
-            {keyResult.status}
-          </span>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 text-xs font-bold">
-            ✏️ EDIT
-          </div>
-        </div>
-      </div>
-      
-      <p className="text-sm text-gray-600 mb-3">{keyResult.description}</p>
-      
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm text-gray-500 font-mono">
-          <span className="font-bold text-blue-600">{keyResult.currentValue}</span> / {keyResult.targetValue} {keyResult.unit}
-        </span>
-        <span className="text-lg font-bold text-blue-600">
-          {Math.round(keyResult.progress)}%
-        </span>
-      </div>
-      
-      <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-        <div
-          className={`h-2 rounded-full transition-all duration-500 ${
-            keyResult.progress >= 100 ? 'bg-green-500' :
-            keyResult.progress >= 70 ? 'bg-blue-500' :
-            keyResult.progress >= 30 ? 'bg-yellow-500' : 'bg-red-500'
-          }`}
-          style={{ width: `${Math.min(100, keyResult.progress)}%` }}
-        />
-      </div>
-      
-      <div className="text-xs text-center text-gray-500 group-hover:text-blue-600 transition-colors">
-        Click to update progress
-      </div>
-    </div>
-  );
+function useTaskMetrics(task: Task) {
+  const { timeBlocks, currentUserId } = useOKRContext();
 
-  const ProjectCard = ({ project }: { project: Project }) => {
-    const projectTasks = getProjectTasks(project.id);
-    const completedTasks = projectTasks.filter(t => t.status === 'completed').length;
-    const progress = projectTasks.length > 0 ? (completedTasks / projectTasks.length) * 100 : 0;
-    
-    return (
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <div className="flex items-start justify-between mb-2">
-          <h4 className="font-medium text-gray-900">{project.name}</h4>
-          <div className="flex items-center space-x-2">
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(project.priority)}`}>
-              {project.priority}
-            </span>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
-              {project.status}
-            </span>
-            {onDeleteProject && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm(`Delete project "${project.name}"? This will also remove ${projectTasks.length} tasks.`)) {
-                    onDeleteProject(project.id);
-                  }
-                }}
-                className="text-red-500 hover:text-red-700 text-sm px-2 py-1 rounded"
-                title="Delete Project"
-              >
-                🗑️
-              </button>
-            )}
-          </div>
-        </div>
-        
-        <p className="text-sm text-gray-600 mb-3">{project.description}</p>
-        
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-gray-500">
-            {completedTasks} / {projectTasks.length} tasks completed
-          </span>
-          <span className="text-sm font-medium text-green-600">
-            {Math.round(progress)}%
-          </span>
-        </div>
-        
-        {/* Hours Progress */}
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">Planned Hours:</span>
-            <span className="font-medium text-blue-600">
-              {calculateProjectPlannedHours(project.id).toFixed(1)}h
-              {project.totalHoursTarget && (
-                <span className="text-gray-500">/{project.totalHoursTarget}h</span>
-              )}
-            </span>
-          </div>
-          {project.totalHoursTarget && project.totalHoursTarget > 0 && (
-            <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
-              <div
-                className="bg-blue-500 h-1 rounded-full transition-all duration-300"
-                style={{ 
-                  width: `${Math.min(100, (calculateProjectPlannedHours(project.id) / project.totalHoursTarget) * 100)}%` 
-                }}
-              />
-            </div>
-          )}
-        </div>
-        
-        <div className="w-full bg-gray-200 rounded-full h-1.5">
-          <div
-            className="bg-green-500 h-1.5 rounded-full transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        
-        <div className="mt-2 space-y-1">
-          {project.dueDate && (
-            <div className="text-xs text-gray-500 flex items-center">
-              <Clock className="w-3 h-3 mr-1" />
-              Due: {project.dueDate.toLocaleDateString()}
-            </div>
-          )}
-          {project.weeklyHoursTarget && (
-            <div className="text-xs text-blue-600 flex items-center">
-              <Clock className="w-3 h-3 mr-1" />
-              Weekly: {project.weeklyHoursTarget}hrs
-            </div>
-          )}
-          {project.totalHoursTarget && (
-            <div className="text-xs text-green-600 flex items-center">
-              <Target className="w-3 h-3 mr-1" />
-              Total: {project.totalHoursTarget}hrs
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
+  return useMemo(() => {
+    if (!currentUserId) {
+      return { plannedMinutes: 0, actualMinutes: 0, progress: 0 };
+    }
 
-  const TaskCard = ({ task }: { task: Task }) => (
-    <div className="bg-white border border-gray-200 rounded-lg p-3">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center space-x-2 mb-1">
-            {task.status === 'completed' ? (
-              <CheckCircle className="w-4 h-4 text-green-600" />
-            ) : task.status === 'in_progress' ? (
-              <Clock className="w-4 h-4 text-blue-600" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-gray-400" />
-            )}
-            <h5 className="font-medium text-gray-900 text-sm">{task.title}</h5>
-          </div>
-          
-          {task.description && (
-            <p className="text-xs text-gray-600 mb-2">{task.description}</p>
-          )}
-          
-          <div className="flex items-center space-x-3 text-xs text-gray-500">
-            <span className={`px-1.5 py-0.5 rounded text-xs ${getPriorityColor(task.priority)}`}>
-              {task.priority}
-            </span>
-            <span>{task.estimatedMinutes}min</span>
-            {task.dueDate && (
-              <span>Due: {task.dueDate.toLocaleDateString()}</span>
-            )}
-          </div>
-          
-          {task.ifThenPlan && (
-            <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
-              <strong>If-Then:</strong> {task.ifThenPlan}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const CreateModal = () => {
-    if (!showCreateModal) return null;
-    if (typeof window === 'undefined') return null; // SSR safety
-
-    const modalTitle = {
-      goal: 'Create New Goal',
-      keyResult: 'Create Key Result',
-      project: 'Create Project',
-      task: 'Create Task'
-    }[showCreateModal];
-
-    // Debug: Log current state
-    console.log('CreateModal State:', { 
-      showCreateModal, 
-      newItemData,
-      titleValue: showCreateModal === 'project' ? newItemData.name : newItemData.title,
-      descriptionValue: newItemData.description
+    const plannedResult = aggregateTaskMinutes({
+      taskId: task.id,
+      mode: "planned",
+      timeBlocks,
+      userId: currentUserId,
     });
 
-    const modalContent = (
-      <div 
-        className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
-        style={{ 
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)'
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            setShowCreateModal(null);
-            setNewItemData({});
-          }
-        }}
-      >
-        <div 
-          className="bg-white rounded-lg shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
-          style={{
-            transform: 'translateZ(0)', // Force hardware acceleration
-            position: 'relative',
-            zIndex: 10000
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-gray-900">{modalTitle}</h3>
-              <button
-                onClick={() => {
-                  setShowCreateModal(null);
-                  setNewItemData({});
-                }}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
-                type="button"
-              >
-                ×
-              </button>
-            </div>
-          
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {showCreateModal === 'keyResult' ? 'Key Result' : 'Title'}
-                </label>
-                <input
-                  ref={titleInputRef}
-                  id="modal-title-input"
-                  type="text"
-                  value={showCreateModal === 'project' ? (newItemData.name || '') : (newItemData.title || '')}
-                  onChange={(e) => handleTitleChange(e.target.value)}
-                  style={{
-                    color: 'black',
-                    backgroundColor: 'white',
-                    border: '2px solid #007bff',
-                    fontSize: '16px'
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder={`Enter ${showCreateModal} title`}
-                  autoFocus
-                  autoComplete="off"
-                />
-            </div>
-            
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <textarea
-                  ref={descriptionInputRef}
-                  id="modal-description-input"
-                  value={newItemData.description || ''}
-                  onChange={(e) => handleDescriptionChange(e.target.value)}
-                  style={{
-                    color: 'black',
-                    backgroundColor: 'white',
-                    border: '2px solid #007bff',
-                    fontSize: '16px'
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  rows={3}
-                  placeholder="Description"
-                  autoComplete="off"
-                />
-            </div>
+    const actualResult = aggregateTaskMinutes({
+      taskId: task.id,
+      mode: "actual",
+      timeBlocks,
+      userId: currentUserId,
+    });
 
-            {showCreateModal === 'goal' && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
-                  <input
-                    id="modal-date-input"
-                    type="date"
-                    value={newItemData.targetDate ? newItemData.targetDate.toISOString().split('T')[0] : ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, targetDate: new Date(e.target.value) })}
-                    style={{
-                      color: '#111827',
-                      backgroundColor: '#ffffff',
-                      WebkitTextFillColor: '#111827',
-                      textShadow: 'none'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  />
-                </div>
+    const estimated = task.estimatedMinutes || 0;
+    let progress = 0;
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Time Allocation Target (hrs/week)</label>
-                    <input
-                      id="modal-time-allocation-input"
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      value={newItemData.timeAllocationTarget || ''}
-                      onChange={(e) => setNewItemData({ ...newItemData, timeAllocationTarget: parseFloat(e.target.value) || 0 })}
-                      style={{
-                        color: 'black',
-                        backgroundColor: 'white',
-                        border: '1px solid #ccc'
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                      placeholder="e.g., 5.0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Total Hours</label>
-                    <input
-                      id="modal-estimated-hours-input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={newItemData.estimatedHours || ''}
-                      onChange={(e) => setNewItemData({ ...newItemData, estimatedHours: parseInt(e.target.value) || undefined })}
-                      style={{
-                        color: 'black',
-                        backgroundColor: 'white',
-                        border: '1px solid #ccc'
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                      placeholder="e.g., 100"
-                    />
-                  </div>
-                </div>
+    if (task.status === "completed") {
+      progress = 100;
+    } else if (estimated > 0) {
+      progress = clamp((actualResult.totalMinutes / estimated) * 100, 0, 99);
+    } else if (plannedResult.totalMinutes > 0) {
+      progress = clamp((actualResult.totalMinutes / plannedResult.totalMinutes) * 100, 0, 99);
+    }
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                    <select
-                      id="modal-goal-priority-select"
-                      value={newItemData.priority || 'medium'}
-                      onChange={(e) => setNewItemData({ ...newItemData, priority: e.target.value })}
-                      style={{
-                        color: '#111827',
-                        backgroundColor: '#ffffff',
-                        WebkitTextFillColor: '#111827',
-                        textShadow: 'none'
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Complexity</label>
-                    <select
-                      id="modal-complexity-select"
-                      value={newItemData.complexity || 'moderate'}
-                      onChange={(e) => setNewItemData({ ...newItemData, complexity: e.target.value })}
-                      style={{
-                        color: '#111827',
-                        backgroundColor: '#ffffff',
-                        WebkitTextFillColor: '#111827',
-                        textShadow: 'none'
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                    >
-                      <option value="simple">Simple</option>
-                      <option value="moderate">Moderate</option>
-                      <option value="complex">Complex</option>
-                      <option value="expert">Expert</option>
-                    </select>
-                  </div>
-                </div>
+    return {
+      plannedMinutes: plannedResult.totalMinutes,
+      actualMinutes: actualResult.totalMinutes,
+      progress: Math.round(progress),
+    };
+  }, [task, timeBlocks, currentUserId]);
+}
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category (Eisenhower Matrix)</label>
-                  <select
-                    id="modal-category-select"
-                    value={newItemData.category || 'important_not_urgent'}
-                    onChange={(e) => setNewItemData({ ...newItemData, category: e.target.value })}
-                    style={{
-                      color: '#111827',
-                      backgroundColor: '#ffffff',
-                      WebkitTextFillColor: '#111827',
-                      textShadow: 'none'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  >
-                    <option value="urgent_important">Urgent & Important (Do First)</option>
-                    <option value="important_not_urgent">Important, Not Urgent (Schedule)</option>
-                    <option value="urgent_not_important">Urgent, Not Important (Delegate)</option>
-                    <option value="neither">Neither (Eliminate)</option>
-                  </select>
-                </div>
-              </>
-            )}
+// ============================================================================
+// UI COMPONENTS - Modulari e riutilizzabili
+// ============================================================================
 
-            {showCreateModal === 'keyResult' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Value</label>
-                  <input
-                    id="modal-target-value-input"
-                    type="number"
-                    value={newItemData.targetValue || ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, targetValue: parseInt(e.target.value) || 0 })}
-                    style={{
-                      color: 'black',
-                      backgroundColor: 'white',
-                      border: '1px solid #ccc'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-                  <input
-                    id="modal-unit-input"
-                    type="text"
-                    value={newItemData.unit || ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, unit: e.target.value })}
-                    style={{
-                      color: 'black',
-                      backgroundColor: 'white',
-                      border: '1px solid #ccc'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                    placeholder="e.g., users, $, %"
-                  />
-                </div>
-              </div>
-            )}
+// Status/Priority badges
+const STATUS_CONFIG: Record<string, { label: string; className: string; icon?: React.ReactNode }> = {
+  active: { label: "Active", className: "bg-blue-50 text-blue-700 border-blue-200" },
+  completed: { label: "Completed", className: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle className="w-3 h-3" /> },
+  paused: { label: "Paused", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+  at_risk: { label: "At Risk", className: "bg-red-50 text-red-700 border-red-200", icon: <AlertTriangle className="w-3 h-3" /> },
+  archived: { label: "Archived", className: "bg-gray-50 text-gray-500 border-gray-200" },
+  pending: { label: "Pending", className: "bg-gray-50 text-gray-600 border-gray-200" },
+  in_progress: { label: "In Progress", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  blocked: { label: "Blocked", className: "bg-red-50 text-red-700 border-red-200" },
+};
 
-            {showCreateModal === 'project' && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    value={newItemData.dueDate ? newItemData.dueDate.toISOString().split('T')[0] : ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, dueDate: e.target.value ? new Date(e.target.value) : undefined })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Weekly Hours Target</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      value={newItemData.weeklyHoursTarget || ''}
-                      onChange={(e) => setNewItemData({ ...newItemData, weeklyHoursTarget: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                      placeholder="e.g., 5.0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Total Hours Target</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={newItemData.totalHoursTarget || ''}
-                      onChange={(e) => setNewItemData({ ...newItemData, totalHoursTarget: parseInt(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                      placeholder="e.g., 100"
-                    />
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                  <select
-                    value={newItemData.priority || 'medium'}
-                    onChange={(e) => setNewItemData({ ...newItemData, priority: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-              </>
-            )}
-            
-            {showCreateModal === 'task' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                <select
-                  id="modal-priority-select"
-                  value={newItemData.priority || 'medium'}
-                  onChange={(e) => setNewItemData({ ...newItemData, priority: e.target.value })}
-                  style={{
-                    color: '#111827',
-                    backgroundColor: '#ffffff',
-                    WebkitTextFillColor: '#111827',
-                    textShadow: 'none'
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-            )}
+const PRIORITY_CONFIG: Record<Priority, { label: string; className: string }> = {
+  critical: { label: "Critical", className: "bg-red-100 text-red-800 border-red-300" },
+  high: { label: "High", className: "bg-orange-50 text-orange-700 border-orange-200" },
+  medium: { label: "Medium", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+  low: { label: "Low", className: "bg-green-50 text-green-700 border-green-200" },
+};
 
-            {showCreateModal === 'task' && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Minutes</label>
-                  <input
-                    id="modal-estimated-minutes-input"
-                    type="number"
-                    value={newItemData.estimatedMinutes || 60}
-                    onChange={(e) => setNewItemData({ ...newItemData, estimatedMinutes: parseInt(e.target.value) || 60 })}
-                    style={{
-                      color: 'black',
-                      backgroundColor: 'white',
-                      border: '1px solid #ccc'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">If-Then Plan</label>
-                  <textarea
-                    id="modal-if-then-input"
-                    value={newItemData.ifThenPlan || ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, ifThenPlan: e.target.value })}
-                    style={{
-                      color: 'black',
-                      backgroundColor: 'white',
-                      border: '1px solid #ccc'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                    rows={2}
-                    placeholder="If [context/time/location], then [specific action]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Why (Purpose)</label>
-                  <input
-                    id="modal-why-input"
-                    type="text"
-                    value={newItemData.why || ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, why: e.target.value })}
-                    style={{
-                      color: 'black',
-                      backgroundColor: 'white',
-                      border: '1px solid #ccc'
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                    placeholder="Why is this important?"
-                  />
-                </div>
-              </>
-            )}
-          </div>
-          
-            <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
-              <button
-                onClick={() => {
-                  setShowCreateModal(null);
-                  setNewItemData({});
-                }}
-                className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateItem}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                type="button"
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-
-    return createPortal(modalContent, document.body);
-  };
+function StatusBadge({ status }: { status?: string }) {
+  const config = status ? STATUS_CONFIG[status] : null;
+  if (!config) return <span className="text-xs text-gray-400">—</span>;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">OKR Management</h2>
-        <button
-          onClick={() => setShowCreateModal('goal')}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Goal</span>
-        </button>
-      </div>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${config.className}`}>
+      {config.icon}
+      {config.label}
+    </span>
+  );
+}
 
-      {/* Goals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {goals.length === 0 ? (
-          <div className="col-span-full">
-            <div className="card card-body text-center py-12">
-              <div className="text-6xl mb-4">🎯</div>
-              <h3 className="heading-2 mb-4">No Goals Yet</h3>
-              <p className="text-body mb-6">
-                Create your first goal to start organizing your objectives and key results.
-              </p>
-              <button
-                onClick={() => setShowCreateModal('goal')}
-                className="btn btn-primary"
-              >
-                🚀 Create First Goal
-              </button>
-            </div>
-          </div>
-        ) : (
-          goals.map(goal => (
-            <GoalCard key={goal.id} goal={goal} />
-          ))
+function PriorityBadge({ priority }: { priority?: Priority }) {
+  const config = priority ? PRIORITY_CONFIG[priority] : null;
+  if (!config) return null;
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border ${config.className}`}>
+      <Flag className="w-3 h-3" />
+      {config.label}
+    </span>
+  );
+}
+
+function ProgressBar({ progress, size = "md", color = "blue" }: { progress: number; size?: "sm" | "md"; color?: "blue" | "green" | "indigo" }) {
+  const heightClass = size === "sm" ? "h-1.5" : "h-2";
+  const colorClass = {
+    blue: "bg-blue-500",
+    green: "bg-green-500",
+    indigo: "bg-indigo-500",
+  }[color];
+
+  return (
+    <div className={`w-full bg-gray-200 rounded-full ${heightClass} overflow-hidden`}>
+      <div
+        className={`${colorClass} ${heightClass} rounded-full transition-all duration-500`}
+        style={{ width: `${clamp(progress, 0, 100)}%` }}
+      />
+    </div>
+  );
+}
+
+function MetricRow({ icon, label, value, subValue }: { icon: React.ReactNode; label: string; value: string; subValue?: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="flex items-center gap-1.5 text-gray-600">
+        {icon}
+        {label}
+      </span>
+      <span className="font-medium text-gray-900">
+        {value}
+        {subValue && <span className="text-gray-400 ml-1">{subValue}</span>}
+      </span>
+    </div>
+  );
+}
+
+// Empty state
+function EmptyState({ icon, title, description, action }: { icon: React.ReactNode; title: string; description: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3 text-gray-400">
+        {icon}
+      </div>
+      <h4 className="text-sm font-medium text-gray-900 mb-1">{title}</h4>
+      <p className="text-xs text-gray-500 mb-3">{description}</p>
+      {action}
+    </div>
+  );
+}
+
+// Loading skeleton
+function CardSkeleton() {
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-5 animate-pulse">
+      <div className="h-5 bg-gray-200 rounded w-3/4 mb-3" />
+      <div className="h-3 bg-gray-100 rounded w-1/2 mb-4" />
+      <div className="flex gap-2 mb-4">
+        <div className="h-6 bg-gray-100 rounded-full w-16" />
+        <div className="h-6 bg-gray-100 rounded w-14" />
+      </div>
+      <div className="h-2 bg-gray-200 rounded-full" />
+    </div>
+  );
+}
+
+// ============================================================================
+// MAIN CARDS
+// ============================================================================
+
+interface GoalCardProps {
+  goal: Goal;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete?: () => void;
+}
+
+function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
+  const metrics = useGoalMetrics(goal);
+
+  return (
+    <div
+      className={`
+        bg-white border-2 rounded-xl p-5 cursor-pointer transition-all duration-200
+        ${isSelected ? "border-blue-500 shadow-lg ring-2 ring-blue-100" : "border-gray-200 hover:border-gray-300 hover:shadow-md"}
+      `}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && onSelect()}
+      aria-pressed={isSelected}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-semibold text-gray-900 truncate">{goal.title}</h3>
+          {goal.description && (
+            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{goal.description}</p>
+          )}
+        </div>
+        {onDelete && (
+          <button
+            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            aria-label="Delete goal"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         )}
       </div>
 
-      {/* Selected Goal Details */}
-      {selectedGoal && (
-        <div className="bg-gray-50 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-xl font-semibold text-gray-900">{selectedGoal.title}</h3>
-              <div className="mt-2 flex flex-wrap gap-3 text-sm">
-                <span className={`px-2 py-1 rounded text-xs font-medium ${getPriorityColor(selectedGoal.priority)}`}>
-                  {selectedGoal.priority} priority
-                </span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700">
-                  {selectedGoal.complexity} complexity
-                </span>
-                <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-50 text-indigo-700">
-                  {selectedGoal.category.replace('_', ' & ').replace('urgent', 'Urgent').replace('important', 'Important').replace('not', 'Not')}
-                </span>
-                {selectedGoal.timeAllocationTarget > 0 && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                    {selectedGoal.timeAllocationTarget}hrs/week target
-                  </span>
-                )}
-                {selectedGoal.estimatedHours && (
-                  <span className="px-2 py-1 rounded text-xs font-medium bg-green-50 text-green-700">
-                    ~{selectedGoal.estimatedHours}hrs total
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setShowCreateModal('keyResult')}
-                className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Key Result</span>
-              </button>
-              <button
-                onClick={() => setShowCreateModal('project')}
-                className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Project</span>
-              </button>
-            </div>
-          </div>
+      {/* Badges */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <StatusBadge status={goal.status} />
+        <PriorityBadge priority={goal.priority} />
+        <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+          <Calendar className="w-3 h-3" />
+          {formatDateSafe(goal.targetDate)}
+        </span>
+      </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Key Results */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                <Target className="w-4 h-4 mr-2" />
-                Key Results
-              </h4>
-              <div className="space-y-3">
-                {getGoalKeyResults(selectedGoal.id).map(kr => (
-                  <KeyResultCard key={kr.id} keyResult={kr} />
-                ))}
-              </div>
-            </div>
+      {/* Metrics */}
+      <div className="space-y-2 mb-4">
+        {metrics.weeklyHoursTarget > 0 && (
+          <MetricRow
+            icon={<Calendar className="w-3.5 h-3.5" />}
+            label="Weekly Target"
+            value={`${formatHours(metrics.weeklyHoursTarget)}h`}
+          />
+        )}
+        <MetricRow
+          icon={<Target className="w-3.5 h-3.5" />}
+          label="Total Target"
+          value={metrics.targetHours > 0 ? `${formatHours(metrics.targetHours)}h` : "—"}
+        />
+        <MetricRow
+          icon={<Clock className="w-3.5 h-3.5" />}
+          label="Planned"
+          value={`${formatHours(metrics.plannedHours)}h`}
+        />
+        <MetricRow
+          icon={<TrendingUp className="w-3.5 h-3.5" />}
+          label="Actual"
+          value={`${formatHours(metrics.actualHours)}h`}
+          subValue={metrics.targetHours > 0 ? `/ ${formatHours(metrics.targetHours)}h` : undefined}
+        />
+      </div>
 
-            {/* Projects */}
-            <div>
-              <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                <TrendingUp className="w-4 h-4 mr-2" />
-                Projects
-              </h4>
-              <div className="space-y-3">
-                {getGoalProjects(selectedGoal.id).map(project => (
-                  <div key={project.id}>
-                    <ProjectCard project={project} />
-                    
-                    {/* Project Tasks */}
-                    <div className="mt-2 ml-4 space-y-2">
-                      {getProjectTasks(project.id).slice(0, 3).map(task => (
-                        <TaskCard key={task.id} task={task} />
-                      ))}
-                      {getProjectTasks(project.id).length > 3 && (
-                        <div className="text-xs text-gray-500 text-center py-1">
-                          +{getProjectTasks(project.id).length - 3} more tasks
-                        </div>
-                      )}
-                      <button
-                        onClick={() => {
-                          console.log('ADD_TASK_CLICK', { goalId: selectedGoal?.id, projectId: project.id, currentUserId });
-                          setSelectedProject(project);
-                          setNewItemData({ projectId: project.id, goalId: selectedGoal?.id });
-                          setShowCreateModal('task');
-                        }}
-                        className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600"
-                      >
-                        + Add Task
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+      {/* Progress */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-lg font-bold text-blue-600">{metrics.progress}%</span>
+          {metrics.krProgress !== null && (
+            <span className="text-xs text-gray-500">Based on Key Results</span>
+          )}
+        </div>
+        <ProgressBar progress={metrics.progress} />
+      </div>
+
+      {/* Selection indicator */}
+      {isSelected && (
+        <div className="mt-3 pt-3 border-t border-blue-100 flex items-center gap-1 text-xs text-blue-600">
+          <ChevronRight className="w-3 h-3" />
+          <span>Viewing details below</span>
         </div>
       )}
-
-      {/* Modals */}
-      <CreateModal />
-      <KeyResultEditModal />
     </div>
   );
+}
 
-  // 🔥 PSICOPATICO MODAL: Key Result Editor
-  function KeyResultEditModal() {
-    if (!showKeyResultModal || !editingKeyResult) return null;
-    if (typeof window === 'undefined') return null;
+interface KeyResultCardProps {
+  keyResult: KeyResult;
+  onEdit: () => void;
+  onDelete?: () => void;
+}
 
-    const modalContent = (
-      <div 
-        className="modal-portal fixed inset-0 z-[9999] flex items-center justify-center p-4" 
-        style={{ 
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)'
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            setShowKeyResultModal(false);
-            setEditingKeyResult(null);
-            setKeyResultEditData({});
-          }
-        }}
-      >
-        <div 
-          className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
-          style={{
-            transform: 'translateZ(0)',
-            position: 'relative',
-            zIndex: 10000
+function KeyResultCard({ keyResult, onEdit, onDelete }: KeyResultCardProps) {
+  const start = keyResult.startValue || 0;
+  const current = keyResult.currentValue || 0;
+  const target = keyResult.targetValue || 0;
+  const range = target - start;
+  const progress = range > 0 ? clamp(((current - start) / range) * 100, 0, 100) : 0;
+
+  return (
+    <div
+      className="bg-gray-50 border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-all cursor-pointer group"
+      onClick={onEdit}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && onEdit()}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex-1 min-w-0">
+          <h4 className="font-medium text-gray-900 truncate">{keyResult.title}</h4>
+          {keyResult.description && (
+            <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{keyResult.description}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 ml-2">
+          <StatusBadge status={keyResult.status} />
+          {onDelete && (
+            <button
+              className="p-1 rounded text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              aria-label="Delete key result"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-mono text-gray-600">
+          <span className="font-bold text-blue-600">{current}</span>
+          <span className="text-gray-400"> / {target}</span>
+          {keyResult.unit && <span className="ml-1 text-gray-400">{keyResult.unit}</span>}
+        </span>
+        <span className="text-lg font-bold text-blue-600">{Math.round(progress)}%</span>
+      </div>
+
+      <ProgressBar progress={progress} size="sm" />
+
+      <div className="mt-2 flex items-center gap-1 text-xs text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Edit3 className="w-3 h-3" />
+        <span>Click to edit</span>
+      </div>
+    </div>
+  );
+}
+
+interface ProjectCardProps {
+  project: Project;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete?: () => void;
+}
+
+function ProjectCard({ project, isSelected, onSelect, onDelete }: ProjectCardProps) {
+  const metrics = useProjectMetrics(project);
+
+  return (
+    <div
+      className={`
+        bg-white border rounded-lg p-4 cursor-pointer transition-all
+        ${isSelected ? "border-indigo-500 shadow-md ring-2 ring-indigo-100" : "border-gray-200 hover:border-gray-300"}
+      `}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && onSelect()}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <h4 className="font-medium text-gray-900 truncate flex-1">{project.name}</h4>
+        <div className="flex items-center gap-2 ml-2">
+          <PriorityBadge priority={project.priority} />
+          <StatusBadge status={project.status} />
+          {onDelete && (
+            <button
+              className="p-1 rounded text-gray-400 hover:text-red-500 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              aria-label="Delete project"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {project.description && (
+        <p className="text-sm text-gray-500 mb-3 line-clamp-2">{project.description}</p>
+      )}
+
+      <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+        <span className="flex items-center gap-1">
+          <ListTodo className="w-3.5 h-3.5" />
+          {metrics.completedTasks} / {metrics.totalTasks} tasks
+        </span>
+        <span className="flex items-center gap-1">
+          <Clock className="w-3.5 h-3.5" />
+          {formatHours(metrics.actualHours)}h
+          {project.totalHoursTarget && <span className="text-gray-400">/ {project.totalHoursTarget}h</span>}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-gray-500">Progress</span>
+        <span className="text-sm font-bold text-green-600">{metrics.progress}%</span>
+      </div>
+      <ProgressBar progress={metrics.progress} size="sm" color="green" />
+
+      {isSelected && (
+        <div className="mt-2 pt-2 border-t border-indigo-100 text-xs text-indigo-600">
+          Tasks shown below
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface TaskCardProps {
+  task: Task;
+  onToggleComplete: () => void;
+  onDelete?: () => void;
+}
+
+function TaskCard({ task, onToggleComplete, onDelete }: TaskCardProps) {
+  const metrics = useTaskMetrics(task);
+  const isCompleted = task.status === "completed";
+
+  return (
+    <div className={`bg-white border rounded-lg p-3 transition-all ${isCompleted ? "opacity-60" : ""}`}>
+      <div className="flex items-start gap-3">
+        <button
+          className={`
+            mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors
+            ${isCompleted ? "bg-green-500 border-green-500 text-white" : "border-gray-300 hover:border-green-400"}
+          `}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleComplete();
           }}
-          onClick={(e) => e.stopPropagation()}
+          aria-label={isCompleted ? "Mark as incomplete" : "Mark as complete"}
         >
-          <div className="p-6">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-bold text-gray-900 flex items-center">
-                🎯 Update Key Result
-              </h3>
+          {isCompleted && <CheckCircle className="w-3 h-3" />}
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <h5 className={`font-medium text-sm ${isCompleted ? "line-through text-gray-400" : "text-gray-900"}`}>
+              {task.title}
+            </h5>
+            {onDelete && (
               <button
-                onClick={() => {
-                  setShowKeyResultModal(false);
-                  setEditingKeyResult(null);
-                  setKeyResultEditData({});
+                className="p-1 rounded text-gray-400 hover:text-red-500 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
                 }}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none transition-colors"
-                type="button"
+                aria-label="Delete task"
               >
-                ×
+                <Trash2 className="w-3 h-3" />
               </button>
-            </div>
-            
-            {/* Key Result Info */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <h4 className="font-bold text-blue-900 mb-2">{editingKeyResult.title}</h4>
-              <p className="text-blue-700 text-sm">{editingKeyResult.description}</p>
-            </div>
-
-            <div className="space-y-6">
-              {/* Progress Input Section */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Current Value</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={keyResultEditData.currentValue || 0}
-                    onChange={(e) => setKeyResultEditData({
-                      ...keyResultEditData, 
-                      currentValue: parseFloat(e.target.value) || 0
-                    })}
-                    className="w-full px-4 py-3 text-lg font-bold border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
-                    style={{
-                      color: '#1e40af',
-                      backgroundColor: '#eff6ff',
-                      fontSize: '18px'
-                    }}
-                    autoFocus
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Target Value</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={keyResultEditData.targetValue || 0}
-                    onChange={(e) => setKeyResultEditData({
-                      ...keyResultEditData, 
-                      targetValue: parseFloat(e.target.value) || 0
-                    })}
-                    className="w-full px-4 py-3 text-lg font-bold border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all"
-                    style={{
-                      color: '#374151',
-                      backgroundColor: '#f9fafb',
-                      fontSize: '18px'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Unit Display */}
-              <div className="text-center">
-                <span className="inline-block px-4 py-2 bg-gray-100 rounded-full text-gray-700 font-medium">
-                  Unit: {keyResultEditData.unit || 'units'}
-                </span>
-              </div>
-
-              {/* Progress Preview */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h5 className="font-bold text-gray-900">Progress Preview</h5>
-                  <span className="text-2xl font-bold text-blue-600">
-                    {keyResultEditData.targetValue > 0 
-                      ? Math.round(Math.min(100, Math.max(0, (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100)))
-                      : 0}%
-                  </span>
-                </div>
-                
-                <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
-                  <div
-                    className="bg-blue-500 h-3 rounded-full transition-all duration-300"
-                    style={{ 
-                      width: `${keyResultEditData.targetValue > 0 
-                        ? Math.min(100, Math.max(0, (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100))
-                        : 0}%` 
-                    }}
-                  />
-                </div>
-                
-                <div className="text-center text-sm text-gray-600">
-                  {keyResultEditData.currentValue || 0} / {keyResultEditData.targetValue || 0} {keyResultEditData.unit || 'units'}
-                </div>
-              </div>
-
-              {/* Status Override (Optional) */}
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Status (Auto-calculated)</label>
-                <select
-                  value={(() => {
-                    const progress = keyResultEditData.targetValue > 0 
-                      ? (keyResultEditData.currentValue / keyResultEditData.targetValue) * 100
-                      : 0;
-                    if (progress >= 100) return 'completed';
-                    if (progress >= 70) return 'active';
-                    if (progress < 30) return 'at_risk';
-                    return 'active';
-                  })()}
-                  onChange={(e) => setKeyResultEditData({...keyResultEditData, status: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  style={{
-                    color: '#111827',
-                    backgroundColor: '#ffffff'
-                  }}
-                >
-                  <option value="active">🟡 Active</option>
-                  <option value="completed">🟢 Completed</option>
-                  <option value="at_risk">🔴 At Risk</option>
-                </select>
-              </div>
-            </div>
-            
-            {/* Action Buttons */}
-            <div className="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200">
-              <button
-                onClick={() => {
-                  setShowKeyResultModal(false);
-                  setEditingKeyResult(null);
-                  setKeyResultEditData({});
-                }}
-                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveKeyResultUpdate}
-                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-bold text-lg flex items-center space-x-2"
-                type="button"
-              >
-                <span>🚀</span>
-                <span>Update Progress</span>
-              </button>
-            </div>
+            )}
           </div>
+
+          {task.description && (
+            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{task.description}</p>
+          )}
+
+          <div className="flex items-center flex-wrap gap-2 mt-2">
+            <PriorityBadge priority={task.priority} />
+            <StatusBadge status={task.status} />
+            {task.estimatedMinutes && task.estimatedMinutes > 0 && (
+              <span className="text-xs text-gray-500 flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {task.estimatedMinutes}min
+              </span>
+            )}
+            {metrics.actualMinutes > 0 && (
+              <span className="text-xs text-indigo-600 flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" />
+                {metrics.actualMinutes}min logged
+              </span>
+            )}
+          </div>
+
+          {task.ifThenPlan && (
+            <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
+              <strong>If-Then:</strong> {task.ifThenPlan}
+            </div>
+          )}
+
+          {!isCompleted && metrics.progress > 0 && (
+            <div className="mt-2">
+              <ProgressBar progress={metrics.progress} size="sm" color="indigo" />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// MODALS
+// ============================================================================
+
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  actions?: React.ReactNode;
+}
+
+function Modal({ isOpen, onClose, title, children, actions }: ModalProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+
+    document.addEventListener("keydown", handleEsc);
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleEsc);
+      document.body.style.overflow = "";
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen || typeof window === "undefined") return null;
+
+  return createPortal(
+    <div
+      ref={overlayRef}
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => e.target === overlayRef.current && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 id="modal-title" className="text-xl font-bold text-gray-900">
+            {title}
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            aria-label="Close modal"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
+
+        {actions && (
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
+            {actions}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// Form input component
+function FormInput({
+  label,
+  type = "text",
+  value,
+  onChange,
+  placeholder,
+  required,
+  autoFocus,
+  min,
+  step,
+}: {
+  label: string;
+  type?: "text" | "number" | "date" | "textarea";
+  value: string | number;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  autoFocus?: boolean;
+  min?: number;
+  step?: number;
+}) {
+  const baseClass = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all";
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+        {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
+      {type === "textarea" ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`${baseClass} resize-none`}
+          rows={3}
+          autoFocus={autoFocus}
+        />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={baseClass}
+          autoFocus={autoFocus}
+          min={min}
+          step={step}
+        />
+      )}
+    </div>
+  );
+}
+
+function FormSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white"
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// ============================================================================
+// CREATE MODAL
+// ============================================================================
+
+interface CreateModalContentProps {
+  type: CreateModalType;
+  selectedGoalId: string | null;
+  selectedProjectId: string | null;
+  currentUserId: string;
+  onClose: () => void;
+  onCreateGoal: OKRManagerProps["onCreateGoal"];
+  onCreateKeyResult: OKRManagerProps["onCreateKeyResult"];
+  onCreateProject: OKRManagerProps["onCreateProject"];
+  onCreateTask: OKRManagerProps["onCreateTask"];
+  onAutoSelect: (type: "goal" | "project", id: string) => void;
+  projects: Project[];
+}
+
+function CreateModalContent({
+  type,
+  selectedGoalId,
+  selectedProjectId,
+  currentUserId,
+  onClose,
+  onCreateGoal,
+  onCreateKeyResult,
+  onCreateProject,
+  onCreateTask,
+  onAutoSelect,
+  projects,
+}: CreateModalContentProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState<Record<string, string | number>>({
+    priority: "medium",
+    status: "active",
+  });
+
+  const updateField = (key: string, value: string | number) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const modalTitles: Record<NonNullable<CreateModalType>, string> = {
+    goal: "Create New Goal",
+    keyResult: "Create Key Result",
+    project: "Create Project",
+    task: "Create Task",
+  };
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+
+    // Validazioni
+    const title = (formData.title || formData.name || "").toString().trim();
+    if (!title) {
+      alert("Title is required");
+      return;
+    }
+
+    if (type === "project" && !selectedGoalId) {
+      alert("Please select a goal first");
+      return;
+    }
+
+    if (type === "task" && !selectedProjectId) {
+      alert("Please select a project first");
+      return;
+    }
+
+    if (type === "keyResult" && !selectedGoalId) {
+      alert("Please select a goal first");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const now = new Date();
+      const baseData = {
+        userId: currentUserId,
+        domainId: "default",
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      let newId: string | void;
+
+      switch (type) {
+        case "goal":
+          newId = await onCreateGoal({
+            id: generateId("goal"),
+            ...baseData,
+            title,
+            description: formData.description?.toString() || "",
+            status: (formData.status as GoalStatus) || "active",
+            priority: (formData.priority as Priority) || "medium",
+            targetDate: formData.targetDate ? new Date(formData.targetDate.toString()) : undefined,
+            targetHours: Number(formData.targetHours) || 0,
+            weeklyHoursTarget: Number(formData.weeklyHoursTarget) || 0,
+          });
+          if (newId) onAutoSelect("goal", newId);
+          break;
+
+        case "keyResult":
+          await onCreateKeyResult({
+            id: generateId("kr"),
+            ...baseData,
+            goalId: selectedGoalId!,
+            title,
+            description: formData.description?.toString() || "",
+            startValue: Number(formData.startValue) || 0,
+            currentValue: Number(formData.currentValue) || 0,
+            targetValue: Number(formData.targetValue) || 100,
+            unit: formData.unit?.toString() || "",
+            status: "active",
+          });
+          break;
+
+        case "project":
+          newId = await onCreateProject({
+            id: generateId("project"),
+            ...baseData,
+            goalId: selectedGoalId!,
+            name: title,
+            description: formData.description?.toString() || "",
+            status: "active",
+            priority: (formData.priority as Priority) || "medium",
+            totalHoursTarget: Number(formData.totalHoursTarget) || 0,
+          });
+          if (newId) onAutoSelect("project", newId);
+          break;
+
+        case "task":
+          await onCreateTask({
+            id: generateId("task"),
+            ...baseData,
+            goalId: selectedGoalId || undefined,
+            projectId: selectedProjectId!,
+            title,
+            description: formData.description?.toString() || "",
+            status: "pending",
+            priority: (formData.priority as Priority) || "medium",
+            estimatedMinutes: Number(formData.estimatedMinutes) || 60,
+            ifThenPlan: formData.ifThenPlan?.toString() || "",
+          });
+          break;
+      }
+
+      onClose();
+    } catch (error) {
+      console.error("Failed to create item:", error);
+      alert("Failed to create. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!type) return null;
+
+  return (
+    <Modal
+      isOpen={!!type}
+      onClose={onClose}
+      title={modalTitles[type]}
+      actions={
+        <>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium transition-colors"
+            disabled={isSubmitting}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            Create
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <FormInput
+          label={type === "project" ? "Project Name" : type === "keyResult" ? "Key Result" : "Title"}
+          value={type === "project" ? (formData.name || "") : (formData.title || "")}
+          onChange={(v) => updateField(type === "project" ? "name" : "title", v)}
+          placeholder={`Enter ${type} ${type === "project" ? "name" : "title"}...`}
+          required
+          autoFocus
+        />
+
+        <FormInput
+          label="Description"
+          type="textarea"
+          value={formData.description || ""}
+          onChange={(v) => updateField("description", v)}
+          placeholder="Optional description..."
+        />
+
+        {type === "goal" && (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <FormInput
+                label="Weekly Hours Target"
+                type="number"
+                value={formData.weeklyHoursTarget || ""}
+                onChange={(v) => updateField("weeklyHoursTarget", v)}
+                placeholder="e.g., 10"
+                min={0}
+              />
+              <FormInput
+                label="Total Hours Target"
+                type="number"
+                value={formData.targetHours || ""}
+                onChange={(v) => updateField("targetHours", v)}
+                placeholder="e.g., 100"
+                min={0}
+              />
+            </div>
+            <FormInput
+              label="Target Date"
+              type="date"
+              value={formData.targetDate?.toString() || ""}
+              onChange={(v) => updateField("targetDate", v)}
+            />
+          </>
+        )}
+
+        {type === "keyResult" && (
+          <div className="grid grid-cols-3 gap-4">
+            <FormInput
+              label="Start Value"
+              type="number"
+              value={formData.startValue || 0}
+              onChange={(v) => updateField("startValue", v)}
+              min={0}
+            />
+            <FormInput
+              label="Current Value"
+              type="number"
+              value={formData.currentValue || 0}
+              onChange={(v) => updateField("currentValue", v)}
+              min={0}
+            />
+            <FormInput
+              label="Target Value"
+              type="number"
+              value={formData.targetValue || 100}
+              onChange={(v) => updateField("targetValue", v)}
+              min={0}
+            />
+          </div>
+        )}
+
+        {type === "keyResult" && (
+          <FormInput
+            label="Unit"
+            value={formData.unit || ""}
+            onChange={(v) => updateField("unit", v)}
+            placeholder="e.g., hours, users, %"
+          />
+        )}
+
+        {type === "project" && (
+          <FormInput
+            label="Total Hours Target"
+            type="number"
+            value={formData.totalHoursTarget || ""}
+            onChange={(v) => updateField("totalHoursTarget", v)}
+            placeholder="e.g., 20"
+            min={0}
+          />
+        )}
+
+        {type === "task" && (
+          <>
+            <FormInput
+              label="Estimated Minutes"
+              type="number"
+              value={formData.estimatedMinutes || 60}
+              onChange={(v) => updateField("estimatedMinutes", v)}
+              min={0}
+              step={15}
+            />
+            <FormInput
+              label="If-Then Plan"
+              value={formData.ifThenPlan || ""}
+              onChange={(v) => updateField("ifThenPlan", v)}
+              placeholder="If [trigger], then I will [action]..."
+            />
+          </>
+        )}
+
+        {(type === "goal" || type === "project" || type === "task") && (
+          <FormSelect
+            label="Priority"
+            value={(formData.priority as string) || "medium"}
+            onChange={(v) => updateField("priority", v)}
+            options={[
+              { value: "critical", label: "🔴 Critical" },
+              { value: "high", label: "🟠 High" },
+              { value: "medium", label: "🟡 Medium" },
+              { value: "low", label: "🟢 Low" },
+            ]}
+          />
+        )}
+
+        {/* Validation warnings */}
+        {type === "project" && !selectedGoalId && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+            <span className="text-sm text-amber-800">
+              Select a goal first to create a project under it.
+            </span>
+          </div>
+        )}
+
+        {type === "task" && !selectedProjectId && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+            <span className="text-sm text-amber-800">
+              Select a project first to create a task under it.
+            </span>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================================
+// KEY RESULT EDIT MODAL
+// ============================================================================
+
+interface KeyResultEditModalProps {
+  keyResult: KeyResult | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (id: string, updates: Partial<KeyResult>) => void;
+}
+
+function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEditModalProps) {
+  const [formData, setFormData] = useState({
+    currentValue: 0,
+    targetValue: 0,
+    startValue: 0,
+    title: "",
+    description: "",
+    unit: "",
+  });
+
+  useEffect(() => {
+    if (keyResult) {
+      setFormData({
+        currentValue: keyResult.currentValue || 0,
+        targetValue: keyResult.targetValue || 0,
+        startValue: keyResult.startValue || 0,
+        title: keyResult.title || "",
+        description: keyResult.description || "",
+        unit: keyResult.unit || "",
+      });
+    }
+  }, [keyResult]);
+
+  const handleSave = () => {
+    if (!keyResult) return;
+
+    const start = formData.startValue;
+    const current = formData.currentValue;
+    const target = formData.targetValue;
+    const range = target - start;
+    const progress = range > 0 ? clamp(((current - start) / range) * 100, 0, 100) : 0;
+
+    let status: GoalStatus = "active";
+    if (progress >= 100) status = "completed";
+    else if (progress < 30) status = "at_risk";
+
+    onSave(keyResult.id, {
+      ...formData,
+      progress: Math.round(progress),
+      status,
+      updatedAt: new Date(),
+    } as Partial<KeyResult>);
+
+    onClose();
+  };
+
+  if (!keyResult) return null;
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Update Key Result"
+      actions={
+        <>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+          >
+            Update
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <FormInput
+          label="Title"
+          value={formData.title}
+          onChange={(v) => setFormData((f) => ({ ...f, title: v }))}
+        />
+
+        <FormInput
+          label="Description"
+          type="textarea"
+          value={formData.description}
+          onChange={(v) => setFormData((f) => ({ ...f, description: v }))}
+        />
+
+        <div className="grid grid-cols-3 gap-4">
+          <FormInput
+            label="Start Value"
+            type="number"
+            value={formData.startValue}
+            onChange={(v) => setFormData((f) => ({ ...f, startValue: Number(v) || 0 }))}
+          />
+          <FormInput
+            label="Current Value"
+            type="number"
+            value={formData.currentValue}
+            onChange={(v) => setFormData((f) => ({ ...f, currentValue: Number(v) || 0 }))}
+            autoFocus
+          />
+          <FormInput
+            label="Target Value"
+            type="number"
+            value={formData.targetValue}
+            onChange={(v) => setFormData((f) => ({ ...f, targetValue: Number(v) || 0 }))}
+          />
+        </div>
+
+        <FormInput
+          label="Unit"
+          value={formData.unit}
+          onChange={(v) => setFormData((f) => ({ ...f, unit: v }))}
+          placeholder="e.g., hours, users, %"
+        />
+
+        {/* Live preview */}
+        <div className="p-4 bg-gray-50 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-600">Preview Progress</span>
+            <span className="text-xl font-bold text-blue-600">
+              {Math.round(
+                formData.targetValue - formData.startValue > 0
+                  ? clamp(
+                      ((formData.currentValue - formData.startValue) /
+                        (formData.targetValue - formData.startValue)) *
+                        100,
+                      0,
+                      100
+                    )
+                  : 0
+              )}
+              %
+            </span>
+          </div>
+          <ProgressBar
+            progress={
+              formData.targetValue - formData.startValue > 0
+                ? clamp(
+                    ((formData.currentValue - formData.startValue) /
+                      (formData.targetValue - formData.startValue)) *
+                      100,
+                    0,
+                    100
+                  )
+                : 0
+            }
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+export default function OKRManager(props: OKRManagerProps) {
+  const {
+    goals,
+    keyResults,
+    projects,
+    tasks,
+    timeBlocks = [],
+    currentUserId,
+    isLoading = false,
+    onCreateGoal,
+    onUpdateGoal,
+    onDeleteGoal,
+    onCreateKeyResult,
+    onUpdateKeyResult,
+    onDeleteKeyResult,
+    onCreateProject,
+    onUpdateProject,
+    onDeleteProject,
+    onCreateTask,
+    onUpdateTask,
+    onDeleteTask,
+  } = props;
+
+  // ========== STATE ==========
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState<CreateModalType>(null);
+  const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
+
+  // ========== FILTERED DATA (by userId - CRITICAL FIX) ==========
+  const visibleGoals = useMemo(() => {
+    if (!currentUserId) return [];
+    return goals.filter((g) => !g.deleted && g.userId === currentUserId);
+  }, [goals, currentUserId]);
+
+  const visibleProjects = useMemo(() => {
+    if (!currentUserId) return [];
+    return projects.filter((p) => !p.deleted && p.userId === currentUserId);
+  }, [projects, currentUserId]);
+
+  const visibleTasks = useMemo(() => {
+    if (!currentUserId) return [];
+    return tasks.filter((t) => !t.deleted && t.userId === currentUserId);
+  }, [tasks, currentUserId]);
+
+  const visibleKeyResults = useMemo(() => {
+    if (!currentUserId) return [];
+    return keyResults.filter((kr) => !kr.deleted && (!kr.userId || kr.userId === currentUserId));
+  }, [keyResults, currentUserId]);
+
+  const visibleTimeBlocks = useMemo(() => {
+    if (!currentUserId) return [];
+    return timeBlocks.filter((tb) => !tb.userId || tb.userId === currentUserId);
+  }, [timeBlocks, currentUserId]);
+
+  // ========== DERIVED STATE ==========
+  const selectedGoal = useMemo(
+    () => visibleGoals.find((g) => g.id === selectedGoalId) || null,
+    [visibleGoals, selectedGoalId]
+  );
+
+  const goalKeyResults = useMemo(
+    () => (selectedGoalId ? visibleKeyResults.filter((kr) => kr.goalId === selectedGoalId) : []),
+    [visibleKeyResults, selectedGoalId]
+  );
+
+  const goalProjects = useMemo(
+    () => (selectedGoalId ? visibleProjects.filter((p) => p.goalId === selectedGoalId) : []),
+    [visibleProjects, selectedGoalId]
+  );
+
+  const projectTasks = useMemo(
+    () => (selectedProjectId ? visibleTasks.filter((t) => t.projectId === selectedProjectId) : []),
+    [visibleTasks, selectedProjectId]
+  );
+
+  // ========== HANDLERS ==========
+  const handleSelectGoal = useCallback((goalId: string | null) => {
+    setSelectedGoalId((prev) => (prev === goalId ? null : goalId));
+    setSelectedProjectId(null);
+  }, []);
+
+  const handleSelectProject = useCallback((projectId: string) => {
+    setSelectedProjectId((prev) => (prev === projectId ? null : projectId));
+  }, []);
+
+  const handleAutoSelect = useCallback((type: "goal" | "project", id: string) => {
+    if (type === "goal") {
+      setSelectedGoalId(id);
+      setSelectedProjectId(null);
+    } else if (type === "project") {
+      setSelectedProjectId(id);
+    }
+  }, []);
+
+  const handleDeleteGoal = useCallback(
+    (goalId: string) => {
+      if (!confirm("Delete this goal? All associated projects and tasks will also be archived.")) return;
+
+      if (onDeleteGoal) {
+        onDeleteGoal(goalId);
+      } else {
+        onUpdateGoal(goalId, { deleted: true } as Partial<Goal>);
+      }
+
+      if (selectedGoalId === goalId) {
+        setSelectedGoalId(null);
+        setSelectedProjectId(null);
+      }
+    },
+    [onDeleteGoal, onUpdateGoal, selectedGoalId]
+  );
+
+  const handleDeleteProject = useCallback(
+    (projectId: string) => {
+      if (!confirm("Delete this project? All associated tasks will also be archived.")) return;
+
+      if (onDeleteProject) {
+        onDeleteProject(projectId);
+      } else {
+        onUpdateProject(projectId, { deleted: true } as Partial<Project>);
+      }
+
+      if (selectedProjectId === projectId) {
+        setSelectedProjectId(null);
+      }
+    },
+    [onDeleteProject, onUpdateProject, selectedProjectId]
+  );
+
+  const handleDeleteTask = useCallback(
+    (taskId: string) => {
+      if (!confirm("Delete this task?")) return;
+
+      if (onDeleteTask) {
+        onDeleteTask(taskId);
+      } else {
+        onUpdateTask(taskId, { deleted: true } as Partial<Task>);
+      }
+    },
+    [onDeleteTask, onUpdateTask]
+  );
+
+  const handleToggleTaskComplete = useCallback(
+    (task: Task) => {
+      const newStatus: TaskStatus = task.status === "completed" ? "pending" : "completed";
+      onUpdateTask(task.id, { status: newStatus, updatedAt: new Date() } as Partial<Task>);
+    },
+    [onUpdateTask]
+  );
+
+  const handleDeleteKeyResult = useCallback(
+    (krId: string) => {
+      if (!confirm("Delete this key result?")) return;
+
+      if (onDeleteKeyResult) {
+        onDeleteKeyResult(krId);
+      } else {
+        onUpdateKeyResult(krId, { deleted: true } as Partial<KeyResult>);
+      }
+    },
+    [onDeleteKeyResult, onUpdateKeyResult]
+  );
+
+  // ========== CONTEXT VALUE ==========
+  const contextValue = useMemo<OKRContextValue>(
+    () => ({
+      currentUserId,
+      selectedGoalId,
+      selectedProjectId,
+      setSelectedGoalId,
+      setSelectedProjectId,
+      timeBlocks: visibleTimeBlocks,
+      projects: visibleProjects,
+      tasks: visibleTasks,
+      keyResults: visibleKeyResults,
+    }),
+    [currentUserId, selectedGoalId, selectedProjectId, visibleTimeBlocks, visibleProjects, visibleTasks, visibleKeyResults]
+  );
+
+  // ========== RENDER ==========
+
+  // Not authenticated state
+  if (!currentUserId) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px] bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+        <div className="text-center px-6 py-8">
+          <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Authentication Required</h3>
+          <p className="text-gray-600">Please sign in to view and manage your OKRs.</p>
         </div>
       </div>
     );
-
-    return createPortal(modalContent, document.body);
   }
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2">
+          <div className="h-10 w-24 bg-gray-200 rounded animate-pulse" />
+          <div className="h-10 w-24 bg-gray-100 rounded animate-pulse" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <OKRContext.Provider value={contextValue}>
+      <div className="space-y-6">
+        {/* Action Bar */}
+        <div className="flex flex-wrap items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+          <button
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+            onClick={() => setShowCreateModal("goal")}
+          >
+            <Plus className="w-4 h-4" />
+            New Goal
+          </button>
+
+          {selectedGoalId && (
+            <>
+              <div className="w-px h-6 bg-gray-200" />
+              <button
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
+                onClick={() => setShowCreateModal("project")}
+              >
+                <FolderOpen className="w-4 h-4" />
+                Add Project
+              </button>
+              <button
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
+                onClick={() => setShowCreateModal("keyResult")}
+              >
+                <Target className="w-4 h-4" />
+                Add Key Result
+              </button>
+            </>
+          )}
+
+          {selectedProjectId && (
+            <button
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
+              onClick={() => setShowCreateModal("task")}
+            >
+              <ListTodo className="w-4 h-4" />
+              Add Task
+            </button>
+          )}
+
+          {(selectedGoalId || selectedProjectId) && (
+            <button
+              className="ml-auto text-sm text-gray-500 hover:text-gray-700"
+              onClick={() => {
+                setSelectedGoalId(null);
+                setSelectedProjectId(null);
+              }}
+            >
+              Clear selection
+            </button>
+          )}
+        </div>
+
+        {/* Goals Grid */}
+        {visibleGoals.length === 0 ? (
+          <EmptyState
+            icon={<Target className="w-6 h-6" />}
+            title="No Goals Yet"
+            description="Create your first goal to get started with OKR tracking."
+            action={
+              <button
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                onClick={() => setShowCreateModal("goal")}
+              >
+                <Plus className="w-4 h-4" />
+                Create Goal
+              </button>
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {visibleGoals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                isSelected={selectedGoalId === goal.id}
+                onSelect={() => handleSelectGoal(goal.id)}
+                onDelete={() => handleDeleteGoal(goal.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Goal Details Panel */}
+        {selectedGoal && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Key Results */}
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <Target className="w-5 h-5 text-blue-500" />
+                  Key Results
+                </h3>
+                <button
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                  onClick={() => setShowCreateModal("keyResult")}
+                >
+                  + Add
+                </button>
+              </div>
+
+              {goalKeyResults.length === 0 ? (
+                <EmptyState
+                  icon={<Target className="w-5 h-5" />}
+                  title="No Key Results"
+                  description="Add key results to measure progress toward this goal."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {goalKeyResults.map((kr) => (
+                    <KeyResultCard
+                      key={kr.id}
+                      keyResult={kr}
+                      onEdit={() => setEditingKeyResult(kr)}
+                      onDelete={() => handleDeleteKeyResult(kr.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Projects */}
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5 text-indigo-500" />
+                  Projects
+                </h3>
+                <button
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                  onClick={() => setShowCreateModal("project")}
+                >
+                  + Add
+                </button>
+              </div>
+
+              {goalProjects.length === 0 ? (
+                <EmptyState
+                  icon={<FolderOpen className="w-5 h-5" />}
+                  title="No Projects"
+                  description="Add projects to organize work toward this goal."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {goalProjects.map((project) => (
+                    <ProjectCard
+                      key={project.id}
+                      project={project}
+                      isSelected={selectedProjectId === project.id}
+                      onSelect={() => handleSelectProject(project.id)}
+                      onDelete={() => handleDeleteProject(project.id)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Tasks (nested under selected project) */}
+              {selectedProjectId && (
+                <div className="mt-6 pt-4 border-t border-gray-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <ListTodo className="w-4 h-4 text-green-500" />
+                      Tasks
+                    </h4>
+                    <button
+                      className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                      onClick={() => setShowCreateModal("task")}
+                    >
+                      + Add
+                    </button>
+                  </div>
+
+                  {projectTasks.length === 0 ? (
+                    <EmptyState
+                      icon={<ListTodo className="w-5 h-5" />}
+                      title="No Tasks"
+                      description="Add tasks to break down this project."
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {projectTasks.map((task) => (
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          onToggleComplete={() => handleToggleTaskComplete(task)}
+                          onDelete={() => handleDeleteTask(task.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Create Modal */}
+        <CreateModalContent
+          type={showCreateModal}
+          selectedGoalId={selectedGoalId}
+          selectedProjectId={selectedProjectId}
+          currentUserId={currentUserId}
+          onClose={() => setShowCreateModal(null)}
+          onCreateGoal={onCreateGoal}
+          onCreateKeyResult={onCreateKeyResult}
+          onCreateProject={onCreateProject}
+          onCreateTask={onCreateTask}
+          onAutoSelect={handleAutoSelect}
+          projects={visibleProjects}
+        />
+
+        {/* Key Result Edit Modal */}
+        <KeyResultEditModal
+          keyResult={editingKeyResult}
+          isOpen={!!editingKeyResult}
+          onClose={() => setEditingKeyResult(null)}
+          onSave={onUpdateKeyResult}
+        />
+      </div>
+    </OKRContext.Provider>
+  );
 }

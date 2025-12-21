@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { TimeBlock, Task, Project, Goal } from '@/types';
-import { toDateSafe } from '@/utils/dateUtils';
+import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from '@/utils/dateUtils';
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
@@ -19,7 +19,7 @@ interface TimeBlockPlannerProps {
   isReady?: boolean; // Disable buttons until Firebase is ready
 }
 
-export default function TimeBlockPlanner({
+export default function TimeBlockPlanner({ 
   timeBlocks,
   tasks,
   projects,
@@ -48,12 +48,12 @@ export default function TimeBlockPlanner({
   };
 
   const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', { 
+    return formatDateSafe(date, { 
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric'
-    });
+    }, 'Invalid Date');
   };
 
   const getTimeFromPosition = (y: number) => {
@@ -306,9 +306,9 @@ export default function TimeBlockPlanner({
 
   const filteredBlocks = timeBlocks.filter((block, index) => {
     try {
-      const blockDate = new Date(block.startTime);
-      const isMatch = blockDate.toDateString() === selectedDate.toDateString();
-      return isMatch;
+      const blockDate = toDateSafe(block.startTime);
+      const isMatch = formatDateStringSafe(blockDate) === formatDateStringSafe(selectedDate);
+      return isMatch && formatDateStringSafe(blockDate) !== 'Invalid Date';
     } catch (error) {
       console.error(`❌ Filter ERROR for block ${index}:`, error, block);
       return false;
@@ -472,22 +472,49 @@ export default function TimeBlockPlanner({
                   )}
                   {/* Time display più compatto */}
                   <div className="text-xs opacity-70 font-mono drop-shadow-sm">
-                    {block.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
-                    {block.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                    {formatTimeSafe(block.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')} - 
+                    {formatTimeSafe(block.endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')}
                   </div>
                 </div>
                 <div className="flex flex-col space-y-2">
+                  {/* TOGGLE COMPLETED: Always visible */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newStatus = block.status === 'completed' ? 'planned' : 'completed';
+                      onUpdateTimeBlock(block.id, { 
+                        status: newStatus,
+                        ...(newStatus === 'completed' && !block.actualStartTime ? {
+                          actualStartTime: block.startTime,
+                          actualEndTime: block.endTime
+                        } : {})
+                      });
+                    }}
+                    className={`text-lg transition-all duration-200 hover:scale-110 ${
+                      block.status === 'completed' 
+                        ? 'text-green-400 hover:text-green-300' 
+                        : 'text-gray-300 hover:text-green-400'
+                    }`}
+                    title={block.status === 'completed' ? 'Mark as planned' : 'Mark as completed'}
+                  >
+                    {block.status === 'completed' ? '✅' : '⭕'}
+                  </button>
+                  
+                  {/* Status indicator */}
                   <div 
-                    className="text-xl drop-shadow-sm cursor-help" 
+                    className="text-sm drop-shadow-sm cursor-help opacity-75" 
                     title={
                       block.status === 'completed' ? 'Completed' :
                       block.status === 'in_progress' ? 'In Progress' :
-                      getOverdueMessage(block) || 'Planned'
+                      'Planned'
                     }
                   >
-                    {getStatusIndicator(block)}
+                    {block.status === 'completed' ? '✅' :
+                     block.status === 'in_progress' ? '⏳' :
+                     block.endTime < new Date() ? '⚠️' : '📋'}
                   </div>
-                  {/* P0.4 FIX: Delete button */}
+                  
+                  {/* Delete button */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -518,8 +545,8 @@ export default function TimeBlockPlanner({
               <div className="text-white text-center">
                 <div className="text-sm font-bold">✨ New Block</div>
                 <div className="text-xs opacity-90 font-mono">
-                  {dragPreview.startTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} - 
-                  {dragPreview.endTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                  {formatTimeSafe(dragPreview.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')} - 
+                  {formatTimeSafe(dragPreview.endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')}
                 </div>
               </div>
             </div>
