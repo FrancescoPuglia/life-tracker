@@ -1,129 +1,110 @@
 "use client";
 
-import React, {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useCallback,
-  createContext,
-  useContext,
-} from "react";
-import { createPortal } from "react-dom";
-import {
-  Calendar,
-  Clock,
-  Target,
-  Trash2,
-  CheckCircle,
-  AlertCircle,
-  Plus,
-  ChevronRight,
-  Loader2,
-  AlertTriangle,
-  TrendingUp,
-  FolderOpen,
-  ListTodo,
-  Flag,
-  Edit3,
-  X,
-} from "lucide-react";
+import { useState, useMemo, useCallback, useEffect, useRef, useContext, createContext } from 'react';
+import { createPortal } from 'react-dom';
+import { 
+  Target, Calendar, Clock, TrendingUp, Plus, Trash2, Edit3, 
+  CheckCircle, AlertTriangle, Flag, ChevronRight, X, Loader2,
+  FolderOpen, ListTodo, AlertCircle
+} from 'lucide-react';
 
 // ============================================================================
-// TYPES - Definizioni complete e strict
+// TYPES - Definizioni complete e corrette
 // ============================================================================
 
-export type GoalStatus = "active" | "completed" | "paused" | "at_risk" | "archived";
-export type Priority = "critical" | "high" | "medium" | "low";
-export type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
-export type TimeBlockStatus = "planned" | "in_progress" | "completed" | "cancelled";
+type GoalStatus = "active" | "completed" | "paused" | "at_risk" | "archived";
+type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
+type Priority = "critical" | "high" | "medium" | "low";
+type TimeBlockStatus = "planned" | "in_progress" | "completed" | "overrun";
 
-export interface Goal {
+interface Goal {
   id: string;
   userId: string;
-  domainId?: string;
+  domainId: string;
   title: string;
   description?: string;
   status: GoalStatus;
-  priority: Priority;
-  targetDate?: Date | { toDate: () => Date } | string;
+  priority?: Priority;
+  targetDate?: Date | unknown;
   targetHours?: number;
-  weeklyHoursTarget?: number;
-  timeAllocationTarget?: number;
+  timeAllocationTarget?: number; // ✅ Campo corretto per weekly target
   deleted?: boolean;
-  createdAt?: Date;
-  updatedAt?: Date;
+  createdAt: Date | unknown;
+  updatedAt: Date | unknown;
 }
 
-export interface KeyResult {
+interface KeyResult {
   id: string;
   userId?: string;
+  domainId: string;
   goalId: string;
   title: string;
   description?: string;
-  startValue?: number;
-  currentValue: number;
-  targetValue: number;
+  currentValue?: number;
+  targetValue?: number;
   unit?: string;
-  progress?: number;
   status?: GoalStatus;
+  progress?: number;
   deleted?: boolean;
+  createdAt: Date | unknown;
+  updatedAt: Date | unknown;
 }
 
-export interface Project {
+interface Project {
   id: string;
   userId: string;
-  goalId: string; // OBBLIGATORIO - specifica punto 3.1
+  domainId: string;
+  goalId: string;
   name: string;
   description?: string;
-  status?: GoalStatus;
+  status: string;
   priority?: Priority;
-  dueDate?: Date | { toDate: () => Date } | string;
-  weeklyHoursTarget?: number;
   totalHoursTarget?: number;
   deleted?: boolean;
+  createdAt: Date | unknown;
+  updatedAt: Date | unknown;
 }
 
-export interface Task {
+interface Task {
   id: string;
   userId: string;
+  domainId: string;
   goalId?: string;
-  projectId: string; // OBBLIGATORIO - specifica punto 3.2
+  projectId: string;
   title: string;
   description?: string;
   status: TaskStatus;
   priority?: Priority;
   estimatedMinutes?: number;
-  dueDate?: Date | { toDate: () => Date } | string;
   ifThenPlan?: string;
-  why?: string;
   deleted?: boolean;
+  createdAt: Date | unknown;
+  updatedAt: Date | unknown;
 }
 
-export interface TimeBlock {
+interface TimeBlock {
   id?: string;
   userId?: string;
-  status?: TimeBlockStatus;
-  startTime?: Date | { toDate: () => Date } | string;
-  endTime?: Date | { toDate: () => Date } | string;
-  actualStartTime?: Date | { toDate: () => Date } | string;
-  actualEndTime?: Date | { toDate: () => Date } | string;
   goalId?: string;
   goalIds?: string[];
   projectId?: string;
   taskId?: string;
+  startTime: Date | unknown;
+  endTime: Date | unknown;
+  actualStartTime?: Date | unknown;
+  actualEndTime?: Date | unknown;
+  status?: string;
 }
 
-export interface OKRManagerProps {
+interface OKRManagerProps {
   goals: Goal[];
   keyResults: KeyResult[];
   projects: Project[];
   tasks: Task[];
   timeBlocks?: TimeBlock[];
-  currentUserId: string | undefined;
+  currentUserId?: string;
   isLoading?: boolean;
 
-  // Callbacks CRUD
   onCreateGoal: (goal: Partial<Goal>) => Promise<string | void> | string | void;
   onUpdateGoal: (id: string, updates: Partial<Goal>) => Promise<void> | void;
   onDeleteGoal?: (id: string) => Promise<void> | void;
@@ -145,7 +126,7 @@ type CreateModalType = "goal" | "keyResult" | "project" | "task" | null;
 type Mode = "planned" | "actual";
 
 // ============================================================================
-// CONTEXT - Per evitare prop drilling
+// CONTEXT
 // ============================================================================
 
 interface OKRContextValue {
@@ -169,7 +150,7 @@ function useOKRContext() {
 }
 
 // ============================================================================
-// UTILITIES - Funzioni pure e robuste
+// UTILITIES
 // ============================================================================
 
 function toDateSafe(x: unknown): Date | null {
@@ -226,15 +207,17 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-// Status helpers
+// ✅ FIX: Include "overrun" status for actual time
 function statusAllowed(mode: Mode, status?: string): boolean {
   if (!status) return false;
-  if (mode === "actual") return status === "completed";
+  if (mode === "actual") {
+    return status === "completed" || status === "overrun"; // CRITICAL FIX
+  }
   return ["planned", "in_progress", "completed"].includes(status);
 }
 
 // ============================================================================
-// AGGREGATION - Calcoli deterministici (core fix anti double-count)
+// AGGREGATION - Anti double-count logic
 // ============================================================================
 
 interface AggregationResult {
@@ -247,13 +230,6 @@ interface AggregationResult {
   };
 }
 
-/**
- * Aggrega i minuti di TimeBlocks per un Goal.
- * Regola anti-doppio conteggio:
- * - Se TB ha projectId di un project del goal → conta come "viaProject"
- * - Se TB ha solo goalId/goalIds → conta come "directGoal"
- * - Non conta mai lo stesso TB due volte
- */
 function aggregateGoalMinutes(args: {
   goalId: string;
   mode: Mode;
@@ -263,10 +239,7 @@ function aggregateGoalMinutes(args: {
 }): AggregationResult {
   const { goalId, mode, timeBlocks, projects, userId } = args;
 
-  // Filtra per userId PRIMA di tutto
   const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
-
-  // Project IDs che appartengono a questo goal
   const goalProjectIds = new Set(
     projects.filter((p) => !p.deleted && p.goalId === goalId && p.userId === userId).map((p) => p.id)
   );
@@ -280,17 +253,15 @@ function aggregateGoalMinutes(args: {
   for (const tb of userTimeBlocks) {
     if (!statusAllowed(mode, tb.status)) continue;
 
-    // Genera chiave unica per dedupe
     const startISO = formatISOSafe(tb.startTime);
     const endISO = formatISOSafe(tb.endTime);
-    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.projectId || ""}|${tb.taskId || ""}|${tb.status}`;
+    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.projectId ?? ""}|${tb.taskId ?? ""}|${tb.status}`;
 
     if (seen.has(uniqueKey)) continue;
 
     const inGoalProject = !!tb.projectId && goalProjectIds.has(tb.projectId);
     const matchesGoal = tb.goalId === goalId || (Array.isArray(tb.goalIds) && tb.goalIds.includes(goalId));
 
-    // Priorità: viaProject > directGoal (evita double-count)
     let shouldCount = false;
     if (inGoalProject) {
       shouldCount = true;
@@ -302,10 +273,8 @@ function aggregateGoalMinutes(args: {
     }
 
     if (!shouldCount) continue;
-
     seen.add(uniqueKey);
 
-    // Calcola durata
     let duration: number;
     if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
       duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
@@ -316,16 +285,9 @@ function aggregateGoalMinutes(args: {
     totalMinutes += duration;
   }
 
-  return {
-    totalMinutes,
-    entriesCount: seen.size,
-    debugInfo: { viaProject, directGoal, viaTask },
-  };
+  return { totalMinutes, entriesCount: seen.size, debugInfo: { viaProject, directGoal, viaTask } };
 }
 
-/**
- * Aggrega i minuti di TimeBlocks per un Project.
- */
 function aggregateProjectMinutes(args: {
   projectId: string;
   mode: Mode;
@@ -344,7 +306,7 @@ function aggregateProjectMinutes(args: {
 
     const startISO = formatISOSafe(tb.startTime);
     const endISO = formatISOSafe(tb.endTime);
-    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.taskId || ""}|${tb.status}`;
+    const uniqueKey = tb.id || `${startISO}|${endISO}|${tb.taskId ?? ""}|${tb.status}`;
 
     if (seen.has(uniqueKey)) continue;
     seen.add(uniqueKey);
@@ -362,9 +324,6 @@ function aggregateProjectMinutes(args: {
   return { totalMinutes, entriesCount: seen.size };
 }
 
-/**
- * Aggrega i minuti di TimeBlocks per una Task.
- */
 function aggregateTaskMinutes(args: {
   taskId: string;
   mode: Mode;
@@ -402,7 +361,7 @@ function aggregateTaskMinutes(args: {
 }
 
 // ============================================================================
-// HOOKS CUSTOM - Logica riutilizzabile
+// HOOKS - Metrics calculation
 // ============================================================================
 
 function useGoalMetrics(goal: Goal) {
@@ -416,7 +375,9 @@ function useGoalMetrics(goal: Goal) {
         targetHours: 0, 
         weeklyHoursTarget: 0,
         progress: 0, 
-        krProgress: null 
+        krProgress: null,
+        variance: 0,
+        efficiency: 0
       };
     }
 
@@ -439,46 +400,51 @@ function useGoalMetrics(goal: Goal) {
     const plannedHours = plannedResult.totalMinutes / 60;
     const actualHours = actualResult.totalMinutes / 60;
 
-    // Weekly hours target
-    const weeklyHoursTarget = goal.weeklyHoursTarget || 0;
+    // ✅ FIX: Use correct field name
+    const weeklyHoursTarget = goal.timeAllocationTarget ?? 0;
 
-    // Total target hours: priorità goal.targetHours > goal.timeAllocationTarget > somma projects
+    // ✅ FIX: Use nullish coalescing consistently
     let targetHours = 0;
-    if (goal.targetHours && goal.targetHours > 0) {
-      targetHours = goal.targetHours;
-    } else if (goal.timeAllocationTarget && goal.timeAllocationTarget > 0) {
-      targetHours = goal.timeAllocationTarget;
+    if ((goal.targetHours ?? 0) > 0) {
+      targetHours = goal.targetHours ?? 0;
+    } else if ((goal.timeAllocationTarget ?? 0) > 0) {
+      targetHours = goal.timeAllocationTarget ?? 0;
     } else {
-      // Fallback: somma target ore dei progetti
       const goalProjects = projects.filter((p) => !p.deleted && p.goalId === goal.id && p.userId === currentUserId);
-      targetHours = goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget || 0), 0);
+      targetHours = goalProjects.reduce((sum, p) => sum + (p.totalHoursTarget ?? 0), 0);
     }
 
-    // Progress basato su ore totali
     const hoursProgress = targetHours > 0 ? clamp((actualHours / targetHours) * 100, 0, 100) : 0;
 
-    // Progress basato su Key Results (se esistono)
-    const goalKRs = keyResults.filter((kr) => !kr.deleted && kr.goalId === goal.id && kr.targetValue > 0);
+    // ✅ FIX: KeyResult progress without startValue
+    const goalKRs = keyResults.filter((kr) => !kr.deleted && kr.goalId === goal.id && (kr.targetValue ?? 0) > 0);
     let krProgress: number | null = null;
 
     if (goalKRs.length > 0) {
-      const avgKR =
-        goalKRs.reduce((sum, kr) => {
-          const start = kr.startValue || 0;
-          const current = kr.currentValue || 0;
-          const target = kr.targetValue || 0;
-          const range = target - start;
-          const pct = range > 0 ? ((current - start) / range) * 100 : 0;
-          return sum + clamp(pct, 0, 100);
-        }, 0) / goalKRs.length;
+      const avgKR = goalKRs.reduce((sum, kr) => {
+        const current = kr.currentValue ?? 0;
+        const target = kr.targetValue ?? 0;
+        const pct = target > 0 ? (current / target) * 100 : 0;
+        return sum + clamp(pct, 0, 100);
+      }, 0) / goalKRs.length;
 
       krProgress = Math.round(avgKR);
     }
 
-    // Progress finale: se ci sono KR validi, usa quelli, altrimenti ore
     const progress = krProgress !== null ? krProgress : Math.round(hoursProgress);
+    const variance = actualHours - targetHours;
+    const efficiency = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
 
-    return { plannedHours, actualHours, targetHours, weeklyHoursTarget, progress, krProgress };
+    return { 
+      plannedHours, 
+      actualHours, 
+      targetHours, 
+      weeklyHoursTarget, 
+      progress, 
+      krProgress,
+      variance,
+      efficiency: Math.round(efficiency)
+    };
   }, [goal, timeBlocks, projects, keyResults, currentUserId]);
 }
 
@@ -510,12 +476,11 @@ function useProjectMetrics(project: Project) {
     const completedTasks = projectTasks.filter((t) => t.status === "completed").length;
     const totalTasks = projectTasks.length;
 
-    // Progress: combinazione task completion + ore
     let progress = 0;
     if (totalTasks > 0) {
       progress = (completedTasks / totalTasks) * 100;
-    } else if (project.totalHoursTarget && project.totalHoursTarget > 0) {
-      progress = clamp((actualResult.totalMinutes / 60 / project.totalHoursTarget) * 100, 0, 100);
+    } else if ((project.totalHoursTarget ?? 0) > 0) {
+      progress = clamp((actualResult.totalMinutes / 60 / (project.totalHoursTarget ?? 1)) * 100, 0, 100);
     }
 
     return {
@@ -533,7 +498,7 @@ function useTaskMetrics(task: Task) {
 
   return useMemo(() => {
     if (!currentUserId) {
-      return { plannedMinutes: 0, actualMinutes: 0, progress: 0 };
+      return { plannedMinutes: 0, actualMinutes: 0, progress: 0, isOvertime: false };
     }
 
     const plannedResult = aggregateTaskMinutes({
@@ -550,7 +515,7 @@ function useTaskMetrics(task: Task) {
       userId: currentUserId,
     });
 
-    const estimated = task.estimatedMinutes || 0;
+    const estimated = task.estimatedMinutes ?? 0;
     let progress = 0;
 
     if (task.status === "completed") {
@@ -561,19 +526,21 @@ function useTaskMetrics(task: Task) {
       progress = clamp((actualResult.totalMinutes / plannedResult.totalMinutes) * 100, 0, 99);
     }
 
+    const isOvertime = estimated > 0 && actualResult.totalMinutes > estimated;
+
     return {
       plannedMinutes: plannedResult.totalMinutes,
       actualMinutes: actualResult.totalMinutes,
       progress: Math.round(progress),
+      isOvertime,
     };
   }, [task, timeBlocks, currentUserId]);
 }
 
 // ============================================================================
-// UI COMPONENTS - Modulari e riutilizzabili
+// UI COMPONENTS
 // ============================================================================
 
-// Status/Priority badges
 const STATUS_CONFIG: Record<string, { label: string; className: string; icon?: React.ReactNode }> = {
   active: { label: "Active", className: "bg-blue-50 text-blue-700 border-blue-200" },
   completed: { label: "Completed", className: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle className="w-3 h-3" /> },
@@ -649,7 +616,6 @@ function MetricRow({ icon, label, value, subValue }: { icon: React.ReactNode; la
   );
 }
 
-// Empty state
 function EmptyState({ icon, title, description, action }: { icon: React.ReactNode; title: string; description: string; action?: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
@@ -663,7 +629,6 @@ function EmptyState({ icon, title, description, action }: { icon: React.ReactNod
   );
 }
 
-// Loading skeleton
 function CardSkeleton() {
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-5 animate-pulse">
@@ -704,7 +669,6 @@ function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
       onKeyDown={(e) => e.key === "Enter" && onSelect()}
       aria-pressed={isSelected}
     >
-      {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-lg font-semibold text-gray-900 truncate">{goal.title}</h3>
@@ -726,7 +690,6 @@ function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
         )}
       </div>
 
-      {/* Badges */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <StatusBadge status={goal.status} />
         <PriorityBadge priority={goal.priority} />
@@ -736,7 +699,6 @@ function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
         </span>
       </div>
 
-      {/* Metrics */}
       <div className="space-y-2 mb-4">
         {metrics.weeklyHoursTarget > 0 && (
           <MetricRow
@@ -763,7 +725,6 @@ function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
         />
       </div>
 
-      {/* Progress */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-lg font-bold text-blue-600">{metrics.progress}%</span>
@@ -774,7 +735,6 @@ function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
         <ProgressBar progress={metrics.progress} />
       </div>
 
-      {/* Selection indicator */}
       {isSelected && (
         <div className="mt-3 pt-3 border-t border-blue-100 flex items-center gap-1 text-xs text-blue-600">
           <ChevronRight className="w-3 h-3" />
@@ -792,11 +752,10 @@ interface KeyResultCardProps {
 }
 
 function KeyResultCard({ keyResult, onEdit, onDelete }: KeyResultCardProps) {
-  const start = keyResult.startValue || 0;
-  const current = keyResult.currentValue || 0;
-  const target = keyResult.targetValue || 0;
-  const range = target - start;
-  const progress = range > 0 ? clamp(((current - start) / range) * 100, 0, 100) : 0;
+  // ✅ FIX: No startValue - direct percentage calculation
+  const current = keyResult.currentValue ?? 0;
+  const target = keyResult.targetValue ?? 0;
+  const progress = target > 0 ? clamp((current / target) * 100, 0, 100) : 0;
 
   return (
     <div
@@ -902,7 +861,7 @@ function ProjectCard({ project, isSelected, onSelect, onDelete }: ProjectCardPro
         <span className="flex items-center gap-1">
           <Clock className="w-3.5 h-3.5" />
           {formatHours(metrics.actualHours)}h
-          {project.totalHoursTarget && <span className="text-gray-400">/ {project.totalHoursTarget}h</span>}
+          {(project.totalHoursTarget ?? 0) > 0 && <span className="text-gray-400">/ {project.totalHoursTarget}h</span>}
         </span>
       </div>
 
@@ -974,16 +933,17 @@ function TaskCard({ task, onToggleComplete, onDelete }: TaskCardProps) {
           <div className="flex items-center flex-wrap gap-2 mt-2">
             <PriorityBadge priority={task.priority} />
             <StatusBadge status={task.status} />
-            {task.estimatedMinutes && task.estimatedMinutes > 0 && (
+            {(task.estimatedMinutes ?? 0) > 0 && (
               <span className="text-xs text-gray-500 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {task.estimatedMinutes}min
               </span>
             )}
             {metrics.actualMinutes > 0 && (
-              <span className="text-xs text-indigo-600 flex items-center gap-1">
+              <span className={`text-xs flex items-center gap-1 ${metrics.isOvertime ? "text-red-600" : "text-indigo-600"}`}>
                 <TrendingUp className="w-3 h-3" />
-                {metrics.actualMinutes}min logged
+                {metrics.actualMinutes}min
+                {metrics.isOvertime && " ⚠️"}
               </span>
             )}
           </div>
@@ -1078,7 +1038,6 @@ function Modal({ isOpen, onClose, title, children, actions }: ModalProps) {
   );
 }
 
-// Form input component
 function FormInput({
   label,
   type = "text",
@@ -1177,7 +1136,6 @@ interface CreateModalContentProps {
   onCreateProject: OKRManagerProps["onCreateProject"];
   onCreateTask: OKRManagerProps["onCreateTask"];
   onAutoSelect: (type: "goal" | "project", id: string) => void;
-  projects: Project[];
 }
 
 function CreateModalContent({
@@ -1191,7 +1149,6 @@ function CreateModalContent({
   onCreateProject,
   onCreateTask,
   onAutoSelect,
-  projects,
 }: CreateModalContentProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<Record<string, string | number>>({
@@ -1213,7 +1170,6 @@ function CreateModalContent({
   const handleSubmit = async () => {
     if (isSubmitting) return;
 
-    // Validazioni
     const title = (formData.title || formData.name || "").toString().trim();
     if (!title) {
       alert("Title is required");
@@ -1259,19 +1215,19 @@ function CreateModalContent({
             priority: (formData.priority as Priority) || "medium",
             targetDate: formData.targetDate ? new Date(formData.targetDate.toString()) : undefined,
             targetHours: Number(formData.targetHours) || 0,
-            weeklyHoursTarget: Number(formData.weeklyHoursTarget) || 0,
+            timeAllocationTarget: Number(formData.timeAllocationTarget) || 0, // ✅ FIX: Correct field name
           });
           if (newId) onAutoSelect("goal", newId);
           break;
 
         case "keyResult":
+          // ✅ FIX: No startValue in creation
           await onCreateKeyResult({
             id: generateId("kr"),
             ...baseData,
             goalId: selectedGoalId!,
             title,
             description: formData.description?.toString() || "",
-            startValue: Number(formData.startValue) || 0,
             currentValue: Number(formData.currentValue) || 0,
             targetValue: Number(formData.targetValue) || 100,
             unit: formData.unit?.toString() || "",
@@ -1369,8 +1325,8 @@ function CreateModalContent({
               <FormInput
                 label="Weekly Hours Target"
                 type="number"
-                value={formData.weeklyHoursTarget || ""}
-                onChange={(v) => updateField("weeklyHoursTarget", v)}
+                value={formData.timeAllocationTarget || ""}
+                onChange={(v) => updateField("timeAllocationTarget", v)}
                 placeholder="e.g., 10"
                 min={0}
               />
@@ -1393,20 +1349,14 @@ function CreateModalContent({
         )}
 
         {type === "keyResult" && (
-          <div className="grid grid-cols-3 gap-4">
-            <FormInput
-              label="Start Value"
-              type="number"
-              value={formData.startValue || 0}
-              onChange={(v) => updateField("startValue", v)}
-              min={0}
-            />
+          <div className="grid grid-cols-2 gap-4">
             <FormInput
               label="Current Value"
               type="number"
               value={formData.currentValue || 0}
               onChange={(v) => updateField("currentValue", v)}
               min={0}
+              autoFocus
             />
             <FormInput
               label="Target Value"
@@ -1471,7 +1421,6 @@ function CreateModalContent({
           />
         )}
 
-        {/* Validation warnings */}
         {type === "project" && !selectedGoalId && (
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
@@ -1509,7 +1458,6 @@ function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEdi
   const [formData, setFormData] = useState({
     currentValue: 0,
     targetValue: 0,
-    startValue: 0,
     title: "",
     description: "",
     unit: "",
@@ -1518,9 +1466,8 @@ function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEdi
   useEffect(() => {
     if (keyResult) {
       setFormData({
-        currentValue: keyResult.currentValue || 0,
-        targetValue: keyResult.targetValue || 0,
-        startValue: keyResult.startValue || 0,
+        currentValue: keyResult.currentValue ?? 0,
+        targetValue: keyResult.targetValue ?? 0,
         title: keyResult.title || "",
         description: keyResult.description || "",
         unit: keyResult.unit || "",
@@ -1531,11 +1478,10 @@ function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEdi
   const handleSave = () => {
     if (!keyResult) return;
 
-    const start = formData.startValue;
+    // ✅ FIX: Progress calculation without startValue
     const current = formData.currentValue;
     const target = formData.targetValue;
-    const range = target - start;
-    const progress = range > 0 ? clamp(((current - start) / range) * 100, 0, 100) : 0;
+    const progress = target > 0 ? clamp((current / target) * 100, 0, 100) : 0;
 
     let status: GoalStatus = "active";
     if (progress >= 100) status = "completed";
@@ -1552,6 +1498,10 @@ function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEdi
   };
 
   if (!keyResult) return null;
+
+  const previewProgress = formData.targetValue > 0 
+    ? clamp((formData.currentValue / formData.targetValue) * 100, 0, 100) 
+    : 0;
 
   return (
     <Modal
@@ -1589,13 +1539,7 @@ function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEdi
           onChange={(v) => setFormData((f) => ({ ...f, description: v }))}
         />
 
-        <div className="grid grid-cols-3 gap-4">
-          <FormInput
-            label="Start Value"
-            type="number"
-            value={formData.startValue}
-            onChange={(v) => setFormData((f) => ({ ...f, startValue: Number(v) || 0 }))}
-          />
+        <div className="grid grid-cols-2 gap-4">
           <FormInput
             label="Current Value"
             type="number"
@@ -1618,38 +1562,14 @@ function KeyResultEditModal({ keyResult, isOpen, onClose, onSave }: KeyResultEdi
           placeholder="e.g., hours, users, %"
         />
 
-        {/* Live preview */}
         <div className="p-4 bg-gray-50 rounded-lg">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-600">Preview Progress</span>
             <span className="text-xl font-bold text-blue-600">
-              {Math.round(
-                formData.targetValue - formData.startValue > 0
-                  ? clamp(
-                      ((formData.currentValue - formData.startValue) /
-                        (formData.targetValue - formData.startValue)) *
-                        100,
-                      0,
-                      100
-                    )
-                  : 0
-              )}
-              %
+              {Math.round(previewProgress)}%
             </span>
           </div>
-          <ProgressBar
-            progress={
-              formData.targetValue - formData.startValue > 0
-                ? clamp(
-                    ((formData.currentValue - formData.startValue) /
-                      (formData.targetValue - formData.startValue)) *
-                      100,
-                    0,
-                    100
-                  )
-                : 0
-            }
-          />
+          <ProgressBar progress={previewProgress} />
         </div>
       </div>
     </Modal>
@@ -1683,13 +1603,15 @@ export default function OKRManager(props: OKRManagerProps) {
     onDeleteTask,
   } = props;
 
-  // ========== STATE ==========
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<CreateModalType>(null);
   const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
 
-  // ========== FILTERED DATA (by userId - CRITICAL FIX) ==========
+  // --------------------------------------------------------------------------
+  // DATA VISIBILITY (multi-user isolation)
+  // --------------------------------------------------------------------------
+
   const visibleGoals = useMemo(() => {
     if (!currentUserId) return [];
     return goals.filter((g) => !g.deleted && g.userId === currentUserId);
@@ -1707,6 +1629,7 @@ export default function OKRManager(props: OKRManagerProps) {
 
   const visibleKeyResults = useMemo(() => {
     if (!currentUserId) return [];
+    // nel tuo progetto alcuni KR legacy potrebbero non avere userId
     return keyResults.filter((kr) => !kr.deleted && (!kr.userId || kr.userId === currentUserId));
   }, [keyResults, currentUserId]);
 
@@ -1715,7 +1638,10 @@ export default function OKRManager(props: OKRManagerProps) {
     return timeBlocks.filter((tb) => !tb.userId || tb.userId === currentUserId);
   }, [timeBlocks, currentUserId]);
 
-  // ========== DERIVED STATE ==========
+  // --------------------------------------------------------------------------
+  // DERIVED SELECTIONS
+  // --------------------------------------------------------------------------
+
   const selectedGoal = useMemo(
     () => visibleGoals.find((g) => g.id === selectedGoalId) || null,
     [visibleGoals, selectedGoalId]
@@ -1731,13 +1657,21 @@ export default function OKRManager(props: OKRManagerProps) {
     [visibleProjects, selectedGoalId]
   );
 
+  const selectedProject = useMemo(
+    () => visibleProjects.find((p) => p.id === selectedProjectId) || null,
+    [visibleProjects, selectedProjectId]
+  );
+
   const projectTasks = useMemo(
     () => (selectedProjectId ? visibleTasks.filter((t) => t.projectId === selectedProjectId) : []),
     [visibleTasks, selectedProjectId]
   );
 
-  // ========== HANDLERS ==========
-  const handleSelectGoal = useCallback((goalId: string | null) => {
+  // --------------------------------------------------------------------------
+  // ACTIONS
+  // --------------------------------------------------------------------------
+
+  const handleSelectGoal = useCallback((goalId: string) => {
     setSelectedGoalId((prev) => (prev === goalId ? null : goalId));
     setSelectedProjectId(null);
   }, []);
@@ -1750,20 +1684,18 @@ export default function OKRManager(props: OKRManagerProps) {
     if (type === "goal") {
       setSelectedGoalId(id);
       setSelectedProjectId(null);
-    } else if (type === "project") {
+    } else {
       setSelectedProjectId(id);
     }
   }, []);
 
   const handleDeleteGoal = useCallback(
     (goalId: string) => {
-      if (!confirm("Delete this goal? All associated projects and tasks will also be archived.")) return;
+      const ok = confirm("Delete this goal? (Will archive goal, projects & tasks linked to it)");
+      if (!ok) return;
 
-      if (onDeleteGoal) {
-        onDeleteGoal(goalId);
-      } else {
-        onUpdateGoal(goalId, { deleted: true } as Partial<Goal>);
-      }
+      if (onDeleteGoal) onDeleteGoal(goalId);
+      else onUpdateGoal(goalId, { deleted: true, updatedAt: new Date() });
 
       if (selectedGoalId === goalId) {
         setSelectedGoalId(null);
@@ -1775,30 +1707,24 @@ export default function OKRManager(props: OKRManagerProps) {
 
   const handleDeleteProject = useCallback(
     (projectId: string) => {
-      if (!confirm("Delete this project? All associated tasks will also be archived.")) return;
+      const ok = confirm("Delete this project? (Will archive project & tasks linked to it)");
+      if (!ok) return;
 
-      if (onDeleteProject) {
-        onDeleteProject(projectId);
-      } else {
-        onUpdateProject(projectId, { deleted: true } as Partial<Project>);
-      }
+      if (onDeleteProject) onDeleteProject(projectId);
+      else onUpdateProject(projectId, { deleted: true, updatedAt: new Date() });
 
-      if (selectedProjectId === projectId) {
-        setSelectedProjectId(null);
-      }
+      if (selectedProjectId === projectId) setSelectedProjectId(null);
     },
     [onDeleteProject, onUpdateProject, selectedProjectId]
   );
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      if (!confirm("Delete this task?")) return;
+      const ok = confirm("Delete this task?");
+      if (!ok) return;
 
-      if (onDeleteTask) {
-        onDeleteTask(taskId);
-      } else {
-        onUpdateTask(taskId, { deleted: true } as Partial<Task>);
-      }
+      if (onDeleteTask) onDeleteTask(taskId);
+      else onUpdateTask(taskId, { deleted: true, updatedAt: new Date() });
     },
     [onDeleteTask, onUpdateTask]
   );
@@ -1806,25 +1732,26 @@ export default function OKRManager(props: OKRManagerProps) {
   const handleToggleTaskComplete = useCallback(
     (task: Task) => {
       const newStatus: TaskStatus = task.status === "completed" ? "pending" : "completed";
-      onUpdateTask(task.id, { status: newStatus, updatedAt: new Date() } as Partial<Task>);
+      onUpdateTask(task.id, { status: newStatus, updatedAt: new Date() });
     },
     [onUpdateTask]
   );
 
   const handleDeleteKeyResult = useCallback(
     (krId: string) => {
-      if (!confirm("Delete this key result?")) return;
+      const ok = confirm("Delete this key result?");
+      if (!ok) return;
 
-      if (onDeleteKeyResult) {
-        onDeleteKeyResult(krId);
-      } else {
-        onUpdateKeyResult(krId, { deleted: true } as Partial<KeyResult>);
-      }
+      if (onDeleteKeyResult) onDeleteKeyResult(krId);
+      else onUpdateKeyResult(krId, { deleted: true, updatedAt: new Date() });
     },
     [onDeleteKeyResult, onUpdateKeyResult]
   );
 
-  // ========== CONTEXT VALUE ==========
+  // --------------------------------------------------------------------------
+  // CONTEXT VALUE
+  // --------------------------------------------------------------------------
+
   const contextValue = useMemo<OKRContextValue>(
     () => ({
       currentUserId,
@@ -1837,12 +1764,21 @@ export default function OKRManager(props: OKRManagerProps) {
       tasks: visibleTasks,
       keyResults: visibleKeyResults,
     }),
-    [currentUserId, selectedGoalId, selectedProjectId, visibleTimeBlocks, visibleProjects, visibleTasks, visibleKeyResults]
+    [
+      currentUserId,
+      selectedGoalId,
+      selectedProjectId,
+      visibleTimeBlocks,
+      visibleProjects,
+      visibleTasks,
+      visibleKeyResults,
+    ]
   );
 
-  // ========== RENDER ==========
+  // --------------------------------------------------------------------------
+  // GUARDS / LOADING
+  // --------------------------------------------------------------------------
 
-  // Not authenticated state
   if (!currentUserId) {
     return (
       <div className="flex items-center justify-center min-h-[400px] bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
@@ -1855,7 +1791,6 @@ export default function OKRManager(props: OKRManagerProps) {
     );
   }
 
-  // Loading state
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -1872,10 +1807,14 @@ export default function OKRManager(props: OKRManagerProps) {
     );
   }
 
+  // --------------------------------------------------------------------------
+  // RENDER
+  // --------------------------------------------------------------------------
+
   return (
     <OKRContext.Provider value={contextValue}>
       <div className="space-y-6">
-        {/* Action Bar */}
+        {/* Top toolbar */}
         <div className="flex flex-wrap items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
           <button
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
@@ -1895,6 +1834,7 @@ export default function OKRManager(props: OKRManagerProps) {
                 <FolderOpen className="w-4 h-4" />
                 Add Project
               </button>
+
               <button
                 className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors"
                 onClick={() => setShowCreateModal("keyResult")}
@@ -1928,7 +1868,7 @@ export default function OKRManager(props: OKRManagerProps) {
           )}
         </div>
 
-        {/* Goals Grid */}
+        {/* Goals grid */}
         {visibleGoals.length === 0 ? (
           <EmptyState
             icon={<Target className="w-6 h-6" />}
@@ -1958,7 +1898,7 @@ export default function OKRManager(props: OKRManagerProps) {
           </div>
         )}
 
-        {/* Goal Details Panel */}
+        {/* Details panel (selected goal) */}
         {selectedGoal && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Key Results */}
@@ -1996,7 +1936,7 @@ export default function OKRManager(props: OKRManagerProps) {
               )}
             </div>
 
-            {/* Projects */}
+            {/* Projects + Tasks */}
             <div className="bg-white border border-gray-200 rounded-xl p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -2031,13 +1971,13 @@ export default function OKRManager(props: OKRManagerProps) {
                 </div>
               )}
 
-              {/* Tasks (nested under selected project) */}
+              {/* Tasks section */}
               {selectedProjectId && (
                 <div className="mt-6 pt-4 border-t border-gray-100">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                       <ListTodo className="w-4 h-4 text-green-500" />
-                      Tasks
+                      Tasks {selectedProject ? `— ${selectedProject.name}` : ""}
                     </h4>
                     <button
                       className="text-sm text-blue-600 hover:text-blue-700 font-medium"
@@ -2071,7 +2011,7 @@ export default function OKRManager(props: OKRManagerProps) {
           </div>
         )}
 
-        {/* Create Modal */}
+        {/* Create modal */}
         <CreateModalContent
           type={showCreateModal}
           selectedGoalId={selectedGoalId}
@@ -2083,10 +2023,9 @@ export default function OKRManager(props: OKRManagerProps) {
           onCreateProject={onCreateProject}
           onCreateTask={onCreateTask}
           onAutoSelect={handleAutoSelect}
-          projects={visibleProjects}
         />
 
-        {/* Key Result Edit Modal */}
+        {/* Edit KR modal */}
         <KeyResultEditModal
           keyResult={editingKeyResult}
           isOpen={!!editingKeyResult}

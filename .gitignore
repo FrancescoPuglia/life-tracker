@@ -69,3 +69,5 @@ ehthumbs.db
 worktrees/.claude/
 *.local.json
 
+.env.debug
+test-results/

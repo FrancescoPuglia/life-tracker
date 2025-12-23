@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useAuth } from '@/lib/auth';
+import React, { useState, useRef, useEffect } from 'react';
+import { useAuthContext } from '@/providers/AuthProvider';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -17,31 +17,67 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  
-  const auth = useAuth();
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  // Robust autofill polling effect
+  useEffect(() => {
+    if (!isOpen) return;
+    let attempts = 0;
+    const maxAttempts = 50; // 5s at 100ms
+    let stopped = false;
+    const poll = () => {
+      if (stopped) return;
+      const e = (emailRef.current?.value ?? '').trim();
+      const p = (passwordRef.current?.value ?? '');
+      let updated = false;
+      if (e && !email) { setEmail(prev => prev || e); updated = true; }
+      if (p && !password) { setPassword(prev => prev || p); updated = true; }
+      if ((e && p) || ++attempts >= maxAttempts) { stopped = true; return; }
+      setTimeout(poll, 100);
+    };
+    poll();
+    return () => { stopped = true; };
+  }, [isOpen, mode]);
+  // Helper to get real values
+  const getEmail = () => (emailRef.current?.value ?? email).trim();
+  const getPassword = () => (passwordRef.current?.value ?? password);
+  const canSubmit = mode === 'reset'
+    ? !!getEmail() && !loading
+    : !!getEmail() && !!getPassword() && !loading;
+  const auth = useAuthContext();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const emailValue = (emailRef.current?.value ?? email).trim();
+    const passValue = (passwordRef.current?.value ?? password);
+    console.log('AuthModal submit START', { mode, emailValue, hasPassword: !!passValue, loading });
     setLoading(true);
     setError(null);
     setMessage(null);
-
     try {
       if (mode === 'signin') {
-        await auth.signIn(email, password);
-        onClose();
+        console.log('AuthModal before signIn', { emailValue });
+        await auth.signIn(emailValue, passValue);
+        console.log('AuthModal after signIn');
       } else if (mode === 'signup') {
-        await auth.signUp(email, password, displayName);
+        await auth.signUp(emailValue, passValue, displayName);
         setMessage('Account created! Please check your email to verify your account.');
         setMode('signin');
       } else if (mode === 'reset') {
-        await auth.sendPasswordReset(email);
+        await auth.sendPasswordReset(emailValue);
         setMessage('Password reset email sent! Check your inbox.');
         setMode('signin');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      if (err && typeof err === 'object' && 'code' in err && 'message' in err) {
+        console.error('AuthModal error', { code: err.code, message: err.message });
+        setError(err.message);
+      } else {
+        console.error('AuthModal error', err);
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      }
     } finally {
+      console.log('AuthModal submit FINALLY');
       setLoading(false);
     }
   };
@@ -115,8 +151,12 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
               <input
                 type="email"
                 id="email"
+                name="email"
+                autoComplete="email"
+                ref={emailRef}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
                 className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-400"
                 placeholder="your.email@example.com"
                 required
@@ -131,8 +171,12 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
                 <input
                   type="password"
                   id="password"
+                  name="password"
+                  autoComplete="current-password"
+                  ref={passwordRef}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
                   className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-400"
                   placeholder="••••••••"
                   required
@@ -143,7 +187,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={!canSubmit}
               className="w-full btn-futuristic bg-gradient-to-r from-blue-500 to-purple-600 disabled:opacity-50"
             >
               {loading ? 'Processing...' : 
