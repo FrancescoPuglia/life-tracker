@@ -70,8 +70,8 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
       }
     } catch (err) {
       if (err && typeof err === 'object' && 'code' in err && 'message' in err) {
-        console.error('AuthModal error', { code: err.code, message: err.message });
-        setError(err.message);
+        console.error('AuthModal error', { code: (err as any).code, message: (err as any).message });
+        setError(typeof (err as any).message === 'string' ? (err as any).message : 'An error occurred');
       } else {
         console.error('AuthModal error', err);
         setError(err instanceof Error ? err.message : 'An error occurred');
