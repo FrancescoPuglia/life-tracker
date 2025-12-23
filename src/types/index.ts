@@ -7,10 +7,10 @@ export type Theme = 'light' | 'dark' | 'auto';
 export interface BaseEntity {
   id: string;
   userId: string;
-  domainId?: string;
+  domainId: string;
   deleted?: boolean;
-  createdAt?: Date;
-  updatedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ====== OKR / STATUS ======
@@ -72,6 +72,8 @@ export interface Goal extends BaseEntity {
 
   targetHours?: number; // utile per OKRManager
   timeAllocationTarget: number; // Hours per week target
+
+
 
   keyResults: KeyResult[];
 

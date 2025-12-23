@@ -64,9 +64,10 @@ function deserializeTimeBlock(block: any): TimeBlock {
 function deserializeGoal(goal: any): Goal {
   return {
     ...goal,
+    domainId: goal.domainId ?? '',
     targetDate: toDateSafe(goal.targetDate),
-    createdAt: toDateSafe(goal.createdAt),
-    updatedAt: toDateSafe(goal.updatedAt),
+    createdAt: toDateSafe(goal.createdAt) ?? new Date(),
+    updatedAt: toDateSafe(goal.updatedAt) ?? new Date(),
   };
 }
 
@@ -748,9 +749,10 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     loadTimeBlocksForDate, refreshKPIs,
   ]);
 
-  return (
-    <DataContext.Provider value={value}>
-      {children}
-    </DataContext.Provider>
-  );
+  return {
+    ...keyResult,
+    domainId: keyResult.domainId ?? '',
+    createdAt: toDateSafe(keyResult.createdAt) ?? new Date(),
+    updatedAt: toDateSafe(keyResult.updatedAt) ?? new Date(),
+  };
 }
