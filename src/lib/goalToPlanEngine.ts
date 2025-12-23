@@ -461,6 +461,7 @@ export class SmartGoalToPlanEngine implements GoalToPlanEngine {
         userId: this.currentGoal.userId,
         goalId: milestone.goalId,
         domainId: 'default',
+        projectId: '',
         estimatedMinutes: template.estimatedDuration || 60,
         // tags: [milestone.title.split(' ')[0].toLowerCase()], // TODO: Add tags to Task interface
         createdAt: new Date(),

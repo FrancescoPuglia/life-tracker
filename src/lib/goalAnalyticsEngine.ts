@@ -410,7 +410,7 @@ export class GoalAnalyticsEngine {
 
   private calculateProgressAchieved(goal: Goal): number {
     if (goal.keyResults.length === 0) return 0;
-    const totalProgress = goal.keyResults.reduce((sum, kr) => sum + kr.progress, 0);
+    const totalProgress = goal.keyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0);
     return totalProgress / goal.keyResults.length;
   }
 
@@ -431,7 +431,7 @@ export class GoalAnalyticsEngine {
     const totalVelocity = keyResults.reduce((sum, kr) => {
       // Simplified velocity calculation (would be more sophisticated in real implementation)
       const daysSinceCreation = Math.max(1, Math.ceil((Date.now() - kr.createdAt.getTime()) / (1000 * 60 * 60 * 24)));
-      return sum + (kr.progress / daysSinceCreation);
+      return sum + ((kr.progress ?? 0) / daysSinceCreation);
     }, 0);
 
     return keyResults.length > 0 ? totalVelocity / keyResults.length : 0;

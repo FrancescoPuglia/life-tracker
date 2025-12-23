@@ -48,7 +48,7 @@ export interface UserPreferences {
   focusMode: boolean;
 }
 
-export interface Domain extends BaseEntity {
+export interface Domain extends Omit<BaseEntity, 'domainId'> {
   name: string;
   color: string;
   icon: string;

@@ -107,7 +107,7 @@ export default function RiskDashboard({
           
           // Trajectory prediction
           const currentProgress = goalKeyResults.length > 0 
-            ? goalKeyResults.reduce((sum, kr) => sum + kr.progress, 0) / (goalKeyResults.length * 100)
+            ? goalKeyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0) / (goalKeyResults.length * 100)
             : 0;
           
           const trajectory = await riskPredictor.predictTrajectory(goal, currentProgress);

@@ -193,7 +193,7 @@ export default function MicroCoachDashboard({
     goals.forEach(goal => {
       const goalKeyResults = keyResults.filter(kr => kr.goalId === goal.id);
       if (goalKeyResults.length > 0) {
-        const avgProgress = goalKeyResults.reduce((sum, kr) => sum + kr.progress, 0) / goalKeyResults.length;
+        const avgProgress = goalKeyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0) / goalKeyResults.length;
         progress[goal.id] = avgProgress / 100; // Convert to 0-1 scale
       } else {
         progress[goal.id] = 0;

@@ -1,100 +1,20 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef, useContext, createContext } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, useContext, createContext, type ReactNode } from 'react';
+
 import { createPortal } from 'react-dom';
+
 import { 
   Target, Calendar, Clock, TrendingUp, Plus, Trash2, Edit3, 
   CheckCircle, AlertTriangle, Flag, ChevronRight, X, Loader2,
   FolderOpen, ListTodo, AlertCircle
 } from 'lucide-react';
+import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus } from '@/types';
+
 
 // ============================================================================
-// TYPES - Definizioni complete e corrette
+// TYPES - Importati da '@/types'
 // ============================================================================
-
-type GoalStatus = "active" | "completed" | "paused" | "at_risk" | "archived";
-type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
-type Priority = "critical" | "high" | "medium" | "low";
-type TimeBlockStatus = "planned" | "in_progress" | "completed" | "overrun";
-
-interface Goal {
-  id: string;
-  userId: string;
-  domainId: string;
-  title: string;
-  description?: string;
-  status: GoalStatus;
-  priority?: Priority;
-  targetDate?: Date | unknown;
-  targetHours?: number;
-  timeAllocationTarget?: number; // ✅ Campo corretto per weekly target
-  deleted?: boolean;
-  createdAt: Date | unknown;
-  updatedAt: Date | unknown;
-}
-
-interface KeyResult {
-  id: string;
-  userId?: string;
-  domainId: string;
-  goalId: string;
-  title: string;
-  description?: string;
-  currentValue?: number;
-  targetValue?: number;
-  unit?: string;
-  status?: GoalStatus;
-  progress?: number;
-  deleted?: boolean;
-  createdAt: Date | unknown;
-  updatedAt: Date | unknown;
-}
-
-interface Project {
-  id: string;
-  userId: string;
-  domainId: string;
-  goalId: string;
-  name: string;
-  description?: string;
-  status: string;
-  priority?: Priority;
-  totalHoursTarget?: number;
-  deleted?: boolean;
-  createdAt: Date | unknown;
-  updatedAt: Date | unknown;
-}
-
-interface Task {
-  id: string;
-  userId: string;
-  domainId: string;
-  goalId?: string;
-  projectId: string;
-  title: string;
-  description?: string;
-  status: TaskStatus;
-  priority?: Priority;
-  estimatedMinutes?: number;
-  ifThenPlan?: string;
-  deleted?: boolean;
-  createdAt: Date | unknown;
-  updatedAt: Date | unknown;
-}
-
-interface TimeBlock {
-  id?: string;
-  userId?: string;
-  goalId?: string;
-  goalIds?: string[];
-  projectId?: string;
-  taskId?: string;
-  startTime: Date | unknown;
-  endTime: Date | unknown;
-  actualStartTime?: Date | unknown;
-  actualEndTime?: Date | unknown;
-  status?: string;
-}
 
 interface OKRManagerProps {
   goals: Goal[];
@@ -541,7 +461,7 @@ function useTaskMetrics(task: Task) {
 // UI COMPONENTS
 // ============================================================================
 
-const STATUS_CONFIG: Record<string, { label: string; className: string; icon?: React.ReactNode }> = {
+const STATUS_CONFIG: Record<string, { label: string; className: string; icon?: ReactNode }> = {
   active: { label: "Active", className: "bg-blue-50 text-blue-700 border-blue-200" },
   completed: { label: "Completed", className: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle className="w-3 h-3" /> },
   paused: { label: "Paused", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
@@ -601,7 +521,7 @@ function ProgressBar({ progress, size = "md", color = "blue" }: { progress: numb
   );
 }
 
-function MetricRow({ icon, label, value, subValue }: { icon: React.ReactNode; label: string; value: string; subValue?: string }) {
+function MetricRow({ icon, label, value, subValue }: { icon: ReactNode; label: string; value: string; subValue?: string }) {
   return (
     <div className="flex items-center justify-between text-sm">
       <span className="flex items-center gap-1.5 text-gray-600">
@@ -616,7 +536,7 @@ function MetricRow({ icon, label, value, subValue }: { icon: React.ReactNode; la
   );
 }
 
-function EmptyState({ icon, title, description, action }: { icon: React.ReactNode; title: string; description: string; action?: React.ReactNode }) {
+function EmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
       <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3 text-gray-400">
@@ -973,8 +893,8 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
-  children: React.ReactNode;
-  actions?: React.ReactNode;
+  children: ReactNode;
+  actions?: ReactNode;
 }
 
 function Modal({ isOpen, onClose, title, children, actions }: ModalProps) {

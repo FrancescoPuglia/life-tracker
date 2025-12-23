@@ -44,7 +44,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // RULE: This effect runs ONCE and sets up the listener
     // The listener will fire ONCE with the auth state
     // After that, status is FINAL (signedIn or signedOut)
-    console.log('AuthProvider subscribe', { authId: auth && (auth.app?.name || typeof auth) });
+    console.log('AuthProvider subscribe', { auth });
     // Timeout: if auth doesn't resolve in 5s, assume signedOut
     let timeout: ReturnType<typeof setTimeout> | undefined = undefined;
     timeout = setTimeout(() => {

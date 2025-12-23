@@ -747,12 +747,13 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     createTask, updateTask, deleteTask,
     createHabit, updateHabit, deleteHabit, logHabit,
     loadTimeBlocksForDate, refreshKPIs,
+
   ]);
 
-  return {
-    ...keyResult,
-    domainId: keyResult.domainId ?? '',
-    createdAt: toDateSafe(keyResult.createdAt) ?? new Date(),
-    updatedAt: toDateSafe(keyResult.updatedAt) ?? new Date(),
-  };
+  return (
+    <DataContext.Provider value={value}>
+      {children}
+    </DataContext.Provider>
+  );
 }
+
