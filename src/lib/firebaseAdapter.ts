@@ -146,13 +146,13 @@ export class FirebaseAdapter implements DatabaseAdapter {
 
   async create<T extends { id?: string }>(collectionName: string, data: T): Promise<T> {
     await this.init();
-    
     console.log('📝 Firebase create():', {
       collectionName,
       userId: this.userId,
       dataId: data.id,
       firestore: !!firestore,
-      isInitialized: this.isInitialized
+      isInitialized: this.isInitialized,
+      data
     });
     
     if (!firestore || !this.isInitialized) {
@@ -287,7 +287,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
 
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
-    
     console.log('📖 Firebase getAll():', {
       collectionName,
       userId: this.userId,
@@ -308,19 +307,19 @@ export class FirebaseAdapter implements DatabaseAdapter {
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
-      
       const querySnapshot = await getDocs(collectionRef);
-      console.log('📖 Firebase query result:', {
-        collectionName,
-        count: querySnapshot.size
-      });
-      
       const results: T[] = [];
       querySnapshot.forEach(doc => {
         const data = { id: doc.id, ...doc.data() };
         results.push(this.convertTimestampsToDates(data) as T);
       });
-      
+      console.log('📖 Firebase query result:', {
+        collectionName,
+        count: querySnapshot.size,
+        ids: results.map(r => (r as any).id),
+        userIds: results.map(r => (r as any).userId),
+        results
+      });
       return results;
     } catch (error) {
       console.error(`❌ Failed to get all documents from ${collectionName}:`, error);
@@ -528,5 +527,4 @@ export function createFirebaseAdapter(): FirebaseAdapter | null {
   }
 }
 
-// Create and export the adapter instance
-export const firebaseAdapter = createFirebaseAdapter();
+// (FIX) Non esportare più l'istanza globale qui. Usa solo la factory createFirebaseAdapter.
