@@ -306,7 +306,7 @@ export default function TimeBlockPlanner({
 
   const filteredBlocks = timeBlocks.filter((block, index) => {
     try {
-      const blockDate = toDateSafe(block.startTime);
+      const blockDate = toDateSafe(block.startTime, selectedDate);
       const isMatch = formatDateStringSafe(blockDate) === formatDateStringSafe(selectedDate);
       return isMatch && formatDateStringSafe(blockDate) !== 'Invalid Date';
     } catch (error) {
@@ -443,13 +443,34 @@ export default function TimeBlockPlanner({
           )}
 
           {/* Render existing blocks */}
-          {filteredBlocks.map((block) => (
+          {filteredBlocks.map((block) => {
+            // Parse times with selectedDate reference for consistent positioning
+            const startTime = toDateSafe(block.startTime, selectedDate);
+            const endTime = toDateSafe(block.endTime, selectedDate);
+            
+            // Guard for invalid durations - set minimum 1 hour for display only
+            const displayEndTime = endTime <= startTime ? new Date(startTime.getTime() + 60*60*1000) : endTime;
+            
+            // Debug log behind feature flag
+            if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+              console.log('[TimeBlockPlanner] Rendering block:', {
+                id: block.id,
+                rawStart: block.startTime,
+                rawEnd: block.endTime,
+                parsedStart: startTime.toISOString(),
+                parsedEnd: endTime.toISOString(),
+                displayEnd: displayEndTime.toISOString(),
+                selectedDate: selectedDate.toISOString()
+              });
+            }
+            
+            return (
             <div
               key={block.id}
               className={`absolute left-16 right-4 ${block.color ? 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2 text-white' : getBlockColor(block)} border-2 border-white rounded-xl shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 z-10`}
               style={{
-                top: `${getPositionFromTime(block.startTime)}px`,
-                height: `${getDurationHeight(block.startTime, block.endTime)}px`,
+                top: `${getPositionFromTime(startTime)}px`,
+                height: `${getDurationHeight(startTime, displayEndTime)}px`,
                 minHeight: '60px',
                 // Use custom color if available
                 ...(block.color ? {
@@ -472,8 +493,8 @@ export default function TimeBlockPlanner({
                   )}
                   {/* Time display più compatto */}
                   <div className="text-xs opacity-70 font-mono drop-shadow-sm">
-                    {formatTimeSafe(block.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')} - 
-                    {formatTimeSafe(block.endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')}
+                    {formatTimeSafe(startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)} - 
+                    {formatTimeSafe(endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)}
                   </div>
                 </div>
                 <div className="flex flex-col space-y-2">
@@ -511,7 +532,7 @@ export default function TimeBlockPlanner({
                   >
                     {block.status === 'completed' ? '✅' :
                      block.status === 'in_progress' ? '⏳' :
-                     block.endTime < new Date() ? '⚠️' : '📋'}
+                     endTime < new Date() ? '⚠️' : '📋'}
                   </div>
                   
                   {/* Delete button */}
@@ -530,7 +551,8 @@ export default function TimeBlockPlanner({
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {/* Drag Preview */}
           {dragPreview && (
@@ -545,8 +567,8 @@ export default function TimeBlockPlanner({
               <div className="text-white text-center">
                 <div className="text-sm font-bold">✨ New Block</div>
                 <div className="text-xs opacity-90 font-mono">
-                  {formatTimeSafe(dragPreview.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')} - 
-                  {formatTimeSafe(dragPreview.endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--')}
+                  {formatTimeSafe(dragPreview.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)} - 
+                  {formatTimeSafe(dragPreview.endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)}
                 </div>
               </div>
             </div>

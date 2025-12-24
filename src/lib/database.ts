@@ -3,7 +3,7 @@ import {
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
   Insight, Achievement, KPI, DashboardState 
 } from '@/types';
-import { DatabaseAdapter, firebaseAdapter } from './firebaseAdapter';
+import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
 
 // Utility: Recursively remove undefined fields from objects/arrays, preserve Date
@@ -804,6 +804,15 @@ class IndexedDBAdapter implements DatabaseAdapter {
 // 🔥 CRITICAL FIX: Main Database Wrapper with proper Firebase restoration
 // ============================================================================
 class LifeTrackerDB {
+
+  /**
+   * Returns the current adapter type as a string (for logging/debug only)
+   */
+  public getAdapterType(): string {
+    // Expose adapter type for debug/logging
+    // @ts-ignore: adapter is private, but this is for diagnostics only
+    return this.adapter?.constructor?.name || 'Unknown';
+  }
   private adapter: DatabaseAdapter;
   private useFirebase: boolean;
   private lastUserId: string | null = null;
@@ -827,33 +836,29 @@ class LifeTrackerDB {
     }
 
     const savedUserId = sessionStorage.getItem('firebase_userId');
-    
     console.log('🔄 restoreFirebaseModeSync called:', {
-      savedUserId,
-      firebaseAdapterExists: !!firebaseAdapter
+      savedUserId
     });
 
-    if (savedUserId && firebaseAdapter) {
-      console.log('✅ Restoring Firebase mode SYNCHRONOUSLY from sessionStorage');
-      
-      // Set all the state atomically
-      this._activeUserId = savedUserId;
-      this.lastUserId = savedUserId;
-      this.adapter = firebaseAdapter;
-      this.useFirebase = true;
-      
-      // Set userId on the adapter (sync operation)
-      firebaseAdapter.setUserId(savedUserId);
-      
-      console.log('✅ Firebase mode restored:', {
-        useFirebase: this.useFirebase,
-        activeUserId: this._activeUserId,
-        adapterType: this.adapter.constructor.name
-      });
-    } else if (!savedUserId) {
+    if (savedUserId) {
+      const adapter = createFirebaseAdapter();
+      if (adapter) {
+        console.log('✅ Restoring Firebase mode SYNCHRONOUSLY from sessionStorage');
+        this._activeUserId = savedUserId;
+        this.lastUserId = savedUserId;
+        this.adapter = adapter;
+        this.useFirebase = true;
+        adapter.setUserId(savedUserId);
+        console.log('✅ Firebase mode restored:', {
+          useFirebase: this.useFirebase,
+          activeUserId: this._activeUserId,
+          adapterType: this.adapter.constructor.name
+        });
+      } else {
+        console.warn('⚠️ Firebase adapter not available, will use IndexedDB');
+      }
+    } else {
       console.log('ℹ️ No saved userId in sessionStorage, will use IndexedDB');
-    } else if (!firebaseAdapter) {
-      console.warn('⚠️ Firebase adapter not available, will use IndexedDB');
     }
   }
 
@@ -863,7 +868,6 @@ class LifeTrackerDB {
     console.log('🔧 configureAdapter called:', {
       inBrowser,
       hasApiKey: !!firebaseConfig?.apiKey,
-      firebaseAdapterExists: !!firebaseAdapter,
       activeUserId: this._activeUserId,
       currentUseFirebase: this.useFirebase
     });
@@ -876,7 +880,7 @@ class LifeTrackerDB {
     }
 
     // 🔥 FIX: If already using Firebase (restored from session), don't override!
-    if (this.useFirebase && this.adapter === firebaseAdapter) {
+    if (this.useFirebase && this.adapter && this.adapter.constructor.name === 'FirebaseAdapter') {
       console.log('✅ Already using Firebase adapter, skipping reconfiguration');
       return;
     }
@@ -902,7 +906,7 @@ class LifeTrackerDB {
     console.time('DB_INIT');
     
     // 🔥 CRITICAL: If Firebase mode was restored in constructor, just init the adapter
-    if (this.useFirebase && this.adapter === firebaseAdapter) {
+    if (this.useFirebase && this.adapter && this.adapter.constructor.name === 'FirebaseAdapter') {
       console.log('🔥 Firebase mode already active, initializing Firebase adapter');
       try {
         await this.adapter.init();
@@ -992,47 +996,45 @@ class LifeTrackerDB {
     console.log('🔥 switchToFirebase called:', {
       userId,
       currentUseFirebase: this.useFirebase,
-      currentActiveUserId: this._activeUserId,
-      firebaseAdapterExists: !!firebaseAdapter
+      currentActiveUserId: this._activeUserId
     });
-    
-    // 🔥 OPTIMIZATION: If already using Firebase with same userId, skip
-    if (this.useFirebase && this._activeUserId === userId && this.adapter === firebaseAdapter) {
+
+    // If already using Firebase with same userId, skip
+    if (this.useFirebase && this._activeUserId === userId && this.adapter && this.adapter.constructor.name === 'FirebaseAdapter') {
       console.log('✅ Already using Firebase with same userId, skipping switch');
       return;
     }
-    
-    if (!firebaseAdapter) {
+
+    const adapter = createFirebaseAdapter();
+    if (!adapter) {
       throw new Error('Cannot switch to Firebase - adapter not initialized');
     }
-    
+
     // Atomic state update
     this._activeUserId = userId;
     this.lastUserId = userId;
-    this.adapter = firebaseAdapter;
-    
-    // Set userId on adapter (sync)
-    firebaseAdapter.setUserId(userId);
-    
+    this.adapter = adapter;
+    adapter.setUserId(userId);
+
     // Persist to sessionStorage for refresh survival
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('firebase_userId', userId);
       console.log('💾 userId persisted to sessionStorage');
     }
-    
+
     // Init adapter
     await this.adapter.init();
-    
+
     // Set flag AFTER everything is ready
     this.useFirebase = true;
     this._isInitialized = true;
-    
+
     console.log('✅ Switched to Firebase adapter:', {
       userId,
       useFirebase: this.useFirebase,
       adapterType: this.adapter.constructor.name
     });
-    
+
     // Verify invariants
     this.checkInvariants(userId);
   }

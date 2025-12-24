@@ -5,6 +5,7 @@ import {
   TimeBlock, Goal, KeyResult, Project, Task, Habit, HabitLog, KPI 
 } from '@/types';
 import { db, sanitizeForStorage } from '@/lib/database';
+import { toDateSafe } from '@/utils/dateUtils';
 
 // ============================================================================
 // DATA STATE MACHINE
@@ -33,26 +34,44 @@ function normalizeTimeBlockStatus(input: unknown): TimeBlockStatus {
   return "planned";
 }
 
-function toDateSafe(value: unknown, fallback?: Date): Date {
-  if (value instanceof Date && !isNaN(value.getTime())) return value;
-  if (value && typeof value === 'object' && 'toDate' in value) {
-    try {
-      const d = (value as { toDate: () => Date }).toDate();
-      if (d instanceof Date && !isNaN(d.getTime())) return d;
-    } catch { /* ignore */ }
-  }
-  if (typeof value === 'string' || typeof value === 'number') {
-    const d = new Date(value);
-    if (!isNaN(d.getTime())) return d;
-  }
-  return fallback ?? new Date();
-}
+// toDateSafe now imported from @/utils/dateUtils
 
 function deserializeTimeBlock(block: any): TimeBlock {
+  // Debug log behind feature flag
+  if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+    console.log('[DataProvider] Deserializing timeBlock:', {
+      id: block.id,
+      rawStartTime: block.startTime,
+      rawEndTime: block.endTime,
+      startType: typeof block.startTime,
+      endType: typeof block.endTime,
+      hasToDate: block.startTime && typeof block.startTime.toDate === 'function',
+      isStartDate: block.startTime instanceof Date,
+      isEndDate: block.endTime instanceof Date,
+      startTimeValid: block.startTime instanceof Date ? !isNaN(block.startTime.getTime()) : 'not-date',
+      endTimeValid: block.endTime instanceof Date ? !isNaN(block.endTime.getTime()) : 'not-date'
+    });
+  }
+
+  const startTime = toDateSafe(block.startTime);
+  const endTime = toDateSafe(block.endTime);
+  
+  // EXTREME DEBUG: Log the parsed results
+  if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+    console.log('[DataProvider] Deserialized timeBlock results:', {
+      id: block.id,
+      parsedStart: startTime.toISOString(),
+      parsedEnd: endTime.toISOString(),
+      startHour: startTime.getHours(),
+      endHour: endTime.getHours(),
+      isSameDay: startTime.toDateString() === endTime.toDateString()
+    });
+  }
+
   return {
     ...block,
-    startTime: toDateSafe(block.startTime),
-    endTime: toDateSafe(block.endTime),
+    startTime,
+    endTime,
     createdAt: toDateSafe(block.createdAt),
     updatedAt: toDateSafe(block.updatedAt),
     actualStartTime: block.actualStartTime ? toDateSafe(block.actualStartTime) : undefined,
@@ -204,100 +223,92 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     keyResultsProgress: 0,
   });
 
-  // ========== DATA LOADING ==========
+  // ========== DATA LOADING & REHYDRATION ========== 
   useEffect(() => {
-    // RULE: Only load if userId changed
-    if (loadedForUser === userId) {
-      return;
-    }
-    
-    // RULE: Prevent concurrent loads
-    if (status === 'loading') {
-      return;
-    }
-    
-    console.log('[DataProvider] Loading data for user:', userId);
+    // Always reload when userId or adapter mode changes
+    if (!userId) return;
     setStatus('loading');
-    
-    const loadData = async () => {
-      try {
-        // Step 1: Init DB
-        await db.init();
-        
-        // Step 2: Switch to Firebase
+    (async () => {
+      await db.init();
+      // Forza adapter: se userId valido, sempre Firebase
+      if (userId && db.switchToFirebase) {
         try {
           const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
-          try {
-            await ensureFirestorePersistence(firestore);
-          } catch (e) {
-            console.warn('[DataProvider] Persistence warning:', e);
-          }
+          try { await ensureFirestorePersistence(firestore); } catch (e) { console.warn('[DataProvider] Persistence warning:', e); }
           await db.switchToFirebase(userId);
         } catch (e) {
           console.warn('[DataProvider] Firebase switch failed, using local:', e);
         }
-        
-        // Step 3: Load ALL data in parallel
-        const [
-          rawTimeBlocks,
-          rawGoals,
-          rawProjects,
-          rawTasks,
-          rawKeyResults,
-          rawHabits,
-          rawHabitLogs,
-        ] = await Promise.all([
-          db.getAll<TimeBlock>('timeBlocks').catch(() => []),
-          db.getAll<Goal>('goals').catch(() => []),
-          db.getAll<Project>('projects').catch(() => []),
-          db.getAll<Task>('tasks').catch(() => []),
-          db.getAll<KeyResult>('keyResults').catch(() => []),
-          db.getAll<Habit>('habits').catch(() => []),
-          db.getAll<HabitLog>('habitLogs').catch(() => []),
-        ]);
-        
-        console.log('[DataProvider] Raw data loaded:', {
-          timeBlocks: rawTimeBlocks.length,
-          goals: rawGoals.length,
-          projects: rawProjects.length,
-          tasks: rawTasks.length,
-        });
-        
-        // Step 4: Deserialize and filter by userId
-        setTimeBlocks(rawTimeBlocks.map(deserializeTimeBlock).filter(x => x.userId === userId));
-        setGoals(rawGoals.map(deserializeGoal).filter(x => x.userId === userId && !x.deleted));
-        setProjects(rawProjects.map(deserializeProject).filter(x => x.userId === userId && !x.deleted));
-        setTasks(rawTasks.map(deserializeTask).filter(x => x.userId === userId && !x.deleted));
-        setKeyResults(rawKeyResults.map(deserializeKeyResult).filter(x => x.userId === userId && !x.deleted));
-        setHabits(rawHabits.map(deserializeHabit).filter(x => x.userId === userId && !x.deleted));
-        setHabitLogs(rawHabitLogs.map(deserializeHabitLog).filter(x => x.userId === userId));
-        
-        // Step 5: Load KPIs
-        try {
-          const newKpis = await db.calculateTodayKPIs(userId);
-          setKpis(newKpis);
-        } catch (e) {
-          console.warn('[DataProvider] KPI calculation failed:', e);
-        }
-        
-        // FINAL STATE
-        setLoadedForUser(userId);
-        setStatus('ready');
-        console.log('[DataProvider] Data ready for user:', userId);
-        
-      } catch (error) {
-        console.error('[DataProvider] Data load failed:', error);
-        setStatus('error');
       }
-    };
-    
-    loadData();
-  }, [userId, loadedForUser, status]);
+      // Carica tutto
+      const [rawTimeBlocks, rawGoals, rawProjects, rawTasks, rawKeyResults, rawHabits, rawHabitLogs] = await Promise.all([
+        db.getAll<TimeBlock>('timeBlocks').catch(() => []),
+        db.getAll<Goal>('goals').catch(() => []),
+        db.getAll<Project>('projects').catch(() => []),
+        db.getAll<Task>('tasks').catch(() => []),
+        db.getAll<KeyResult>('keyResults').catch(() => []),
+        db.getAll<Habit>('habits').catch(() => []),
+        db.getAll<HabitLog>('habitLogs').catch(() => []),
+      ]);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [REHYDRATE] source:', db.getAdapterType(), { userId });
+        console.log('[DataProvider] [REHYDRATE] counts:', {
+          goals: rawGoals.length, projects: rawProjects.length, tasks: rawTasks.length, timeBlocks: rawTimeBlocks.length
+        });
+        console.log('[DataProvider] [REHYDRATE] rawTimeBlocks:', rawTimeBlocks);
+        console.log('[DataProvider] [REHYDRATE] rawGoals:', rawGoals);
+      }
 
-  // ========== CRUD: TimeBlock ==========
+      // Debug timeBlock rehydration behind feature flag
+      if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1' && rawTimeBlocks.length > 0) {
+        console.log('[DataProvider] Rehydrating timeBlocks:', {
+          count: rawTimeBlocks.length,
+          samples: rawTimeBlocks.slice(0, 3).map(tb => ({
+            id: tb.id,
+            rawStart: tb.startTime,
+            rawEnd: tb.endTime,
+            startType: typeof tb.startTime,
+            endType: typeof tb.endTime
+          }))
+        });
+      }
+      setTimeBlocks(rawTimeBlocks.map(deserializeTimeBlock).filter(x => x.userId === userId));
+      setGoals(rawGoals.map(deserializeGoal).filter(x => x.userId === userId && !x.deleted));
+      setProjects(rawProjects.map(deserializeProject).filter(x => x.userId === userId && !x.deleted));
+      setTasks(rawTasks.map(deserializeTask).filter(x => x.userId === userId && !x.deleted));
+      setKeyResults(rawKeyResults.map(deserializeKeyResult).filter(x => x.userId === userId && !x.deleted));
+      setHabits(rawHabits.map(deserializeHabit).filter(x => x.userId === userId && !x.deleted));
+      setHabitLogs(rawHabitLogs.map(deserializeHabitLog).filter(x => x.userId === userId));
+      try {
+        const newKpis = await db.calculateTodayKPIs(userId);
+        setKpis(newKpis);
+      } catch (e) {
+        console.warn('[DataProvider] KPI calculation failed:', e);
+      }
+      setLoadedForUser(userId);
+      setStatus('ready');
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [REHYDRATE] done for user:', userId);
+      }
+    })();
+  }, [userId, db.getAdapterType()]);
+
+  // ========== KPI Refresh (must be above TimeBlock CRUD for deps) ==========
+  const refreshKPIs = useCallback(async () => {
+    try {
+      const newKpis = await db.calculateTodayKPIs(userId);
+      setKpis(newKpis);
+    } catch (error) {
+      console.warn('[DataProvider] Refresh KPIs failed:', error);
+    }
+  }, [userId]);
+
+  // ========== CRUD: TimeBlock ========== 
   const createTimeBlock = useCallback(async (data: Partial<TimeBlock>) => {
-    const startTime = data.startTime ? toDateSafe(data.startTime) : new Date();
-    const endTime = data.endTime ? toDateSafe(data.endTime) : new Date(startTime.getTime() + 60 * 60 * 1000);
+    // Use today as fallback reference if times can't be parsed
+    const today = new Date();
+    const startTime = data.startTime ? toDateSafe(data.startTime, today) : new Date();
+    const endTime = data.endTime ? toDateSafe(data.endTime, today) : new Date(startTime.getTime() + 60 * 60 * 1000);
     const now = new Date();
     
     const block: TimeBlock = {
@@ -312,54 +323,117 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       updatedAt: now,
     } as TimeBlock;
 
+    // Debug log behind feature flag
+    if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+      console.log('[DataProvider] Creating timeBlock:', {
+        id: block.id,
+        rawStart: data.startTime,
+        rawEnd: data.endTime,
+        parsedStart: startTime.toISOString(),
+        parsedEnd: endTime.toISOString(),
+        userId,
+        adapter: db.getAdapterType()
+      });
+    }
+
     // Optimistic
     setTimeBlocks(prev => [...prev, block]);
 
     try {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [DEBUG] createTimeBlock: about to call db.create', {
+          userId,
+          adapter: db.getAdapterType(),
+          block
+        });
+      }
       const saved = await db.create<TimeBlock>('timeBlocks', block);
       setTimeBlocks(prev => prev.map(b => b.id === block.id ? deserializeTimeBlock(saved) : b));
+      await refreshKPIs();
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [PROGRESS] createTimeBlock', {
+          timeBlocksCount: (timeBlocks?.length || 0) + 1,
+          goalId: block.goalId, projectId: block.projectId, taskId: block.taskId,
+          saved
+        });
+      }
     } catch (error) {
       console.error('[DataProvider] Create timeblock failed:', error);
       setTimeBlocks(prev => prev.filter(b => b.id !== block.id));
     }
-  }, [userId]);
+  }, [userId, refreshKPIs, timeBlocks]);
 
   const updateTimeBlock = useCallback(async (id: string, updates: Partial<TimeBlock>) => {
     const existing = timeBlocks.find(b => b.id === id);
     if (!existing) return;
     
+    // EXTREME DEBUG: Log what we're updating
+    if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+      console.log('[DataProvider] updateTimeBlock called:', {
+        id,
+        updates,
+        existingStartTime: existing.startTime,
+        existingEndTime: existing.endTime,
+        existingStartType: typeof existing.startTime,
+        existingEndType: typeof existing.endTime,
+        updatesStartTime: updates.startTime,
+        updatesEndTime: updates.endTime,
+        updatesStartType: typeof updates.startTime,
+        updatesEndType: typeof updates.endTime
+      });
+    }
+    
     const updated: TimeBlock = {
       ...existing,
       ...updates,
       status: normalizeTimeBlockStatus(updates.status ?? existing.status),
-      startTime: updates.startTime ? toDateSafe(updates.startTime) : existing.startTime,
-      endTime: updates.endTime ? toDateSafe(updates.endTime) : existing.endTime,
+      startTime: updates.startTime ? toDateSafe(updates.startTime, existing.startTime) : existing.startTime,
+      endTime: updates.endTime ? toDateSafe(updates.endTime, existing.endTime) : existing.endTime,
       updatedAt: new Date(),
     };
     
-    setTimeBlocks(prev => prev.map(b => b.id === id ? updated : b));
+    // EXTREME DEBUG: Log the result
+    if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+      console.log('[DataProvider] updateTimeBlock result:', {
+        id,
+        updatedStartTime: updated.startTime,
+        updatedEndTime: updated.endTime,
+        updatedStartISO: updated.startTime.toISOString(),
+        updatedEndISO: updated.endTime.toISOString()
+      });
+    }
     
+    setTimeBlocks(prev => prev.map(b => b.id === id ? updated : b));
     try {
       await db.update('timeBlocks', sanitizeForStorage(updated));
+      await refreshKPIs();
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [PROGRESS] updateTimeBlock', {
+          id, goalId: updated.goalId, projectId: updated.projectId, taskId: updated.taskId
+        });
+      }
     } catch (error) {
       console.error('[DataProvider] Update timeblock failed:', error);
       setTimeBlocks(prev => prev.map(b => b.id === id ? existing : b));
     }
-  }, [timeBlocks]);
+  }, [timeBlocks, refreshKPIs]);
 
   const deleteTimeBlock = useCallback(async (id: string) => {
     const existing = timeBlocks.find(b => b.id === id);
     if (!existing) return;
     
     setTimeBlocks(prev => prev.filter(b => b.id !== id));
-    
     try {
       await db.delete('timeBlocks', id);
+      await refreshKPIs();
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [PROGRESS] deleteTimeBlock', { id });
+      }
     } catch (error) {
       console.error('[DataProvider] Delete timeblock failed:', error);
       setTimeBlocks(prev => [...prev, existing]);
     }
-  }, [timeBlocks]);
+  }, [timeBlocks, refreshKPIs]);
 
   // ========== CRUD: Goal ==========
   const createGoal = useCallback(async (data: Partial<Goal>): Promise<string | undefined> => {
@@ -378,8 +452,18 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     setGoals(prev => [...prev, goal]);
 
     try {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [DEBUG] createGoal: about to call db.create', {
+          userId,
+          adapter: db.getAdapterType(),
+          goal
+        });
+      }
       const saved = await db.create<Goal>('goals', goal);
       setGoals(prev => prev.map(g => g.id === goal.id ? deserializeGoal(saved) : g));
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[DataProvider] [PROGRESS] createGoal', { goalId: goal.id, saved });
+      }
       return saved.id;
     } catch (error) {
       console.error('[DataProvider] Create goal failed:', error);
@@ -696,14 +780,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     }
   }, [userId]);
 
-  const refreshKPIs = useCallback(async () => {
-    try {
-      const newKpis = await db.calculateTodayKPIs(userId);
-      setKpis(newKpis);
-    } catch (error) {
-      console.warn('[DataProvider] Refresh KPIs failed:', error);
-    }
-  }, [userId]);
+
 
   // ========== Context Value ==========
   const value: DataContextValue = useMemo(() => ({
