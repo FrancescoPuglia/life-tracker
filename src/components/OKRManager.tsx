@@ -493,7 +493,8 @@ function useGoalMetrics(goal: Goal) {
 
     // 🎯 CHRISTMAS FIX: Prioritize ACTUAL HOURS over Key Results for life tracking
     // This is a goal-centric time tracking app - hours are the primary metric!
-    const progress = targetHours > 0 && actualHours > 0 ? Math.round(hoursProgress) : (krProgress !== null ? krProgress : 0);
+    // 🔧 SHERLOCK FIX: Preserve small percentages (0.1% shouldn't become 0%)
+    const progress = targetHours > 0 && actualHours > 0 ? Math.round(hoursProgress * 10) / 10 : (krProgress !== null ? krProgress : 0);
     const variance = actualHours - targetHours;
     const efficiency = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
 
@@ -550,19 +551,26 @@ function useProjectMetrics(project: Project) {
     const completedTasks = projectTasks.filter((t) => t.status === "completed").length;
     const totalTasks = projectTasks.length;
 
+    // 🔧 SHERLOCK FIX: Always prioritize HOURS over tasks for progress calculation
+    // This aligns with the GOAL-CENTRIC time tracking philosophy!
     let progress = 0;
-    if (totalTasks > 0) {
+    const actualHours = actualResult.totalMinutes / 60;
+    const targetHours = project.totalHoursTarget ?? 0;
+    
+    if (targetHours > 0 && actualHours > 0) {
+      // Primary: Hours-based progress (like goals)
+      progress = (actualHours / targetHours) * 100;
+    } else if (totalTasks > 0) {
+      // Fallback: Task completion percentage
       progress = (completedTasks / totalTasks) * 100;
-    } else if ((project.totalHoursTarget ?? 0) > 0) {
-      progress = clamp((actualResult.totalMinutes / 60 / (project.totalHoursTarget ?? 1)) * 100, 0, 100);
     }
 
     return {
       plannedHours: plannedResult.totalMinutes / 60,
-      actualHours: actualResult.totalMinutes / 60,
+      actualHours,
       completedTasks,
       totalTasks,
-      progress: Math.round(progress),
+      progress: Math.round(progress * 10) / 10, // 🔧 Preserve decimal precision
     };
   }, [project, timeBlocks, tasks, currentUserId]);
 }

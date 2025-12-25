@@ -699,56 +699,182 @@ export default function TimeBlockPlanner({
         </div>
         )}
 
-        {/* Week View */}
+        {/* Week View - Google Calendar Style */}
         {viewMode === 'week' && (
-          <div className="bg-white p-4">
-            <div className="grid grid-cols-8 gap-2">
-              {/* Time labels */}
-              <div className="space-y-8 pt-12">
-                {[9, 12, 15, 18, 21].map(hour => (
-                  <div key={hour} className="text-xs text-gray-500 text-right pr-2">
-                    {formatTime(hour)}
+          <div className="bg-white">
+            <div className="flex">
+              {/* Time Column */}
+              <div className="w-16 flex-shrink-0 border-r border-gray-200">
+                {/* Empty header space */}
+                <div className="h-12 border-b border-gray-200"></div>
+                {/* Hour slots */}
+                {HOURS.map(hour => (
+                  <div
+                    key={hour}
+                    className="border-b border-gray-100 text-xs text-gray-500 text-right pr-2 flex items-start justify-end"
+                    style={{ height: `${HOUR_HEIGHT}px` }}
+                  >
+                    <span className="mt-1">{formatTime(hour)}</span>
                   </div>
                 ))}
               </div>
-              
-              {/* Day columns */}
-              {getViewPeriodDates(selectedDate, 'week').map((date, index) => {
-                const dayBlocks = filteredBlocks.filter(block => {
-                  const blockDate = toDateSafe(block.startTime, date);
-                  return formatDateStringSafe(blockDate) === formatDateStringSafe(date);
-                });
-                
-                return (
-                  <div key={index} className="min-h-64 border-l border-gray-100">
-                    <div className="text-center mb-2 p-2 border-b border-gray-100">
-                      <div className="text-sm font-medium text-gray-900">
-                        {date.toLocaleDateString('en-US', { weekday: 'short' })}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {date.getDate()}
-                      </div>
-                    </div>
+
+              {/* Days Grid */}
+              <div className="flex-1 overflow-x-auto">
+                <div className="grid grid-cols-7 min-w-full">
+                  {getViewPeriodDates(selectedDate, 'week').map((date, dayIndex) => {
+                    const dayBlocks = filteredBlocks.filter(block => {
+                      const blockDate = toDateSafe(block.startTime, date);
+                      return formatDateStringSafe(blockDate) === formatDateStringSafe(date);
+                    });
+
+                    const isToday = date.toDateString() === new Date().toDateString();
                     
-                    <div className="space-y-1 p-1">
-                      {dayBlocks.map((block) => (
-                        <div
-                          key={block.id}
-                          className="text-xs p-2 rounded text-white cursor-pointer hover:shadow-md transition-shadow"
-                          style={{ backgroundColor: block.color || getDefaultColorForType(block.type) }}
-                          onClick={() => setSelectedBlock(block)}
-                          title={`${block.title} - ${formatTimeSafe(block.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}`}
-                        >
-                          <div className="font-medium truncate">{getBlockIcon(block)} {block.title}</div>
-                          <div className="opacity-75">
-                            {formatTimeSafe(block.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}
+                    return (
+                      <div key={dayIndex} className="border-r border-gray-200 relative">
+                        {/* Day Header */}
+                        <div className={`h-12 border-b border-gray-200 flex flex-col items-center justify-center text-center ${isToday ? 'bg-blue-50' : 'bg-gray-50'}`}>
+                          <div className="text-xs text-gray-600 font-medium">
+                            {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                          </div>
+                          <div className={`text-sm font-bold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                            {date.getDate()}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+
+                        {/* Hour Grid for this day */}
+                        <div className="relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
+                          {/* Hour grid lines */}
+                          {HOURS.map(hour => (
+                            <div
+                              key={hour}
+                              className="absolute left-0 right-0 border-b border-gray-100 hover:bg-blue-50 transition-colors group cursor-pointer"
+                              style={{ 
+                                top: `${hour * HOUR_HEIGHT}px`, 
+                                height: `${HOUR_HEIGHT}px` 
+                              }}
+                              onClick={() => {
+                                const clickDate = new Date(date);
+                                clickDate.setHours(hour, 0, 0, 0);
+                                if (!currentUserId) {
+                                  console.error('Cannot create time block: userId not available');
+                                  return;
+                                }
+                                const newBlock: Partial<TimeBlock> = {
+                                  startTime: clickDate,
+                                  endTime: new Date(clickDate.getTime() + 60*60*1000),
+                                  title: 'New Time Block',
+                                  status: 'planned',
+                                  type: 'work',
+                                  userId: currentUserId,
+                                  domainId: 'domain-1',
+                                };
+                                setNewBlockData(newBlock);
+                                setShowCreateModal(true);
+                              }}
+                            >
+                              <button
+                                className={`absolute right-2 top-1 transition-opacity w-5 h-5 rounded-full text-xs flex items-center justify-center ${
+                                  isReady
+                                    ? 'opacity-0 group-hover:opacity-100 bg-blue-500 text-white hover:bg-blue-600'
+                                    : 'opacity-50 bg-gray-400 text-gray-200 cursor-not-allowed'
+                                }`}
+                                title={isReady ? `Add block at ${formatTime(hour)}` : 'Please log in first'}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isReady || !currentUserId) return;
+                                  const clickDate = new Date(date);
+                                  clickDate.setHours(hour, 0, 0, 0);
+                                  const newBlock: Partial<TimeBlock> = {
+                                    startTime: clickDate,
+                                    endTime: new Date(clickDate.getTime() + 60*60*1000),
+                                    title: 'New Time Block',
+                                    status: 'planned',
+                                    type: 'work',
+                                    userId: currentUserId,
+                                    domainId: 'domain-1',
+                                  };
+                                  setNewBlockData(newBlock);
+                                  setShowCreateModal(true);
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
+                          ))}
+
+                          {/* Time blocks for this day */}
+                          {dayBlocks.map((block) => {
+                            const startTime = toDateSafe(block.startTime, date);
+                            const endTime = toDateSafe(block.endTime, date);
+                            const displayEndTime = endTime <= startTime ? new Date(startTime.getTime() + 60*60*1000) : endTime;
+                            
+                            return (
+                              <div
+                                key={block.id}
+                                className={`absolute left-1 right-1 ${block.color ? 'font-bold rounded-lg hover:shadow-lg transform hover:scale-105 transition-all duration-200 border text-white' : getBlockColor(block)} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 z-10 border`}
+                                style={{
+                                  top: `${getPositionFromTime(startTime)}px`,
+                                  height: `${getDurationHeight(startTime, displayEndTime)}px`,
+                                  minHeight: '30px',
+                                  ...(block.color ? {
+                                    backgroundColor: block.color,
+                                    borderColor: block.color + '80'
+                                  } : {})
+                                }}
+                                onClick={() => setSelectedBlock(block)}
+                                title={`${block.title} - ${formatTimeSafe(startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)} to ${formatTimeSafe(displayEndTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}`}
+                              >
+                                <div className="p-2 h-full flex flex-col justify-between">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-xs font-bold truncate mb-1 drop-shadow-sm">
+                                      {getBlockIcon(block)} {block.title}
+                                    </div>
+                                    <div className="text-xs opacity-75 font-mono drop-shadow-sm">
+                                      {formatTimeSafe(startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Quick actions */}
+                                  <div className="flex justify-end space-x-1 mt-1">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const newStatus = block.status === 'completed' ? 'planned' : 'completed';
+                                        onUpdateTimeBlock(block.id, { 
+                                          status: newStatus,
+                                          ...(newStatus === 'completed' && !block.actualStartTime ? {
+                                            actualStartTime: block.startTime,
+                                            actualEndTime: block.endTime
+                                          } : {})
+                                        });
+                                      }}
+                                      className="text-xs hover:scale-110 transition-transform"
+                                      title={block.status === 'completed' ? 'Mark as planned' : 'Mark as completed'}
+                                    >
+                                      {block.status === 'completed' ? '✅' : '⭕'}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* Current time line (only for today) */}
+                          {isToday && (
+                            <div
+                              className="absolute left-0 right-0 h-0.5 bg-red-500 z-20 pointer-events-none"
+                              style={{ top: `${getPositionFromTime(new Date())}px` }}
+                            >
+                              <div className="absolute -left-1 -top-1 w-3 h-3 bg-red-500 rounded-full"></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}
