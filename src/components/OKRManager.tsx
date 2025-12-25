@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { 
   Target, Calendar, Clock, TrendingUp, Plus, Trash2, Edit3, 
   CheckCircle, AlertTriangle, Flag, ChevronRight, X, Loader2,
-  FolderOpen, ListTodo, AlertCircle
+  FolderOpen, ListTodo, AlertCircle, Check
 } from 'lucide-react';
 import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus } from '@/types';
 
@@ -127,9 +127,133 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+// ============================================================================
+// EDITABLE TEXT COMPONENT - Supreme Detective Implementation
+// ============================================================================
+
+interface EditableTextProps {
+  value: string;
+  onSave: (newValue: string) => void;
+  className?: string;
+  placeholder?: string;
+  maxLength?: number;
+  variant?: 'title' | 'subtitle' | 'body';
+}
+
+function EditableText({ 
+  value, 
+  onSave, 
+  className = '', 
+  placeholder = 'Enter text...', 
+  maxLength = 100,
+  variant = 'body' 
+}: EditableTextProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const variantClasses = {
+    title: 'text-lg font-semibold text-gray-900',
+    subtitle: 'font-medium text-gray-900', 
+    body: 'font-medium text-sm text-gray-900'
+  };
+
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSave = async () => {
+    const trimmed = editValue.trim();
+    if (!trimmed || trimmed === value || isSubmitting) return;
+    
+    setIsSubmitting(true);
+    try {
+      await onSave(trimmed);
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Failed to save:', error);
+      setEditValue(value); // Revert on error
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditValue(value);
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleCancel();
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <input
+          ref={inputRef}
+          type="text"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleSave}
+          className={`
+            flex-1 min-w-0 px-2 py-1 bg-white border border-blue-300 rounded 
+            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+            ${variantClasses[variant]} ${className}
+          `}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          disabled={isSubmitting}
+        />
+        {isSubmitting && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 min-w-0 flex-1 group">
+      <span className={`truncate ${variantClasses[variant]} ${className}`}>
+        {value}
+      </span>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsEditing(true);
+        }}
+        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-gray-400 hover:text-blue-500 hover:bg-blue-50"
+        title="Rename"
+        aria-label="Rename"
+      >
+        <Edit3 className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 // ✅ FIX: Include "overrun" status for actual time
 function statusAllowed(mode: Mode, status?: string): boolean {
   if (!status) return false;
+  
+  // 🔍 DETECTIVE DEBUG - Status filtering investigation
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[statusAllowed] DETECTIVE DEBUG:', { mode, status, result: mode === "actual" ? (status === "completed" || status === "overrun") : ["planned", "in_progress", "completed"].includes(status) });
+  }
+  
   if (mode === "actual") {
     return status === "completed" || status === "overrun"; // CRITICAL FIX
   }
@@ -217,6 +341,22 @@ function aggregateProjectMinutes(args: {
   const { projectId, mode, timeBlocks, userId } = args;
 
   const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+  
+  // 🔍 DETECTIVE DEBUG - Critical aggregation investigation
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[aggregateProjectMinutes] DETECTIVE DEBUG:', {
+      projectId,
+      mode,
+      totalTimeBlocks: timeBlocks.length,
+      userTimeBlocks: userTimeBlocks.length,
+      matchingProjectBlocks: userTimeBlocks.filter(tb => tb.projectId === projectId),
+      statusAllowedBlocks: userTimeBlocks.filter(tb => statusAllowed(mode, tb.status)),
+      finalMatchingBlocks: userTimeBlocks.filter(tb => 
+        statusAllowed(mode, tb.status) && tb.projectId === projectId
+      )
+    });
+  }
+  
   const seen = new Set<string>();
   let totalMinutes = 0;
 
@@ -351,7 +491,9 @@ function useGoalMetrics(goal: Goal) {
       krProgress = Math.round(avgKR);
     }
 
-    const progress = krProgress !== null ? krProgress : Math.round(hoursProgress);
+    // 🎯 CHRISTMAS FIX: Prioritize ACTUAL HOURS over Key Results for life tracking
+    // This is a goal-centric time tracking app - hours are the primary metric!
+    const progress = targetHours > 0 && actualHours > 0 ? Math.round(hoursProgress) : (krProgress !== null ? krProgress : 0);
     const variance = actualHours - targetHours;
     const efficiency = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
 
@@ -374,6 +516,18 @@ function useProjectMetrics(project: Project) {
   return useMemo(() => {
     if (!currentUserId) {
       return { plannedHours: 0, actualHours: 0, completedTasks: 0, totalTasks: 0, progress: 0 };
+    }
+
+    // 🔍 DETECTIVE DEBUG - Critical Progress Bug Investigation
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[useProjectMetrics] DETECTIVE DEBUG:', {
+        projectId: project.id,
+        projectName: project.name,
+        totalTimeBlocks: timeBlocks.length,
+        timeBlocksForProject: timeBlocks.filter(tb => tb.projectId === project.id),
+        completedTimeBlocks: timeBlocks.filter(tb => tb.projectId === project.id && tb.status === 'completed'),
+        currentUserId
+      });
     }
 
     const plannedResult = aggregateProjectMinutes({
@@ -571,10 +725,11 @@ interface GoalCardProps {
   goal: Goal;
   isSelected: boolean;
   onSelect: () => void;
+  onUpdate?: (id: string, updates: Partial<Goal>) => void;
   onDelete?: () => void;
 }
 
-function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
+function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete }: GoalCardProps) {
   const metrics = useGoalMetrics(goal);
 
   return (
@@ -591,7 +746,17 @@ function GoalCard({ goal, isSelected, onSelect, onDelete }: GoalCardProps) {
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 truncate">{goal.title}</h3>
+          {onUpdate ? (
+            <EditableText
+              value={goal.title}
+              onSave={(newTitle) => onUpdate(goal.id, { title: newTitle })}
+              variant="title"
+              placeholder="Goal title..."
+              maxLength={200}
+            />
+          ) : (
+            <h3 className="text-lg font-semibold text-gray-900 truncate">{goal.title}</h3>
+          )}
           {goal.description && (
             <p className="text-sm text-gray-500 mt-1 line-clamp-2">{goal.description}</p>
           )}
@@ -732,11 +897,22 @@ interface ProjectCardProps {
   project: Project;
   isSelected: boolean;
   onSelect: () => void;
+  onUpdate?: (id: string, updates: Partial<Project>) => void;
   onDelete?: () => void;
 }
 
-function ProjectCard({ project, isSelected, onSelect, onDelete }: ProjectCardProps) {
+function ProjectCard({ project, isSelected, onSelect, onUpdate, onDelete }: ProjectCardProps) {
   const metrics = useProjectMetrics(project);
+
+  // EXTREME DEBUG: Log what we're rendering
+  if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+    console.log('[OKRManager] Rendering ProjectCard:', {
+      projectId: project.id,
+      projectName: project.name,
+      goalId: project.goalId,
+      fullProject: project
+    });
+  }
 
   return (
     <div
@@ -750,7 +926,23 @@ function ProjectCard({ project, isSelected, onSelect, onDelete }: ProjectCardPro
       onKeyDown={(e) => e.key === "Enter" && onSelect()}
     >
       <div className="flex items-start justify-between mb-2">
-        <h4 className="font-medium text-gray-900 truncate flex-1">{project.name}</h4>
+        {onUpdate ? (
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="text-xs text-gray-400 font-mono">[PROJECT]</span>
+            <EditableText
+              value={project.name}
+              onSave={(newName) => onUpdate(project.id, { name: newName })}
+              variant="subtitle"
+              placeholder="Project name..."
+              maxLength={150}
+              className="flex-1"
+            />
+          </div>
+        ) : (
+          <h4 className="font-medium text-gray-900 truncate flex-1">
+            [PROJECT] {project.name}
+          </h4>
+        )}
         <div className="flex items-center gap-2 ml-2">
           <PriorityBadge priority={project.priority} />
           <StatusBadge status={project.status} />
@@ -803,10 +995,11 @@ function ProjectCard({ project, isSelected, onSelect, onDelete }: ProjectCardPro
 interface TaskCardProps {
   task: Task;
   onToggleComplete: () => void;
+  onUpdate?: (id: string, updates: Partial<Task>) => void;
   onDelete?: () => void;
 }
 
-function TaskCard({ task, onToggleComplete, onDelete }: TaskCardProps) {
+function TaskCard({ task, onToggleComplete, onUpdate, onDelete }: TaskCardProps) {
   const metrics = useTaskMetrics(task);
   const isCompleted = task.status === "completed";
 
@@ -829,9 +1022,23 @@ function TaskCard({ task, onToggleComplete, onDelete }: TaskCardProps) {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <h5 className={`font-medium text-sm ${isCompleted ? "line-through text-gray-400" : "text-gray-900"}`}>
-              {task.title}
-            </h5>
+            {onUpdate && !isCompleted ? (
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="text-xs text-gray-400 font-mono">[TASK]</span>
+                <EditableText
+                  value={task.title}
+                  onSave={(newTitle) => onUpdate(task.id, { title: newTitle })}
+                  variant="body"
+                  placeholder="Task title..."
+                  maxLength={150}
+                  className="flex-1"
+                />
+              </div>
+            ) : (
+              <h5 className={`font-medium text-sm ${isCompleted ? "line-through text-gray-400" : "text-gray-900"}`}>
+                [TASK] {task.title}
+              </h5>
+            )}
             {onDelete && (
               <button
                 className="p-1 rounded text-gray-400 hover:text-red-500 transition-colors"
@@ -1812,6 +2019,7 @@ export default function OKRManager(props: OKRManagerProps) {
                 goal={goal}
                 isSelected={selectedGoalId === goal.id}
                 onSelect={() => handleSelectGoal(goal.id)}
+                onUpdate={onUpdateGoal}
                 onDelete={() => handleDeleteGoal(goal.id)}
               />
             ))}
@@ -1885,6 +2093,7 @@ export default function OKRManager(props: OKRManagerProps) {
                       project={project}
                       isSelected={selectedProjectId === project.id}
                       onSelect={() => handleSelectProject(project.id)}
+                      onUpdate={onUpdateProject}
                       onDelete={() => handleDeleteProject(project.id)}
                     />
                   ))}
@@ -1920,6 +2129,7 @@ export default function OKRManager(props: OKRManagerProps) {
                           key={task.id}
                           task={task}
                           onToggleComplete={() => handleToggleTaskComplete(task)}
+                          onUpdate={onUpdateTask}
                           onDelete={() => handleDeleteTask(task.id)}
                         />
                       ))}

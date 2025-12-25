@@ -272,6 +272,19 @@ export function DataProvider({ userId, children }: DataProviderProps) {
           }))
         });
       }
+
+      // Debug project rehydration behind feature flag
+      if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1' && rawProjects.length > 0) {
+        console.log('[DataProvider] Rehydrating projects:', {
+          count: rawProjects.length,
+          projects: rawProjects.map(p => ({
+            id: p.id,
+            name: p.name,
+            goalId: p.goalId,
+            userId: p.userId
+          }))
+        });
+      }
       setTimeBlocks(rawTimeBlocks.map(deserializeTimeBlock).filter(x => x.userId === userId));
       setGoals(rawGoals.map(deserializeGoal).filter(x => x.userId === userId && !x.deleted));
       setProjects(rawProjects.map(deserializeProject).filter(x => x.userId === userId && !x.deleted));
@@ -333,6 +346,20 @@ export function DataProvider({ userId, children }: DataProviderProps) {
         parsedEnd: endTime.toISOString(),
         userId,
         adapter: db.getAdapterType()
+      });
+    }
+
+    // 🔍 DETECTIVE DEBUG - Progress bug investigation
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[DataProvider] DETECTIVE: createTimeBlock with connections:', {
+        blockId: block.id,
+        title: block.title,
+        projectId: block.projectId,
+        goalId: block.goalId,
+        taskId: block.taskId,
+        status: block.status,
+        hasProjectConnection: !!block.projectId,
+        inputData: data
       });
     }
 
@@ -400,6 +427,20 @@ export function DataProvider({ userId, children }: DataProviderProps) {
         updatedEndTime: updated.endTime,
         updatedStartISO: updated.startTime.toISOString(),
         updatedEndISO: updated.endTime.toISOString()
+      });
+    }
+
+    // 🔍 DETECTIVE DEBUG - Status change investigation  
+    if (process.env.NODE_ENV !== 'production' && updates.status) {
+      console.log('[DataProvider] DETECTIVE: TimeBlock status changed:', {
+        blockId: id,
+        title: updated.title,
+        oldStatus: existing.status,
+        newStatus: updated.status,
+        projectId: updated.projectId,
+        goalId: updated.goalId,
+        taskId: updated.taskId,
+        hasProjectConnection: !!updated.projectId
       });
     }
     
@@ -573,6 +614,17 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       updatedAt: now,
     } as Project;
 
+    // EXTREME DEBUG: Log project creation
+    if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+      console.log('[DataProvider] createProject called:', {
+        inputData: data,
+        finalProject: project,
+        projectName: project.name,
+        projectId: project.id,
+        goalId: project.goalId
+      });
+    }
+
     setProjects(prev => [...prev, project]);
 
     try {
@@ -629,6 +681,18 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       createdAt: now,
       updatedAt: now,
     } as Task;
+
+    // EXTREME DEBUG: Log task creation
+    if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
+      console.log('[DataProvider] createTask called:', {
+        inputData: data,
+        finalTask: task,
+        taskTitle: task.title,
+        taskId: task.id,
+        projectId: task.projectId,
+        goalId: task.goalId
+      });
+    }
 
     setTasks(prev => [...prev, task]);
 

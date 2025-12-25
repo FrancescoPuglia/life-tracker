@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TimeBlock, Task, Project, Goal } from '@/types';
 import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from '@/utils/dateUtils';
+
+type ViewMode = 'day' | 'week' | 'month';
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
@@ -32,6 +35,7 @@ export default function TimeBlockPlanner({
   currentUserId, // 🔥 CRITICAL FIX
   isReady = false
 }: TimeBlockPlannerProps) {
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number; time: Date } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ startTime: Date; endTime: Date } | null>(null);
@@ -42,6 +46,88 @@ export default function TimeBlockPlanner({
 
   const HOUR_HEIGHT = 80;
   const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+  // ============================================================================
+  // VIEW MODE UTILITIES - Supreme Detective Implementation  
+  // ============================================================================
+
+  const getViewPeriodDates = (date: Date, mode: ViewMode) => {
+    const baseDate = new Date(date);
+    
+    switch (mode) {
+      case 'day':
+        return [new Date(baseDate)];
+        
+      case 'week': {
+        const startOfWeek = new Date(baseDate);
+        const dayOfWeek = startOfWeek.getDay();
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        startOfWeek.setDate(startOfWeek.getDate() + diffToMonday);
+        
+        const dates = [];
+        for (let i = 0; i < 7; i++) {
+          const weekDate = new Date(startOfWeek);
+          weekDate.setDate(weekDate.getDate() + i);
+          dates.push(weekDate);
+        }
+        return dates;
+      }
+        
+      case 'month': {
+        const year = baseDate.getFullYear();
+        const month = baseDate.getMonth();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        
+        const dates = [];
+        for (let day = 1; day <= daysInMonth; day++) {
+          dates.push(new Date(year, month, day));
+        }
+        return dates;
+      }
+        
+      default:
+        return [new Date(baseDate)];
+    }
+  };
+
+  const navigateDate = (direction: 'prev' | 'next') => {
+    const currentDate = new Date(selectedDate);
+    
+    switch (viewMode) {
+      case 'day':
+        currentDate.setDate(currentDate.getDate() + (direction === 'next' ? 1 : -1));
+        break;
+      case 'week':
+        currentDate.setDate(currentDate.getDate() + (direction === 'next' ? 7 : -7));
+        break;
+      case 'month':
+        if (direction === 'next') {
+          currentDate.setMonth(currentDate.getMonth() + 1, 1);
+        } else {
+          currentDate.setMonth(currentDate.getMonth() - 1, 1);
+        }
+        break;
+    }
+    
+    onDateChange(currentDate);
+  };
+
+  const getViewTitle = () => {
+    switch (viewMode) {
+      case 'day':
+        return formatDate(selectedDate);
+      case 'week': {
+        const dates = getViewPeriodDates(selectedDate, 'week');
+        const start = dates[0];
+        const end = dates[dates.length - 1];
+        return `${start.getDate()} ${start.toLocaleDateString('en-US', { month: 'short' })} - ${end.getDate()} ${end.toLocaleDateString('en-US', { month: 'short' })} ${end.getFullYear()}`;
+      }
+      case 'month':
+        return selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      default:
+        return formatDate(selectedDate);
+    }
+  };
 
   const formatTime = (hour: number) => {
     return `${hour.toString().padStart(2, '0')}:00`;
@@ -307,8 +393,13 @@ export default function TimeBlockPlanner({
   const filteredBlocks = timeBlocks.filter((block, index) => {
     try {
       const blockDate = toDateSafe(block.startTime, selectedDate);
-      const isMatch = formatDateStringSafe(blockDate) === formatDateStringSafe(selectedDate);
-      return isMatch && formatDateStringSafe(blockDate) !== 'Invalid Date';
+      const viewDates = getViewPeriodDates(selectedDate, viewMode);
+      
+      const isInViewPeriod = viewDates.some(date => 
+        formatDateStringSafe(blockDate) === formatDateStringSafe(date)
+      );
+      
+      return isInViewPeriod && formatDateStringSafe(blockDate) !== 'Invalid Date';
     } catch (error) {
       console.error(`❌ Filter ERROR for block ${index}:`, error, block);
       return false;
@@ -336,10 +427,29 @@ export default function TimeBlockPlanner({
       {/* Header */}
       <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 flex items-center">
-            📅 Time Planner
-          </h2>
-          <p className="text-sm text-gray-600 font-medium">{formatDate(selectedDate)}</p>
+          <div className="flex items-center gap-4 mb-2">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center">
+              📅 Time Planner
+            </h2>
+            
+            {/* View Mode Switcher - Supreme Implementation */}
+            <div className="flex items-center bg-white rounded-lg border border-gray-200 overflow-hidden">
+              {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors capitalize ${
+                    viewMode === mode
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-sm text-gray-600 font-medium">{getViewTitle()}</p>
         </div>
         
         <div className="flex items-center space-x-2">
@@ -356,28 +466,31 @@ export default function TimeBlockPlanner({
           </button>
           <div className="border-l border-gray-300 h-6"></div>
           <button
-            onClick={() => onDateChange(new Date(selectedDate.getTime() - 24 * 60 * 60 * 1000))}
-            className="p-2 text-gray-400 hover:text-gray-600"
+            onClick={() => navigateDate('prev')}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
+            title={`Previous ${viewMode}`}
           >
-            ←
+            <ChevronLeft className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDateChange(new Date())}
-            className="px-3 py-1 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
+            className="px-3 py-1.5 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium"
           >
             Today
           </button>
           <button
-            onClick={() => onDateChange(new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000))}
-            className="p-2 text-gray-400 hover:text-gray-600"
+            onClick={() => navigateDate('next')}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
+            title={`Next ${viewMode}`}
           >
-            →
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Time Grid */}
+      {/* Time Grid - Conditional View Rendering */}
       <div className="relative">
+        {viewMode === 'day' && (
         <div 
           ref={plannerRef}
           className="relative h-96 overflow-y-auto bg-white"
@@ -584,6 +697,138 @@ export default function TimeBlockPlanner({
             </div>
           )}
         </div>
+        )}
+
+        {/* Week View */}
+        {viewMode === 'week' && (
+          <div className="bg-white p-4">
+            <div className="grid grid-cols-8 gap-2">
+              {/* Time labels */}
+              <div className="space-y-8 pt-12">
+                {[9, 12, 15, 18, 21].map(hour => (
+                  <div key={hour} className="text-xs text-gray-500 text-right pr-2">
+                    {formatTime(hour)}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Day columns */}
+              {getViewPeriodDates(selectedDate, 'week').map((date, index) => {
+                const dayBlocks = filteredBlocks.filter(block => {
+                  const blockDate = toDateSafe(block.startTime, date);
+                  return formatDateStringSafe(blockDate) === formatDateStringSafe(date);
+                });
+                
+                return (
+                  <div key={index} className="min-h-64 border-l border-gray-100">
+                    <div className="text-center mb-2 p-2 border-b border-gray-100">
+                      <div className="text-sm font-medium text-gray-900">
+                        {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {date.getDate()}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1 p-1">
+                      {dayBlocks.map((block) => (
+                        <div
+                          key={block.id}
+                          className="text-xs p-2 rounded text-white cursor-pointer hover:shadow-md transition-shadow"
+                          style={{ backgroundColor: block.color || getDefaultColorForType(block.type) }}
+                          onClick={() => setSelectedBlock(block)}
+                          title={`${block.title} - ${formatTimeSafe(block.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}`}
+                        >
+                          <div className="font-medium truncate">{getBlockIcon(block)} {block.title}</div>
+                          <div className="opacity-75">
+                            {formatTimeSafe(block.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Month View */}
+        {viewMode === 'month' && (
+          <div className="bg-white p-4">
+            <div className="grid grid-cols-7 gap-2">
+              {/* Day headers */}
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                <div key={day} className="text-center text-sm font-medium text-gray-600 py-2">
+                  {day}
+                </div>
+              ))}
+              
+              {/* Calendar grid */}
+              {(() => {
+                const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+                const lastDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+                const startDay = new Date(firstDay);
+                const mondayOffset = firstDay.getDay() === 0 ? -6 : 1 - firstDay.getDay();
+                startDay.setDate(startDay.getDate() + mondayOffset);
+                
+                const cells = [];
+                const currentDate = new Date(startDay);
+                
+                // Generate 6 weeks (42 days) to ensure full calendar grid
+                for (let i = 0; i < 42; i++) {
+                  const cellDate = new Date(currentDate);
+                  const isCurrentMonth = cellDate.getMonth() === selectedDate.getMonth();
+                  const isToday = cellDate.toDateString() === new Date().toDateString();
+                  
+                  const dayBlocks = filteredBlocks.filter(block => {
+                    const blockDate = toDateSafe(block.startTime, cellDate);
+                    return formatDateStringSafe(blockDate) === formatDateStringSafe(cellDate);
+                  });
+                  
+                  cells.push(
+                    <div
+                      key={i}
+                      className={`min-h-24 p-1 border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
+                        !isCurrentMonth ? 'bg-gray-50 text-gray-400' : isToday ? 'bg-blue-50 border-blue-200' : 'bg-white'
+                      }`}
+                      onClick={() => {
+                        onDateChange(cellDate);
+                        setViewMode('day');
+                      }}
+                    >
+                      <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                        {cellDate.getDate()}
+                      </div>
+                      
+                      <div className="space-y-0.5">
+                        {dayBlocks.slice(0, 3).map((block, idx) => (
+                          <div
+                            key={idx}
+                            className="text-xs p-1 rounded truncate text-white"
+                            style={{ backgroundColor: block.color || getDefaultColorForType(block.type) }}
+                            title={block.title}
+                          >
+                            {getBlockIcon(block)} {block.title}
+                          </div>
+                        ))}
+                        {dayBlocks.length > 3 && (
+                          <div className="text-xs text-gray-500 text-center">
+                            +{dayBlocks.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                  
+                  currentDate.setDate(currentDate.getDate() + 1);
+                }
+                
+                return cells;
+              })()}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Help Section */}
