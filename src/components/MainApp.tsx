@@ -23,13 +23,14 @@ import AIInputBar from '@/components/AIInputBar';
 import SmartScheduler from '@/components/SmartScheduler';
 import RealTimeAdaptation from '@/components/RealTimeAdaptation';
 import MicroCoachDashboard from '@/components/MicroCoachDashboard';
+import VisionBoardStandalone from '@/components/VisionBoardStandalone';
 import { audioManager } from '@/lib/audioManager';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board';
 
 interface MainAppProps {
   buildId: string;
@@ -334,6 +335,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                       { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights' },
                       { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track habits' },
                       { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives' },
+                      { id: 'vision-board', label: 'Vision Board', icon: '✧', description: 'Manifest dreams' },
                       { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data' },
                       { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights' },
                       { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones' },
@@ -366,6 +368,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'micro_coach' && '🧠 AI Coach'}
                   {activeTab === 'habits' && '🔥 Habits Tracker'}
                   {activeTab === 'okr' && '🎯 Goals & Projects'}
+                  {activeTab === 'vision-board' && '✧ Vision Board'}
                   {activeTab === 'analytics' && '📊 Analytics Dashboard'}
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
                   {activeTab === 'badges' && '🏆 Achievements'}
@@ -503,6 +506,10 @@ export default function MainApp({ buildId }: MainAppProps) {
                     userStats={userStats}
                     onBadgeUnlocked={handleBadgeUnlocked}
                   />
+                )}
+
+                {activeTab === 'vision-board' && (
+                  <VisionBoardStandalone />
                 )}
               </div>
             </div>

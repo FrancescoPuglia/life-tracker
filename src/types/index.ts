@@ -560,3 +560,48 @@ export interface GoalRoadmap extends BaseEntity {
   pathStyle?: 'linear' | 'curved' | 'mountain'; // Path visualization style
   totalDistance?: number; // Virtual distance for avatar movement
 }
+
+// ============================================================================
+// VISION BOARD - Visual Goal Manifestation System
+// ============================================================================
+
+export interface MediaAsset extends BaseEntity {
+  kind: 'image' | 'audio' | 'video';
+  storage: 'firebase' | 'indexeddb';
+  url?: string; // Firebase download URL
+  blobKey?: string; // IndexedDB blob key
+  mimeType: string;
+  sizeBytes: number;
+  width?: number; // For images
+  height?: number; // For images  
+  durationSec?: number; // For audio/video
+  originalName?: string;
+}
+
+export interface VisionBoard extends BaseEntity {
+  title: string;
+  description?: string;
+  coverImageAssetId?: string;
+  linkedGoalId?: string; // Optional connection to goal
+  backgroundColor?: string; // Custom theme
+  isActive?: boolean; // For ritual mode
+}
+
+export interface VisionItem extends BaseEntity {
+  boardId: string;
+  type: 'image' | 'quote' | 'video' | 'audio';
+  assetId?: string; // For media items
+  text?: string; // For quotes
+  caption?: string;
+  linkedGoalId?: string; // Optional connection
+  linkedProjectId?: string;
+  linkedTaskId?: string;
+  // Layout positioning (for collage mode)
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  rotation?: number;
+  order: number; // For simple grid layout
+  isPinned?: boolean; // Show in ritual mode
+}

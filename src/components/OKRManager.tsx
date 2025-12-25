@@ -7,11 +7,12 @@ import { createPortal } from 'react-dom';
 import { 
   Target, Calendar, Clock, TrendingUp, Plus, Trash2, Edit3, 
   CheckCircle, AlertTriangle, Flag, ChevronRight, X, Loader2,
-  FolderOpen, ListTodo, AlertCircle, Check, FileText, Map
+  FolderOpen, ListTodo, AlertCircle, Check, FileText, Map, Sparkles
 } from 'lucide-react';
 import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
 import { RichNoteEditor } from './RichNoteEditor';
 import { GoalRoadmapView } from './GoalRoadmapView';
+import { LazyVisionBoardView } from './VisionBoard';
 import { useDataContext } from '@/providers/DataProvider';
 
 
@@ -740,9 +741,10 @@ interface GoalCardProps {
   onDelete?: () => void;
   onShowNotes?: (goalId: string) => void;
   onShowRoadmap?: (goalId: string) => void;
+  onShowVisionBoard?: (goalId: string) => void;
 }
 
-function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes, onShowRoadmap }: GoalCardProps) {
+function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes, onShowRoadmap, onShowVisionBoard }: GoalCardProps) {
   const metrics = useGoalMetrics(goal);
 
   return (
@@ -800,6 +802,20 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes,
               title="Roadmap"
             >
               <Map className="w-4 h-4" />
+            </button>
+          )}
+
+          {onShowVisionBoard && (
+            <button
+              className="p-1.5 rounded-lg text-gray-400 hover:text-purple-500 hover:bg-purple-50 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowVisionBoard(goal.id);
+              }}
+              aria-label="Goal Vision Board"
+              title="Vision Board"
+            >
+              <Sparkles className="w-4 h-4" />
             </button>
           )}
           
@@ -1779,9 +1795,10 @@ export default function OKRManager(props: OKRManagerProps) {
   const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
   
   // Notes & Roadmap state
-  const [activeTab, setActiveTab] = useState<'notes' | 'roadmap'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'roadmap' | 'vision-board'>('notes');
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [showRoadmapSection, setShowRoadmapSection] = useState(false);
+  const [showVisionBoardSection, setShowVisionBoardSection] = useState(false);
   
   // Access to data context for notes and roadmaps
   const {
@@ -2086,12 +2103,33 @@ export default function OKRManager(props: OKRManagerProps) {
                   setActiveTab('notes');
                   setShowNotesSection(true);
                   setShowRoadmapSection(false);
+                  setShowVisionBoardSection(false);
                 }}
                 onShowRoadmap={(goalId) => {
                   setSelectedGoalId(goalId);
                   setActiveTab('roadmap');
                   setShowRoadmapSection(true);
                   setShowNotesSection(false);
+                  setShowVisionBoardSection(false);
+                }}
+                onShowVisionBoard={(goalId) => {
+                  console.log('🔍 SHERLOCK DEBUG: Vision Board clicked!', {
+                    goalId,
+                    currentUserId,
+                    visibleGoalsLength: visibleGoals.length,
+                    goalExists: visibleGoals.find(g => g.id === goalId),
+                    beforeSelectedGoalId: selectedGoalId
+                  });
+                  setSelectedGoalId(goalId);
+                  setActiveTab('vision-board');
+                  setShowVisionBoardSection(true);
+                  setShowNotesSection(false);
+                  setShowRoadmapSection(false);
+                  console.log('🔍 SHERLOCK DEBUG: State updated!', {
+                    newSelectedGoalId: goalId,
+                    activeTab: 'vision-board',
+                    showVisionBoardSection: true
+                  });
                 }}
               />
             ))}
@@ -2099,7 +2137,14 @@ export default function OKRManager(props: OKRManagerProps) {
         )}
 
         {/* Details panel (selected goal) */}
-        {selectedGoal && (
+        {(() => {
+          console.log('🔍 SHERLOCK DEBUG: Details panel render check', {
+            selectedGoal: !!selectedGoal,
+            selectedGoalId,
+            selectedGoalTitle: selectedGoal?.title
+          });
+          return selectedGoal;
+        })() && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Key Results */}
             <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -2214,7 +2259,7 @@ export default function OKRManager(props: OKRManagerProps) {
         )}
 
         {/* Notes & Roadmap Section */}
-        {(showNotesSection || showRoadmapSection) && selectedGoalId && (
+        {(showNotesSection || showRoadmapSection || showVisionBoardSection) && selectedGoalId && (
           <div className="mt-8 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
             {/* Header with tabs */}
             <div className="border-b border-gray-200 dark:border-gray-700 p-4">
@@ -2226,6 +2271,7 @@ export default function OKRManager(props: OKRManagerProps) {
                   onClick={() => {
                     setShowNotesSection(false);
                     setShowRoadmapSection(false);
+                    setShowVisionBoardSection(false);
                   }}
                   className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                 >
@@ -2240,6 +2286,7 @@ export default function OKRManager(props: OKRManagerProps) {
                     setActiveTab('notes');
                     setShowNotesSection(true);
                     setShowRoadmapSection(false);
+                    setShowVisionBoardSection(false);
                   }}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     activeTab === 'notes'
@@ -2255,6 +2302,7 @@ export default function OKRManager(props: OKRManagerProps) {
                     setActiveTab('roadmap');
                     setShowRoadmapSection(true);
                     setShowNotesSection(false);
+                    setShowVisionBoardSection(false);
                   }}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     activeTab === 'roadmap'
@@ -2264,6 +2312,22 @@ export default function OKRManager(props: OKRManagerProps) {
                 >
                   <Map className="w-4 h-4 inline mr-2" />
                   Roadmap
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('vision-board');
+                    setShowVisionBoardSection(true);
+                    setShowNotesSection(false);
+                    setShowRoadmapSection(false);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'vision-board'
+                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300'
+                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 inline mr-2" />
+                  Vision Board
                 </button>
               </div>
             </div>
@@ -2352,6 +2416,35 @@ export default function OKRManager(props: OKRManagerProps) {
                       );
                     }
                   })()}
+                </div>
+              )}
+
+              {(() => {
+                console.log('🔍 SHERLOCK DEBUG: Vision Board section render check', {
+                  activeTab,
+                  showVisionBoardSection,
+                  selectedGoal: !!selectedGoal,
+                  allConditionsMet: activeTab === 'vision-board' && showVisionBoardSection && selectedGoal
+                });
+                return activeTab === 'vision-board' && showVisionBoardSection && selectedGoal;
+              })() && (
+                <div className="space-y-4">
+                  <LazyVisionBoardView
+                    goalId={selectedGoal?.id}
+                    userId={currentUserId || 'guest'}
+                    domainId={selectedGoal?.domainId}
+                    goals={goals}
+                    projects={projects}
+                    tasks={tasks}
+                    onRitualMode={() => {
+                      console.log('Opening Ritual Mode for goal:', selectedGoal?.title);
+                    }}
+                    onBack={() => {
+                      setShowVisionBoardSection(false);
+                      setActiveTab('notes');
+                    }}
+                    className="min-h-[600px]"
+                  />
                 </div>
               )}
             </div>

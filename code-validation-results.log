@@ -1,0 +1,185 @@
+🧪 Life Tracker Code Validation
+=================================
+🔍 Running Code Validation Tests...
+===================================
+📁 Found 46 files to analyze
+
+🚫 Validating Hard Rules...
+
+📊 Validating Progress Rules...
+
+🔒 Validating Auth Rules...
+
+📊 VALIDATION SUMMARY
+=====================
+Files Analyzed: 46
+Critical Issues: 50
+High Issues: 0
+Medium Issues: 0
+Overall Status: ❌ FAIL
+
+🚨 CRITICAL ISSUES:
+❌ build sempre verde: npm run build deve passare
+   File: src/app/layout.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/app/page.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/AIInputBar.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/AISystemTest.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/AnalyticsDashboard.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/AuthModal.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/BadgeSystem.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/DailyMotivation.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/ErrorBoundary.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/GamingEffects.tsx
+   Found: 
+❌ MAI modificare/sovrascrivere dati già salvati
+   File: src/components/GoalAnalyticsDashboard.tsx
+   Found: .replace(, .replace(
+❌ build sempre verde: npm run build deve passare
+   File: src/components/GoalAnalyticsDashboard.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/HabitsTracker.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/KPIDashboard.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/MainApp.tsx
+   Found: 
+❌ MAI modificare/sovrascrivere dati già salvati
+   File: src/components/MicroCoachDashboard.tsx
+   Found: .replace(
+❌ build sempre verde: npm run build deve passare
+   File: src/components/MicroCoachDashboard.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/NowBar.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/OKRManager.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/RealTimeAdaptation.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/RiskDashboard.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/SecondBrainChat.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/SmartScheduler.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/SyncStatus.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/TestModal.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/components/TimeBlockPlanner.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/config/firebaseConfig.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/aiEngine.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/audioManager.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/auth.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/autoScheduler.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/database.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/firebase.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/firebaseAdapter.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/goalAnalyticsEngine.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/goalToPlanEngine.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/microCoach.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/rePlanningEngine.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/riskPredictor.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/secondBrain.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/lib/syncManager.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/providers/AuthProvider.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/providers/DataProvider.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/providers/Index.tsx
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/types/ai-enhanced.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/types/index.ts
+   Found: 
+❌ MAI modificare/sovrascrivere dati già salvati
+   File: src/utils/dateUtils.ts
+   Found: .replace(
+❌ build sempre verde: npm run build deve passare
+   File: src/utils/dateUtils.ts
+   Found: 
+❌ build sempre verde: npm run build deve passare
+   File: src/utils/sessionManager.ts
+   Found: 
+❌ AuthGate prevents UI rendering before login
+   File: src/app/page.tsx
+   Found: AuthGate, status === 'signedOut, AuthGate
+
+📦 Validating Package Configuration...
+✅ Package.json validation: PASS
+
+📘 Validating TypeScript Configuration...
+✅ TypeScript config: PASS
+
+🏁 FINAL VALIDATION RESULT
+===========================
+Code Validation: ❌ FAIL
+Package Config: ✅ PASS
+TypeScript Config: ✅ PASS
+
+OVERALL: 🚨 ISSUES FOUND - FIX REQUIRED

@@ -1,0 +1,35 @@
+
+> life-tracker@1.0.0 build
+> next build && node -e "require('fs').closeSync(require('fs').openSync('out/.nojekyll','a'))"
+
+   ▲ Next.js 15.5.6
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 5.7s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+✅ Firebase initialized successfully with hardcoded config
+🧠 INITIALIZING SECOND BRAIN ENGINE
+🧠 Loading common productivity patterns...
+   Generating static pages (1/4) 
+   Generating static pages (2/4) 
+   Generating static pages (3/4) 
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+   Exporting (0/2) ...
+ ✓ Exporting (2/2)
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                     346 kB         448 kB
+└ ○ /_not-found                            996 B         103 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/255-6ea4b01f9c8b9834.js       45.7 kB
+  ├ chunks/4bd1b696-409494caf8c83275.js  54.2 kB
+  └ other shared chunks (total)          1.99 kB
+
+
+○  (Static)  prerendered as static content
+

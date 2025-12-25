@@ -1,7 +1,7 @@
 import { 
   User, Domain, Goal, KeyResult, Project, Task, TimeBlock, Session, 
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
-  Insight, Achievement, KPI, DashboardState 
+  Insight, Achievement, KPI, DashboardState, VisionBoard, VisionItem, MediaAsset
 } from '@/types';
 import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
@@ -186,7 +186,8 @@ class IndexedDBAdapter implements DatabaseAdapter {
           'users', 'domains', 'goals', 'keyResults', 'projects', 'tasks',
           'timeBlocks', 'sessions', 'habits', 'habitLogs', 'metrics',
           'calendarEvents', 'deadlines', 'journalEntries', 'insights', 'achievements',
-          'notes', 'noteTemplates', 'goalRoadmaps'
+          'notes', 'noteTemplates', 'goalRoadmaps',
+          'visionBoards', 'visionItems', 'mediaAssets', 'mediaBlobs'
         ];
 
         stores.forEach(storeName => {
@@ -240,6 +241,26 @@ class IndexedDBAdapter implements DatabaseAdapter {
               case 'goalRoadmaps':
                 store.createIndex('userId', 'userId');
                 store.createIndex('goalId', 'goalId');
+                break;
+              case 'visionBoards':
+                store.createIndex('userId', 'userId');
+                store.createIndex('linkedGoalId', 'linkedGoalId');
+                store.createIndex('isActive', 'isActive');
+                break;
+              case 'visionItems':
+                store.createIndex('userId', 'userId');
+                store.createIndex('boardId', 'boardId');
+                store.createIndex('type', 'type');
+                store.createIndex('isPinned', 'isPinned');
+                break;
+              case 'mediaAssets':
+                store.createIndex('userId', 'userId');
+                store.createIndex('kind', 'kind');
+                store.createIndex('storage', 'storage');
+                break;
+              case 'mediaBlobs':
+                // Special store for guest blob storage - uses blobKey as id
+                // No userId index needed since blob keys are already unique
                 break;
               default:
                 store.createIndex('userId', 'userId');
@@ -778,6 +799,38 @@ class IndexedDBAdapter implements DatabaseAdapter {
     if (nextWeekGoals.length === 0) nextWeekGoals.push('Maintain current momentum');
 
     return { highlights, challenges, insights, nextWeekGoals };
+  }
+
+  // ========== VISION BOARD BLOB STORAGE ==========
+  
+  async storeBlob(blobKey: string, blob: Blob): Promise<void> {
+    const store = await this.getStore('mediaBlobs', 'readwrite');
+    return new Promise((resolve, reject) => {
+      const request = store.put({ id: blobKey, blob });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+  
+  async getBlob(blobKey: string): Promise<Blob | null> {
+    const store = await this.getStore('mediaBlobs');
+    return new Promise((resolve, reject) => {
+      const request = store.get(blobKey);
+      request.onsuccess = () => {
+        const result = request.result;
+        resolve(result ? result.blob : null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+  
+  async deleteBlob(blobKey: string): Promise<void> {
+    const store = await this.getStore('mediaBlobs', 'readwrite');
+    return new Promise((resolve, reject) => {
+      const request = store.delete(blobKey);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
   }
 
   // Reset database method - only for recovery scenarios
@@ -1594,6 +1647,149 @@ class LifeTrackerDB {
     if (nextWeekGoals.length === 0) nextWeekGoals.push('Maintain current momentum');
 
     return { highlights, challenges, insights, nextWeekGoals };
+  }
+
+  // ============================================================================
+  // VISION BOARD CRUD OPERATIONS
+  // ============================================================================
+
+  // Vision Board operations
+  async createVisionBoard(data: Omit<VisionBoard, 'id' | 'createdAt' | 'updatedAt'>): Promise<VisionBoard> {
+    const now = new Date();
+    const visionBoard: VisionBoard = {
+      ...data,
+      id: `visionBoard-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: now,
+      updatedAt: now
+    };
+    return this.create('visionBoards', visionBoard);
+  }
+
+  async getVisionBoards(userId: string): Promise<VisionBoard[]> {
+    return this.getByIndex<VisionBoard>('visionBoards', 'userId', userId);
+  }
+
+  async getVisionBoard(id: string): Promise<VisionBoard | null> {
+    return this.read<VisionBoard>('visionBoards', id);
+  }
+
+  async updateVisionBoard(data: VisionBoard): Promise<VisionBoard> {
+    const updated = { ...data, updatedAt: new Date() };
+    return this.update('visionBoards', updated);
+  }
+
+  async deleteVisionBoard(id: string): Promise<void> {
+    // First delete all vision items in this board
+    const items = await this.getByIndex<VisionItem>('visionItems', 'boardId', id);
+    for (const item of items) {
+      await this.deleteVisionItem(item.id);
+    }
+    
+    // Then delete the board itself
+    await this.delete('visionBoards', id);
+  }
+
+  // Vision Item operations  
+  async createVisionItem(data: Omit<VisionItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<VisionItem> {
+    const now = new Date();
+    const visionItem: VisionItem = {
+      ...data,
+      id: `visionItem-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: now,
+      updatedAt: now
+    };
+    return this.create('visionItems', visionItem);
+  }
+
+  async getVisionItems(boardId: string): Promise<VisionItem[]> {
+    return this.getByIndex<VisionItem>('visionItems', 'boardId', boardId);
+  }
+
+  async getVisionItem(id: string): Promise<VisionItem | null> {
+    return this.read<VisionItem>('visionItems', id);
+  }
+
+  async updateVisionItem(data: VisionItem): Promise<VisionItem> {
+    const updated = { ...data, updatedAt: new Date() };
+    return this.update('visionItems', updated);
+  }
+
+  async deleteVisionItem(id: string): Promise<void> {
+    // Get the item to check for asset cleanup
+    const item = await this.read<VisionItem>('visionItems', id);
+    if (item?.assetId) {
+      await this.deleteMediaAsset(item.assetId);
+    }
+    
+    await this.delete('visionItems', id);
+  }
+
+  // Media Asset operations
+  async createMediaAsset(data: Omit<MediaAsset, 'id' | 'createdAt' | 'updatedAt'>): Promise<MediaAsset> {
+    const now = new Date();
+    const mediaAsset: MediaAsset = {
+      ...data,
+      id: `mediaAsset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: now,
+      updatedAt: now
+    };
+    return this.create('mediaAssets', mediaAsset);
+  }
+
+  async getMediaAsset(id: string): Promise<MediaAsset | null> {
+    return this.read<MediaAsset>('mediaAssets', id);
+  }
+
+  async getMediaAssets(userId: string): Promise<MediaAsset[]> {
+    return this.getByIndex<MediaAsset>('mediaAssets', 'userId', userId);
+  }
+
+  async deleteMediaAsset(id: string): Promise<void> {
+    const asset = await this.read<MediaAsset>('mediaAssets', id);
+    
+    // Clean up blob storage for guest users
+    if (asset?.storage === 'indexeddb' && asset.blobKey) {
+      await this.deleteBlob(asset.blobKey);
+    }
+    
+    await this.delete('mediaAssets', id);
+  }
+
+  // Blob storage operations (delegated to IndexedDB adapter)
+  async storeBlob(blobKey: string, blob: Blob): Promise<void> {
+    if (this.adapter instanceof IndexedDBAdapter) {
+      return (this.adapter as any).storeBlob(blobKey, blob);
+    }
+    throw new Error('Blob storage only available in IndexedDB mode');
+  }
+
+  async getBlob(blobKey: string): Promise<Blob | null> {
+    if (this.adapter instanceof IndexedDBAdapter) {
+      return (this.adapter as any).getBlob(blobKey);
+    }
+    throw new Error('Blob storage only available in IndexedDB mode');
+  }
+
+  async deleteBlob(blobKey: string): Promise<void> {
+    if (this.adapter instanceof IndexedDBAdapter) {
+      return (this.adapter as any).deleteBlob(blobKey);
+    }
+    throw new Error('Blob storage only available in IndexedDB mode');
+  }
+
+  // Advanced Vision Board queries
+  async getActiveVisionBoards(userId: string): Promise<VisionBoard[]> {
+    const boards = await this.getVisionBoards(userId);
+    return boards.filter(board => board.isActive);
+  }
+
+  async getVisionBoardsByGoal(goalId: string): Promise<VisionBoard[]> {
+    return this.getByIndex<VisionBoard>('visionBoards', 'linkedGoalId', goalId);
+  }
+
+  async getPinnedVisionItems(boardId: string): Promise<VisionItem[]> {
+    const items = await this.getVisionItems(boardId);
+    return items.filter(item => item.isPinned);
   }
 
   async resetLocalDatabase(): Promise<void> {
