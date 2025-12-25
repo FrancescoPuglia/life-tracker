@@ -185,7 +185,8 @@ class IndexedDBAdapter implements DatabaseAdapter {
         const stores = [
           'users', 'domains', 'goals', 'keyResults', 'projects', 'tasks',
           'timeBlocks', 'sessions', 'habits', 'habitLogs', 'metrics',
-          'calendarEvents', 'deadlines', 'journalEntries', 'insights', 'achievements'
+          'calendarEvents', 'deadlines', 'journalEntries', 'insights', 'achievements',
+          'notes', 'noteTemplates', 'goalRoadmaps'
         ];
 
         stores.forEach(storeName => {
@@ -225,6 +226,20 @@ class IndexedDBAdapter implements DatabaseAdapter {
               case 'insights':
                 store.createIndex('userId', 'userId');
                 store.createIndex('dismissed', 'dismissed');
+                break;
+              case 'notes':
+                store.createIndex('userId', 'userId');
+                store.createIndex('entityType', 'entityType');
+                store.createIndex('entityId', 'entityId');
+                store.createIndex('isPinned', 'isPinned');
+                break;
+              case 'noteTemplates':
+                store.createIndex('userId', 'userId');
+                store.createIndex('category', 'category');
+                break;
+              case 'goalRoadmaps':
+                store.createIndex('userId', 'userId');
+                store.createIndex('goalId', 'goalId');
                 break;
               default:
                 store.createIndex('userId', 'userId');

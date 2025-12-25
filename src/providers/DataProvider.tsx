@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, ReactNode } from 'react';
 import { 
-  TimeBlock, Goal, KeyResult, Project, Task, Habit, HabitLog, KPI 
+  TimeBlock, Goal, KeyResult, Project, Task, Habit, HabitLog, KPI, Note, NoteTemplate, GoalRoadmap 
 } from '@/types';
 import { db, sanitizeForStorage } from '@/lib/database';
 import { toDateSafe } from '@/utils/dateUtils';
@@ -134,6 +134,34 @@ function deserializeHabitLog(log: any): HabitLog {
   };
 }
 
+function deserializeNote(note: any): Note {
+  return {
+    ...note,
+    createdAt: toDateSafe(note.createdAt),
+    updatedAt: toDateSafe(note.updatedAt),
+  };
+}
+
+function deserializeNoteTemplate(template: any): NoteTemplate {
+  return {
+    ...template,
+    createdAt: toDateSafe(template.createdAt),
+    updatedAt: toDateSafe(template.updatedAt),
+  };
+}
+
+function deserializeGoalRoadmap(roadmap: any): GoalRoadmap {
+  return {
+    ...roadmap,
+    createdAt: toDateSafe(roadmap.createdAt),
+    updatedAt: toDateSafe(roadmap.updatedAt),
+    milestones: roadmap.milestones?.map((m: any) => ({
+      ...m,
+      completedAt: m.completedAt ? toDateSafe(m.completedAt) : undefined,
+    })) || [],
+  };
+}
+
 // ============================================================================
 // CONTEXT TYPE
 // ============================================================================
@@ -152,6 +180,9 @@ interface DataContextValue {
   habits: Habit[];
   habitLogs: HabitLog[];
   kpis: KPI;
+  notes: Note[];
+  noteTemplates: NoteTemplate[];
+  goalRoadmaps: GoalRoadmap[];
   
   // CRUD handlers
   createTimeBlock: (data: Partial<TimeBlock>) => Promise<void>;
@@ -178,6 +209,20 @@ interface DataContextValue {
   updateHabit: (id: string, updates: Partial<Habit>) => Promise<void>;
   deleteHabit: (id: string) => Promise<void>;
   logHabit: (habitId: string, completed: boolean, value?: number) => Promise<void>;
+  
+  createNote: (data: Partial<Note>) => Promise<string | undefined>;
+  updateNote: (id: string, updates: Partial<Note>) => Promise<void>;
+  deleteNote: (id: string) => Promise<void>;
+  getNotesForEntity: (entityType: string, entityId?: string) => Note[];
+  
+  createNoteTemplate: (data: Partial<NoteTemplate>) => Promise<string | undefined>;
+  updateNoteTemplate: (id: string, updates: Partial<NoteTemplate>) => Promise<void>;
+  deleteNoteTemplate: (id: string) => Promise<void>;
+  
+  createGoalRoadmap: (data: Partial<GoalRoadmap>) => Promise<string | undefined>;
+  updateGoalRoadmap: (id: string, updates: Partial<GoalRoadmap>) => Promise<void>;
+  deleteGoalRoadmap: (id: string) => Promise<void>;
+  getOrCreateRoadmapForGoal: (goalId: string) => Promise<GoalRoadmap>;
   
   // Utils
   loadTimeBlocksForDate: (date: Date) => Promise<void>;
@@ -216,6 +261,9 @@ export function DataProvider({ userId, children }: DataProviderProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [noteTemplates, setNoteTemplates] = useState<NoteTemplate[]>([]);
+  const [goalRoadmaps, setGoalRoadmaps] = useState<GoalRoadmap[]>([]);
   const [kpis, setKpis] = useState<KPI>({
     focusMinutes: 0,
     planVsActual: 0,
@@ -241,7 +289,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
         }
       }
       // Carica tutto
-      const [rawTimeBlocks, rawGoals, rawProjects, rawTasks, rawKeyResults, rawHabits, rawHabitLogs] = await Promise.all([
+      const [rawTimeBlocks, rawGoals, rawProjects, rawTasks, rawKeyResults, rawHabits, rawHabitLogs, rawNotes, rawNoteTemplates, rawGoalRoadmaps] = await Promise.all([
         db.getAll<TimeBlock>('timeBlocks').catch(() => []),
         db.getAll<Goal>('goals').catch(() => []),
         db.getAll<Project>('projects').catch(() => []),
@@ -249,6 +297,9 @@ export function DataProvider({ userId, children }: DataProviderProps) {
         db.getAll<KeyResult>('keyResults').catch(() => []),
         db.getAll<Habit>('habits').catch(() => []),
         db.getAll<HabitLog>('habitLogs').catch(() => []),
+        db.getAll<Note>('notes').catch(() => []),
+        db.getAll<NoteTemplate>('noteTemplates').catch(() => []),
+        db.getAll<GoalRoadmap>('goalRoadmaps').catch(() => []),
       ]);
       if (process.env.NODE_ENV !== 'production') {
         console.log('[DataProvider] [REHYDRATE] source:', db.getAdapterType(), { userId });
@@ -292,6 +343,9 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       setKeyResults(rawKeyResults.map(deserializeKeyResult).filter(x => x.userId === userId && !x.deleted));
       setHabits(rawHabits.map(deserializeHabit).filter(x => x.userId === userId && !x.deleted));
       setHabitLogs(rawHabitLogs.map(deserializeHabitLog).filter(x => x.userId === userId));
+      setNotes(rawNotes.map(deserializeNote).filter(x => x.userId === userId));
+      setNoteTemplates(rawNoteTemplates.map(deserializeNoteTemplate).filter(x => x.userId === userId));
+      setGoalRoadmaps(rawGoalRoadmaps.map(deserializeGoalRoadmap).filter(x => x.userId === userId));
       try {
         const newKpis = await db.calculateTodayKPIs(userId);
         setKpis(newKpis);
@@ -845,6 +899,159 @@ export function DataProvider({ userId, children }: DataProviderProps) {
   }, [userId]);
 
 
+  // ========== NOTE CRUD ==========
+  const createNote = useCallback(async (data: Partial<Note>): Promise<string | undefined> => {
+    const note = { 
+      ...data, 
+      userId, 
+      domainId: data.domainId || 'domain-1',
+      id: data.id || `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as Note;
+    await db.create('notes', note);
+    setNotes(prev => [...prev, note]);
+    return note.id;
+  }, [userId]);
+
+  const updateNote = useCallback(async (id: string, updates: Partial<Note>) => {
+    const updated = { ...updates, id, updatedAt: new Date() } as Note;
+    await db.update('notes', sanitizeForStorage(updated));
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, ...updated } : n));
+  }, []);
+
+  const deleteNote = useCallback(async (id: string) => {
+    await db.delete('notes', id);
+    setNotes(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  const getNotesForEntity = useCallback((entityType: string, entityId?: string): Note[] => {
+    if (entityType === 'global') {
+      return notes.filter(n => n.entityType === 'global');
+    }
+    return notes.filter(n => n.entityType === entityType && n.entityId === entityId);
+  }, [notes]);
+
+  // ========== NOTE TEMPLATE CRUD ==========
+  const createNoteTemplate = useCallback(async (data: Partial<NoteTemplate>): Promise<string | undefined> => {
+    const template = { 
+      ...data, 
+      userId, 
+      domainId: data.domainId || 'domain-1',
+      id: data.id || `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as NoteTemplate;
+    await db.create('noteTemplates', template);
+    setNoteTemplates(prev => [...prev, template]);
+    return template.id;
+  }, [userId]);
+
+  const updateNoteTemplate = useCallback(async (id: string, updates: Partial<NoteTemplate>) => {
+    const updated = { ...updates, id, updatedAt: new Date() } as NoteTemplate;
+    await db.update('noteTemplates', sanitizeForStorage(updated));
+    setNoteTemplates(prev => prev.map(t => t.id === id ? { ...t, ...updated } : t));
+  }, []);
+
+  const deleteNoteTemplate = useCallback(async (id: string) => {
+    await db.delete('noteTemplates', id);
+    setNoteTemplates(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // ========== GOAL ROADMAP CRUD ==========
+  const createGoalRoadmap = useCallback(async (data: Partial<GoalRoadmap>): Promise<string | undefined> => {
+    const roadmap = { 
+      ...data, 
+      userId, 
+      domainId: data.domainId || 'domain-1',
+      id: data.id || `roadmap-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      milestones: data.milestones || []
+    } as GoalRoadmap;
+    await db.create('goalRoadmaps', roadmap);
+    setGoalRoadmaps(prev => [...prev, roadmap]);
+    return roadmap.id;
+  }, [userId]);
+
+  const updateGoalRoadmap = useCallback(async (id: string, updates: Partial<GoalRoadmap>) => {
+    const updated = { ...updates, id, updatedAt: new Date() } as GoalRoadmap;
+    await db.update('goalRoadmaps', sanitizeForStorage(updated));
+    setGoalRoadmaps(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
+  }, []);
+
+  const deleteGoalRoadmap = useCallback(async (id: string) => {
+    await db.delete('goalRoadmaps', id);
+    setGoalRoadmaps(prev => prev.filter(r => r.id !== id));
+  }, []);
+
+  const getOrCreateRoadmapForGoal = useCallback(async (goalId: string): Promise<GoalRoadmap> => {
+    // Check if roadmap already exists
+    const existing = goalRoadmaps.find(r => r.goalId === goalId);
+    if (existing) return existing;
+
+    // Create default roadmap with basic milestones
+    const goal = goals.find(g => g.id === goalId);
+    const goalProjects = projects.filter(p => p.goalId === goalId);
+    
+    const defaultMilestones = goalProjects.length > 0
+      ? goalProjects.map((project, index) => ({
+          id: `milestone-${project.id}`,
+          title: `Complete ${project.name}`,
+          description: project.description,
+          requiredHours: project.totalHoursTarget || 50,
+          projectId: project.id,
+          order: index,
+          status: 'pending' as const,
+          icon: '🎯'
+        }))
+      : [
+          {
+            id: `milestone-start-${goalId}`,
+            title: 'Get Started',
+            description: 'Begin working on this goal',
+            requiredHours: 10,
+            order: 0,
+            status: 'pending' as const,
+            icon: '🚀'
+          },
+          {
+            id: `milestone-progress-${goalId}`,
+            title: 'Make Progress',
+            description: 'Reach the halfway point',
+            requiredHours: 50,
+            order: 1,
+            status: 'pending' as const,
+            icon: '📈'
+          },
+          {
+            id: `milestone-complete-${goalId}`,
+            title: 'Goal Complete',
+            description: 'Achieve the goal successfully',
+            requiredHours: 100,
+            order: 2,
+            status: 'pending' as const,
+            icon: '🏆'
+          }
+        ];
+
+    const newRoadmap: GoalRoadmap = {
+      id: `roadmap-${goalId}`,
+      userId,
+      domainId: 'domain-1',
+      goalId,
+      title: `${goal?.title || 'Goal'} Journey`,
+      description: 'Your path to achieving this goal',
+      milestones: defaultMilestones,
+      avatarStyle: 'character',
+      pathStyle: 'mountain',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    await createGoalRoadmap(newRoadmap);
+    return newRoadmap;
+  }, [goalRoadmaps, goals, projects, userId, createGoalRoadmap]);
 
   // ========== Context Value ==========
   const value: DataContextValue = useMemo(() => ({
@@ -858,6 +1065,9 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     habits,
     habitLogs,
     kpis,
+    notes,
+    noteTemplates,
+    goalRoadmaps,
     createTimeBlock,
     updateTimeBlock,
     deleteTimeBlock,
@@ -877,16 +1087,31 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     updateHabit,
     deleteHabit,
     logHabit,
+    createNote,
+    updateNote,
+    deleteNote,
+    getNotesForEntity,
+    createNoteTemplate,
+    updateNoteTemplate,
+    deleteNoteTemplate,
+    createGoalRoadmap,
+    updateGoalRoadmap,
+    deleteGoalRoadmap,
+    getOrCreateRoadmapForGoal,
     loadTimeBlocksForDate,
     refreshKPIs,
   }), [
     status, userId, timeBlocks, goals, keyResults, projects, tasks, habits, habitLogs, kpis,
+    notes, noteTemplates, goalRoadmaps,
     createTimeBlock, updateTimeBlock, deleteTimeBlock,
     createGoal, updateGoal, deleteGoal,
     createKeyResult, updateKeyResult, deleteKeyResult,
     createProject, updateProject, deleteProject,
     createTask, updateTask, deleteTask,
     createHabit, updateHabit, deleteHabit, logHabit,
+    createNote, updateNote, deleteNote, getNotesForEntity,
+    createNoteTemplate, updateNoteTemplate, deleteNoteTemplate,
+    createGoalRoadmap, updateGoalRoadmap, deleteGoalRoadmap, getOrCreateRoadmapForGoal,
     loadTimeBlocksForDate, refreshKPIs,
 
   ]);

@@ -7,9 +7,12 @@ import { createPortal } from 'react-dom';
 import { 
   Target, Calendar, Clock, TrendingUp, Plus, Trash2, Edit3, 
   CheckCircle, AlertTriangle, Flag, ChevronRight, X, Loader2,
-  FolderOpen, ListTodo, AlertCircle, Check
+  FolderOpen, ListTodo, AlertCircle, Check, FileText, Map
 } from 'lucide-react';
-import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus } from '@/types';
+import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
+import { RichNoteEditor } from './RichNoteEditor';
+import { GoalRoadmapView } from './GoalRoadmapView';
+import { useDataContext } from '@/providers/DataProvider';
 
 
 // ============================================================================
@@ -735,9 +738,11 @@ interface GoalCardProps {
   onSelect: () => void;
   onUpdate?: (id: string, updates: Partial<Goal>) => void;
   onDelete?: () => void;
+  onShowNotes?: (goalId: string) => void;
+  onShowRoadmap?: (goalId: string) => void;
 }
 
-function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete }: GoalCardProps) {
+function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes, onShowRoadmap }: GoalCardProps) {
   const metrics = useGoalMetrics(goal);
 
   return (
@@ -769,18 +774,48 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete }: GoalCardPr
             <p className="text-sm text-gray-500 mt-1 line-clamp-2">{goal.description}</p>
           )}
         </div>
-        {onDelete && (
-          <button
-            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            aria-label="Delete goal"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {onShowNotes && (
+            <button
+              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowNotes(goal.id);
+              }}
+              aria-label="Goal Notes"
+              title="Notes"
+            >
+              <FileText className="w-4 h-4" />
+            </button>
+          )}
+          
+          {onShowRoadmap && (
+            <button
+              className="p-1.5 rounded-lg text-gray-400 hover:text-green-500 hover:bg-green-50 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowRoadmap(goal.id);
+              }}
+              aria-label="Goal Roadmap"
+              title="Roadmap"
+            >
+              <Map className="w-4 h-4" />
+            </button>
+          )}
+          
+          {onDelete && (
+            <button
+              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              aria-label="Delete goal"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -1742,6 +1777,23 @@ export default function OKRManager(props: OKRManagerProps) {
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<CreateModalType>(null);
   const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
+  
+  // Notes & Roadmap state
+  const [activeTab, setActiveTab] = useState<'notes' | 'roadmap'>('notes');
+  const [showNotesSection, setShowNotesSection] = useState(false);
+  const [showRoadmapSection, setShowRoadmapSection] = useState(false);
+  
+  // Access to data context for notes and roadmaps
+  const {
+    notes,
+    noteTemplates,
+    goalRoadmaps,
+    createNote,
+    updateNote,
+    deleteNote,
+    getNotesForEntity,
+    getOrCreateRoadmapForGoal
+  } = useDataContext();
 
   // --------------------------------------------------------------------------
   // DATA VISIBILITY (multi-user isolation)
@@ -2029,6 +2081,18 @@ export default function OKRManager(props: OKRManagerProps) {
                 onSelect={() => handleSelectGoal(goal.id)}
                 onUpdate={onUpdateGoal}
                 onDelete={() => handleDeleteGoal(goal.id)}
+                onShowNotes={(goalId) => {
+                  setSelectedGoalId(goalId);
+                  setActiveTab('notes');
+                  setShowNotesSection(true);
+                  setShowRoadmapSection(false);
+                }}
+                onShowRoadmap={(goalId) => {
+                  setSelectedGoalId(goalId);
+                  setActiveTab('roadmap');
+                  setShowRoadmapSection(true);
+                  setShowNotesSection(false);
+                }}
               />
             ))}
           </div>
@@ -2143,6 +2207,151 @@ export default function OKRManager(props: OKRManagerProps) {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Notes & Roadmap Section */}
+        {(showNotesSection || showRoadmapSection) && selectedGoalId && (
+          <div className="mt-8 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            {/* Header with tabs */}
+            <div className="border-b border-gray-200 dark:border-gray-700 p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Goal Details: {selectedGoal?.title}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowNotesSection(false);
+                    setShowRoadmapSection(false);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              {/* Tab Navigation */}
+              <div className="flex items-center gap-1 mt-4">
+                <button
+                  onClick={() => {
+                    setActiveTab('notes');
+                    setShowNotesSection(true);
+                    setShowRoadmapSection(false);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'notes'
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 inline mr-2" />
+                  Notes
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('roadmap');
+                    setShowRoadmapSection(true);
+                    setShowNotesSection(false);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'roadmap'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                  }`}
+                >
+                  <Map className="w-4 h-4 inline mr-2" />
+                  Roadmap
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-4">
+              {activeTab === 'notes' && showNotesSection && (
+                <div className="space-y-4">
+                  {/* Existing notes list */}
+                  {getNotesForEntity('goal', selectedGoalId).length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Existing Notes</h4>
+                      {getNotesForEntity('goal', selectedGoalId).map(note => (
+                        <div key={note.id} className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                          <div className="flex items-start justify-between">
+                            <h5 className="font-medium text-gray-900 dark:text-white">{note.title}</h5>
+                            <button
+                              onClick={() => deleteNote(note.id)}
+                              className="text-gray-400 hover:text-red-500 transition-colors"
+                              title="Delete note"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Created {new Date(note.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Rich Text Editor for new note */}
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Create New Note</h4>
+                    <RichNoteEditor
+                      entityType="goal"
+                      entityId={selectedGoalId}
+                      currentUserId={currentUserId}
+                      placeholder="Write your goal notes here..."
+                      onSave={async (noteData) => {
+                        await createNote(noteData);
+                      }}
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'roadmap' && showRoadmapSection && selectedGoal && (
+                <div>
+                  {(() => {
+                    const existingRoadmap = goalRoadmaps.find(r => r.goalId === selectedGoalId);
+                    
+                    if (existingRoadmap) {
+                      return (
+                        <GoalRoadmapView
+                          goal={selectedGoal}
+                          roadmap={existingRoadmap}
+                          timeBlocks={timeBlocks}
+                          projects={visibleProjects}
+                          tasks={visibleTasks}
+                          className="border border-gray-200 dark:border-gray-700 rounded-lg"
+                        />
+                      );
+                    } else {
+                      return (
+                        <div className="text-center py-8">
+                          <Map className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                          <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                            Create Your Goal Roadmap
+                          </h4>
+                          <p className="text-gray-600 dark:text-gray-400 mb-4">
+                            Visualize your journey to achieving this goal with an interactive roadmap.
+                          </p>
+                          <button
+                            onClick={async () => {
+                              const roadmap = await getOrCreateRoadmapForGoal(selectedGoalId);
+                              // Roadmap will now be available in the next render
+                            }}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          >
+                            Generate Roadmap
+                          </button>
+                        </div>
+                      );
+                    }
+                  })()}
                 </div>
               )}
             </div>

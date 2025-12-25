@@ -511,3 +511,52 @@ export interface AnalyticsData {
     nextWeekGoals: string[];
   };
 }
+
+// ============================================================================
+// NOTES & TEMPLATES - Rich Text Editor Implementation
+// ============================================================================
+
+export interface NoteTemplate extends BaseEntity {
+  title: string;
+  docJson: any; // Tiptap JSON document
+  description?: string;
+  category?: string;
+  tags?: string[];
+}
+
+export interface Note extends BaseEntity {
+  entityType: 'goal' | 'project' | 'task' | 'global';
+  entityId?: string; // null for global notes
+  title: string;
+  docJson: any; // Tiptap JSON document  
+  templateId?: string; // Optional reference to template used
+  tags?: string[];
+  isPinned?: boolean;
+}
+
+// ============================================================================
+// GOAL ROADMAP - Avatar Progress System
+// ============================================================================
+
+export interface GoalMilestone {
+  id: string;
+  title: string;
+  description?: string;
+  requiredHours?: number; // Hours needed to reach this milestone
+  projectId?: string; // Optional link to specific project
+  taskId?: string; // Optional link to specific task
+  order: number; // Display order on roadmap
+  status: 'pending' | 'in_progress' | 'completed';
+  completedAt?: Date;
+  icon?: string; // Emoji or icon for milestone
+}
+
+export interface GoalRoadmap extends BaseEntity {
+  goalId: string;
+  title?: string; // Optional custom roadmap title
+  description?: string;
+  milestones: GoalMilestone[];
+  avatarStyle?: 'character' | 'progress_bar' | 'rocket'; // Avatar visualization style
+  pathStyle?: 'linear' | 'curved' | 'mountain'; // Path visualization style
+  totalDistance?: number; // Virtual distance for avatar movement
+}
