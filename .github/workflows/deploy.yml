@@ -34,6 +34,7 @@ jobs:
         run: npm run build
         env:
           CI: true
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Add .nojekyll file
         run: touch out/.nojekyll
