@@ -65,6 +65,12 @@ export function toDateSafe(value: any, referenceDate?: Date): Date {
     return d instanceof Date && !isNaN(d.getTime()) ? d : fallbackDate(referenceDate);
   }
 
+  // 🚨 SHERLOCK EMERGENCY FIX: Handle serverTimestamp objects
+  if (value && typeof value === "object" && value._methodName === "serverTimestamp") {
+    // serverTimestamp placeholders should fall back to current time
+    return referenceDate ? new Date(referenceDate) : new Date();
+  }
+
   // 3) Firestore Timestamp-like (seconds/nanoseconds)
   //    e.g. { seconds: 123, nanoseconds: 0 }
   if (
@@ -93,17 +99,8 @@ export function toDateSafe(value: any, referenceDate?: Date): Date {
   }
 
   // 6) Fallback
-  if (process.env.NEXT_PUBLIC_DEBUG_INIT === "1") {
-    // eslint-disable-next-line no-console
-    console.warn("⚠️ toDateSafe FALLBACK (unparsable) -> using safe fallback", {
-      value,
-      referenceDate: referenceDate ? safeToISO(referenceDate) : null,
-      stack: new Error().stack,
-    });
-  } else {
-    // eslint-disable-next-line no-console
-    console.warn("toDateSafe: Could not parse date value:", value, "using safe fallback");
-  }
+  // 🔇 SHERLOCK EMERGENCY: Disable console logs to stop flood
+  // console logs disabled to prevent infinite loop spam
   return fallbackDate(referenceDate);
 }
 

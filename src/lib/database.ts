@@ -1225,15 +1225,11 @@ class LifeTrackerDB {
       }
     }
     
-    console.log(`📖 db.getAll(${storeName}):`, {
-      useFirebase: this.useFirebase,
-      adapterType: this.adapter?.constructor?.name,
-      activeUserId: this._activeUserId
-    });
+    // 🔇 SHERLOCK EMERGENCY: Disabled console logs to stop infinite spam
     
     try {
       const result = await this.adapter.getAll(storeName);
-      console.log(`✅ db.getAll SUCCESS for ${storeName}: ${result.length} items`);
+      // console.log disabled to prevent spam
       return result as T[];
     } catch (error) {
       console.error(`❌ db.getAll ERROR for ${storeName}:`, error);

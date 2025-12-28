@@ -305,7 +305,7 @@ export default function MainApp({ buildId }: MainAppProps) {
         <div className="container mx-auto">
           <div className="grid-responsive gap-6">
             {/* Left Sidebar */}
-            <div className="space-y-6">
+            <div className="sidebar-container space-y-6">
               {/* Daily Login Streak System */}
               <DailyLoginStreakSystem 
                 showCompact={true}
@@ -324,7 +324,7 @@ export default function MainApp({ buildId }: MainAppProps) {
               />
               
               {/* AI Assistant */}
-              <div className="card-elevated card-body hover-lift transition-smooth">
+              <div className="sidebar-card card-elevated card-body hover-lift transition-smooth">
                 <div className="mb-4">
                   <h3 className="heading-3 flex items-center gap-3">
                     🧠 AI Assistant
@@ -351,11 +351,11 @@ export default function MainApp({ buildId }: MainAppProps) {
               </div>
 
               {/* KPI Dashboard */}
-              <div className="card-elevated hover-lift transition-smooth">
+              <div className="sidebar-card kpi-card card-elevated hover-lift transition-smooth">
                 <div className="card-header">
                   <h3 className="heading-3">Today's Progress</h3>
                 </div>
-                <div className="card-body">
+                <div className="card-body" style={{minHeight: '140px', contain: 'layout'}}>
                   <KPIDashboard 
                     kpis={data.kpis}
                     onRefresh={data.refreshKPIs}

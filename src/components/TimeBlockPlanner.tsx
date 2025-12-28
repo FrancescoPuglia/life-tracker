@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TimeBlock, Task, Project, Goal } from '@/types';
@@ -390,7 +390,8 @@ export default function TimeBlockPlanner({
   };
 
 
-  const filteredBlocks = timeBlocks.filter((block, index) => {
+  // 🔧 SHERLOCK MEMOIZATION FIX: Prevent infinite re-rendering
+  const filteredBlocks = useMemo(() => timeBlocks.filter((block, index) => {
     try {
       const blockDate = toDateSafe(block.startTime, selectedDate);
       const viewDates = getViewPeriodDates(selectedDate, viewMode);
@@ -404,13 +405,7 @@ export default function TimeBlockPlanner({
       console.error(`❌ Filter ERROR for block ${index}:`, error, block);
       return false;
     }
-  });
-  
-  console.log('📊 FILTER RESULTS:', {
-    totalBlocks: timeBlocks.length,
-    filteredCount: filteredBlocks.length,
-    filteredBlocks: filteredBlocks.map(b => ({ id: b.id, title: b.title }))
-  });
+  }), [timeBlocks, selectedDate, viewMode]); // Dependencies for memoization
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -423,7 +418,7 @@ export default function TimeBlockPlanner({
   };
 
   return (
-    <div className="glass-card border border-gray-200 shadow-xl">
+    <div className="glass-card border border-gray-200 shadow-xl" style={{minHeight: '600px', contain: 'layout style'}}>
       {/* Header */}
       <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50">
         <div>
@@ -701,7 +696,7 @@ export default function TimeBlockPlanner({
 
         {/* Week View - Google Calendar Style */}
         {viewMode === 'week' && (
-          <div className="bg-white">
+          <div className="bg-white" style={{minHeight: '500px', contain: 'layout'}}>
             <div className="flex">
               {/* Time Column */}
               <div className="w-16 flex-shrink-0 border-r border-gray-200">
@@ -721,7 +716,7 @@ export default function TimeBlockPlanner({
 
               {/* Days Grid */}
               <div className="flex-1 overflow-x-auto">
-                <div className="grid grid-cols-7 min-w-full">
+                <div className="grid grid-cols-7 min-w-full" style={{minHeight: '480px', contain: 'layout'}}>
                   {getViewPeriodDates(selectedDate, 'week').map((date, dayIndex) => {
                     const dayBlocks = filteredBlocks.filter(block => {
                       // 🔧 SHERLOCK FIX: Use block's actual creation date as reference, not the current view date
@@ -817,10 +812,12 @@ export default function TimeBlockPlanner({
                             const startTime = toDateSafe(block.startTime, blockCreationDate);
                             const endTime = toDateSafe(block.endTime, blockCreationDate);
                             
-                            // 🛠️ SHERLOCK DATA REPAIR: Fix corrupted multi-day time blocks
+                            // 🛠️ SHERLOCK DATA REPAIR: Fix corrupted multi-day time blocks (STABLE MODE)
                             let displayEndTime;
                             const duration = endTime.getTime() - startTime.getTime();
                             const maxReasonableDuration = 24 * 60 * 60 * 1000; // 24 hours max for single block
+                            
+                            // 🛡️ PREVENT LOOP: Only repair once, don't trigger state updates
                             
                             if (duration > maxReasonableDuration) {
                               // ⚡ AUTO-REPAIR: If block spans multiple days, assume same-day intent
@@ -832,14 +829,8 @@ export default function TimeBlockPlanner({
                                 displayEndTime.setDate(displayEndTime.getDate() + 1);
                               }
                               
-                              console.log('🔧 AUTO-REPAIRED TIME BLOCK:', {
-                                id: block.id,
-                                title: block.title,
-                                originalDuration: duration / (1000 * 60 * 60),
-                                repairedDuration: (displayEndTime.getTime() - startTime.getTime()) / (1000 * 60 * 60),
-                                originalEnd: endTime,
-                                repairedEnd: displayEndTime
-                              });
+                              // 🔇 REMOVED: Console spam prevention
+                              // Repair executed silently
                               
                               // 💾 OPTIONAL: Auto-save the repair to database (uncomment to enable)
                               // onUpdateTimeBlock(block.id, { endTime: displayEndTime });
@@ -858,22 +849,7 @@ export default function TimeBlockPlanner({
                             const maxVisualHeight = 8 * HOUR_HEIGHT; // 640px (8 hours × 80px)
                             const finalHeight = Math.min(calculatedHeight, maxVisualHeight);
                             
-                            // 🕵️ SHERLOCK DIAGNOSTIC: Log problematic blocks
-                            if (actualDuration > maxDuration || block.title.includes('ROUTINE')) {
-                              console.log('🚨 PROBLEMATIC TIME BLOCK DETECTED:', {
-                                id: block.id,
-                                title: block.title,
-                                originalStart: block.startTime,
-                                originalEnd: block.endTime,
-                                parsedStart: startTime,
-                                parsedEnd: displayEndTime,
-                                actualDurationHours: actualDuration / (1000 * 60 * 60),
-                                safeDurationHours: safeDuration / (1000 * 60 * 60),
-                                calculatedHeight,
-                                finalHeight,
-                                referenceDate: date
-                              });
-                            }
+                            // 🔇 REMOVED: Diagnostic logs to prevent console spam
                             
                             return (
                               <div

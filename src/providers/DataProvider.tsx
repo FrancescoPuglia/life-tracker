@@ -304,14 +304,8 @@ export function DataProvider({ userId, children }: DataProviderProps) {
         db.getAll<NoteTemplate>('noteTemplates').catch(() => []),
         db.getAll<GoalRoadmap>('goalRoadmaps').catch(() => []),
       ]);
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[DataProvider] [REHYDRATE] source:', db.getAdapterType(), { userId });
-        console.log('[DataProvider] [REHYDRATE] counts:', {
-          goals: rawGoals.length, projects: rawProjects.length, tasks: rawTasks.length, timeBlocks: rawTimeBlocks.length
-        });
-        console.log('[DataProvider] [REHYDRATE] rawTimeBlocks:', rawTimeBlocks);
-        console.log('[DataProvider] [REHYDRATE] rawGoals:', rawGoals);
-      }
+      // 🔇 SHERLOCK EMERGENCY: Disabled DataProvider logs to stop spam
+      // console.logs disabled to prevent infinite loop spam
 
       // Debug timeBlock rehydration behind feature flag
       if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1' && rawTimeBlocks.length > 0) {
@@ -358,7 +352,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       setLoadedForUser(userId);
       setStatus('ready');
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[DataProvider] [REHYDRATE] done for user:', userId);
+        // 🔇 SHERLOCK EMERGENCY: console.log disabled
       }
     })();
   }, [userId, db.getAdapterType()]);

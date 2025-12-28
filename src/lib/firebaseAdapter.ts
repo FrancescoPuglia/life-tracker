@@ -71,7 +71,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
     this.restoreUserId();
     
     if (this.isInitialized) {
-      console.log('✅ FirebaseAdapter already initialized, userId:', this.userId);
+      // 🔇 EMERGENCY: console.log disabled
       return;
     }
     
@@ -287,12 +287,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
 
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
-    console.log('📖 Firebase getAll():', {
-      collectionName,
-      userId: this.userId,
-      firestore: !!firestore,
-      isInitialized: this.isInitialized
-    });
+    // 🔇 EMERGENCY: console.log disabled to stop spam
     
     if (!firestore) {
       throw new Error('Firebase Firestore not initialized');
@@ -313,13 +308,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
         const data = { id: doc.id, ...doc.data() };
         results.push(this.convertTimestampsToDates(data) as T);
       });
-      console.log('📖 Firebase query result:', {
-        collectionName,
-        count: querySnapshot.size,
-        ids: results.map(r => (r as any).id),
-        userIds: results.map(r => (r as any).userId),
-        results
-      });
+      // 🔇 EMERGENCY: console.log disabled to stop spam
       return results;
     } catch (error) {
       console.error(`❌ Failed to get all documents from ${collectionName}:`, error);

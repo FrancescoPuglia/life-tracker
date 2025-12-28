@@ -347,6 +347,44 @@ td {
   }
 }
 
+/* 🔧 SHERLOCK FIX: Prevent sidebar micro-jumping during navigation */
+.sidebar-container {
+  contain: layout style;
+  will-change: auto;
+  min-height: calc(100vh - 80px);
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-card, .glass-card {
+  contain: layout;
+  min-height: 120px;
+  transition: none !important;
+  transform: translateZ(0); /* Force GPU acceleration for stability */
+}
+
+.kpi-card, .streak-card, .progress-card {
+  min-height: 140px;
+  max-height: 300px;
+  overflow: hidden;
+  contain: strict;
+  backface-visibility: hidden; /* Prevent flicker */
+}
+
+/* 🔧 SHERLOCK FIX: Prevent Time Planner jumping during navigation */
+.glass-card {
+  contain: layout;
+  will-change: auto;
+  transform: translateZ(0); /* GPU acceleration for stability */
+}
+
+/* 🔇 REMOVED: Transition disable was causing flicker */
+
+.grid-cols-7 > div {
+  contain: layout;
+  min-height: 480px; /* Match grid container height */
+}
+
 @media (min-width: 1024px) {
   .grid-responsive {
     grid-template-columns: 280px 1fr 320px;
