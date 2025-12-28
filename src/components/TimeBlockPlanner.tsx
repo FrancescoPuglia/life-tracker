@@ -724,7 +724,12 @@ export default function TimeBlockPlanner({
                 <div className="grid grid-cols-7 min-w-full">
                   {getViewPeriodDates(selectedDate, 'week').map((date, dayIndex) => {
                     const dayBlocks = filteredBlocks.filter(block => {
-                      const blockDate = toDateSafe(block.startTime, date);
+                      // 🔧 SHERLOCK FIX: Use block's actual creation date as reference, not the current view date
+                      // This prevents time blocks from "jumping" when navigating between weeks
+                      const blockCreationDate = block.startTime instanceof Date 
+                        ? new Date(block.startTime.getFullYear(), block.startTime.getMonth(), block.startTime.getDate())
+                        : date; // fallback to current date if not a proper Date object
+                      const blockDate = toDateSafe(block.startTime, blockCreationDate);
                       return formatDateStringSafe(blockDate) === formatDateStringSafe(date);
                     });
 
@@ -805,9 +810,70 @@ export default function TimeBlockPlanner({
 
                           {/* Time blocks for this day */}
                           {dayBlocks.map((block) => {
-                            const startTime = toDateSafe(block.startTime, date);
-                            const endTime = toDateSafe(block.endTime, date);
-                            const displayEndTime = endTime <= startTime ? new Date(startTime.getTime() + 60*60*1000) : endTime;
+                            // 🔧 SHERLOCK FIX: Use consistent date reference for both start and end times
+                            const blockCreationDate = block.startTime instanceof Date 
+                              ? new Date(block.startTime.getFullYear(), block.startTime.getMonth(), block.startTime.getDate())
+                              : date;
+                            const startTime = toDateSafe(block.startTime, blockCreationDate);
+                            const endTime = toDateSafe(block.endTime, blockCreationDate);
+                            
+                            // 🛠️ SHERLOCK DATA REPAIR: Fix corrupted multi-day time blocks
+                            let displayEndTime;
+                            const duration = endTime.getTime() - startTime.getTime();
+                            const maxReasonableDuration = 24 * 60 * 60 * 1000; // 24 hours max for single block
+                            
+                            if (duration > maxReasonableDuration) {
+                              // ⚡ AUTO-REPAIR: If block spans multiple days, assume same-day intent
+                              displayEndTime = new Date(startTime);
+                              displayEndTime.setHours(endTime.getHours(), endTime.getMinutes(), endTime.getSeconds());
+                              
+                              // If end time is before start time (next day scenario), add 1 day
+                              if (displayEndTime <= startTime) {
+                                displayEndTime.setDate(displayEndTime.getDate() + 1);
+                              }
+                              
+                              console.log('🔧 AUTO-REPAIRED TIME BLOCK:', {
+                                id: block.id,
+                                title: block.title,
+                                originalDuration: duration / (1000 * 60 * 60),
+                                repairedDuration: (displayEndTime.getTime() - startTime.getTime()) / (1000 * 60 * 60),
+                                originalEnd: endTime,
+                                repairedEnd: displayEndTime
+                              });
+                              
+                              // 💾 OPTIONAL: Auto-save the repair to database (uncomment to enable)
+                              // onUpdateTimeBlock(block.id, { endTime: displayEndTime });
+                            } else {
+                              displayEndTime = endTime <= startTime ? new Date(startTime.getTime() + 60*60*1000) : endTime;
+                            }
+                            
+                            // 🛡️ SHERLOCK PROTECTION: Prevent excessive block heights (max 8 hours)
+                            const maxDuration = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+                            const actualDuration = displayEndTime.getTime() - startTime.getTime();
+                            const safeDuration = Math.min(actualDuration, maxDuration);
+                            const safeDisplayEndTime = new Date(startTime.getTime() + safeDuration);
+                            
+                            // 🔧 Calculate safe height with hard limit enforcement
+                            const calculatedHeight = getDurationHeight(startTime, safeDisplayEndTime);
+                            const maxVisualHeight = 8 * HOUR_HEIGHT; // 640px (8 hours × 80px)
+                            const finalHeight = Math.min(calculatedHeight, maxVisualHeight);
+                            
+                            // 🕵️ SHERLOCK DIAGNOSTIC: Log problematic blocks
+                            if (actualDuration > maxDuration || block.title.includes('ROUTINE')) {
+                              console.log('🚨 PROBLEMATIC TIME BLOCK DETECTED:', {
+                                id: block.id,
+                                title: block.title,
+                                originalStart: block.startTime,
+                                originalEnd: block.endTime,
+                                parsedStart: startTime,
+                                parsedEnd: displayEndTime,
+                                actualDurationHours: actualDuration / (1000 * 60 * 60),
+                                safeDurationHours: safeDuration / (1000 * 60 * 60),
+                                calculatedHeight,
+                                finalHeight,
+                                referenceDate: date
+                              });
+                            }
                             
                             return (
                               <div
@@ -815,7 +881,7 @@ export default function TimeBlockPlanner({
                                 className={`absolute left-1 right-1 ${block.color ? 'font-bold rounded-lg hover:shadow-lg transform hover:scale-105 transition-all duration-200 border text-white' : getBlockColor(block)} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 z-10 border`}
                                 style={{
                                   top: `${getPositionFromTime(startTime)}px`,
-                                  height: `${getDurationHeight(startTime, displayEndTime)}px`,
+                                  height: `${finalHeight}px`, // 🔧 SHERLOCK FIX: Use calculated safe height
                                   minHeight: '30px',
                                   ...(block.color ? {
                                     backgroundColor: block.color,
@@ -829,9 +895,14 @@ export default function TimeBlockPlanner({
                                   <div className="flex-1 min-w-0">
                                     <div className="text-xs font-bold truncate mb-1 drop-shadow-sm">
                                       {getBlockIcon(block)} {block.title}
+                                      {duration > maxReasonableDuration && <span className="ml-1 text-blue-300" title="Multi-day block auto-repaired">🔧</span>}
+                                      {actualDuration > maxDuration && <span className="ml-1 text-orange-300" title="Block duration truncated for display">⚠️</span>}
                                     </div>
                                     <div className="text-xs opacity-75 font-mono drop-shadow-sm">
                                       {formatTimeSafe(startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}
+                                      {actualDuration > maxDuration && (
+                                        <div className="text-orange-300">Duration: {Math.round(actualDuration / (1000 * 60 * 60) * 10) / 10}h (truncated)</div>
+                                      )}
                                     </div>
                                   </div>
                                   
@@ -853,6 +924,20 @@ export default function TimeBlockPlanner({
                                       title={block.status === 'completed' ? 'Mark as planned' : 'Mark as completed'}
                                     >
                                       {block.status === 'completed' ? '✅' : '⭕'}
+                                    </button>
+                                    
+                                    {/* 🗑️ SHERLOCK DELETE BUTTON - Requested feature */}
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (window.confirm(`Delete "${block.title}"?`)) {
+                                          onDeleteTimeBlock(block.id);
+                                        }
+                                      }}
+                                      className="text-xs text-red-400 hover:text-red-600 hover:scale-110 transition-all"
+                                      title="Delete this time block"
+                                    >
+                                      🗑️
                                     </button>
                                   </div>
                                 </div>
