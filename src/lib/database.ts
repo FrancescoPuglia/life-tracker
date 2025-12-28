@@ -3,6 +3,7 @@ import {
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
   Insight, Achievement, KPI, DashboardState, VisionBoard, VisionItem, MediaAsset
 } from '@/types';
+import { Page } from '@/types/blocks';
 import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
 
@@ -114,7 +115,7 @@ class MemoryAdapter implements DatabaseAdapter {
 }
 
 // IndexedDB version constant - single source of truth
-const IDB_VERSION = 2;
+const IDB_VERSION = 4; // Incremented for pages collection (Notion Editor)
 
 // IndexedDB Adapter (existing implementation)
 class IndexedDBAdapter implements DatabaseAdapter {
@@ -187,7 +188,9 @@ class IndexedDBAdapter implements DatabaseAdapter {
           'timeBlocks', 'sessions', 'habits', 'habitLogs', 'metrics',
           'calendarEvents', 'deadlines', 'journalEntries', 'insights', 'achievements',
           'notes', 'noteTemplates', 'goalRoadmaps',
-          'visionBoards', 'visionItems', 'mediaAssets', 'mediaBlobs'
+          'visionBoards', 'visionItems', 'mediaAssets', 'mediaBlobs',
+          'pages', // Notion-like Block Editor pages
+          'login_streaks' // Daily login streak tracking
         ];
 
         stores.forEach(storeName => {
@@ -261,6 +264,21 @@ class IndexedDBAdapter implements DatabaseAdapter {
               case 'mediaBlobs':
                 // Special store for guest blob storage - uses blobKey as id
                 // No userId index needed since blob keys are already unique
+                break;
+              case 'pages':
+                store.createIndex('userId', 'userId');
+                store.createIndex('title', 'title');
+                store.createIndex('linkedGoalIds', 'linkedGoalIds', { multiEntry: true });
+                store.createIndex('linkedProjectIds', 'linkedProjectIds', { multiEntry: true });
+                store.createIndex('linkedTaskIds', 'linkedTaskIds', { multiEntry: true });
+                store.createIndex('tags', 'tags', { multiEntry: true });
+                store.createIndex('isTemplate', 'isTemplate');
+                store.createIndex('createdAt', 'createdAt');
+                store.createIndex('updatedAt', 'updatedAt');
+                break;
+              case 'login_streaks':
+                store.createIndex('userId', 'userId');
+                store.createIndex('lastLoginDate', 'lastLoginDate');
                 break;
               default:
                 store.createIndex('userId', 'userId');
@@ -1815,6 +1833,148 @@ class LifeTrackerDB {
   clearDatabaseError(): void {
     if (typeof window !== 'undefined') {
       delete (window as any).__lifeTrackerDBError;
+    }
+  }
+
+  // ============================================================================
+  // 🧠 NOTION-LIKE PAGES CRUD OPERATIONS
+  // ============================================================================
+
+  // Page operations
+  async createPage(data: Omit<Page, 'id' | 'createdAt' | 'updatedAt'>): Promise<Page> {
+    const now = new Date();
+    const page: Page = {
+      ...data,
+      id: `page-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: now,
+      updatedAt: now
+    };
+    
+    console.log('📝 Creating page:', {
+      id: page.id,
+      title: page.title,
+      userId: page.userId,
+      blocksCount: page.blocks.length
+    });
+    
+    return this.create('pages', page);
+  }
+
+  async getPages(userId: string): Promise<Page[]> {
+    console.log('📖 Getting pages for userId:', userId);
+    return this.getByIndex<Page>('pages', 'userId', userId);
+  }
+
+  async getPage(id: string): Promise<Page | null> {
+    console.log('📄 Getting page:', id);
+    return this.read<Page>('pages', id);
+  }
+
+  async updatePage(data: Page): Promise<Page> {
+    const updated = { ...data, updatedAt: new Date() };
+    
+    console.log('✏️ Updating page:', {
+      id: updated.id,
+      title: updated.title,
+      blocksCount: updated.blocks.length
+    });
+    
+    return this.update('pages', updated);
+  }
+
+  async deletePage(id: string): Promise<void> {
+    console.log('🗑️ Deleting page:', id);
+    await this.delete('pages', id);
+  }
+
+  // Advanced Page queries
+  async getPagesByTag(userId: string, tag: string): Promise<Page[]> {
+    const pages = await this.getPages(userId);
+    return pages.filter(page => page.tags?.includes(tag));
+  }
+
+  async getTemplatePages(userId: string): Promise<Page[]> {
+    const pages = await this.getPages(userId);
+    return pages.filter(page => page.isTemplate);
+  }
+
+  async getPagesByGoal(goalId: string): Promise<Page[]> {
+    return this.getByIndex<Page>('pages', 'linkedGoalIds', goalId);
+  }
+
+  async getPagesByProject(projectId: string): Promise<Page[]> {
+    return this.getByIndex<Page>('pages', 'linkedProjectIds', projectId);
+  }
+
+  async getPagesByTask(taskId: string): Promise<Page[]> {
+    return this.getByIndex<Page>('pages', 'linkedTaskIds', taskId);
+  }
+
+  async searchPages(userId: string, query: string): Promise<Page[]> {
+    const pages = await this.getPages(userId);
+    const lowercaseQuery = query.toLowerCase();
+    
+    return pages.filter(page => 
+      page.title.toLowerCase().includes(lowercaseQuery) ||
+      page.tags?.some(tag => tag.toLowerCase().includes(lowercaseQuery))
+    );
+  }
+
+  async getRecentPages(userId: string, limit: number = 10): Promise<Page[]> {
+    const pages = await this.getPages(userId);
+    return pages
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, limit);
+  }
+
+  // Page statistics
+  async getPageStats(userId: string): Promise<{
+    totalPages: number;
+    templatesCount: number;
+    tagsCount: number;
+    averageBlocksPerPage: number;
+    lastUpdated: Date | null;
+  }> {
+    const pages = await this.getPages(userId);
+    
+    const totalPages = pages.length;
+    const templatesCount = pages.filter(p => p.isTemplate).length;
+    
+    const allTags = new Set<string>();
+    pages.forEach(page => page.tags?.forEach(tag => allTags.add(tag)));
+    const tagsCount = allTags.size;
+    
+    const totalBlocks = pages.reduce((sum, page) => sum + page.blocks.length, 0);
+    const averageBlocksPerPage = totalPages > 0 ? Math.round(totalBlocks / totalPages) : 0;
+    
+    const lastUpdated = pages.length > 0 
+      ? pages.reduce((latest, page) => 
+          new Date(page.updatedAt) > new Date(latest) ? page.updatedAt : latest, 
+          pages[0].updatedAt
+        )
+      : null;
+
+    return {
+      totalPages,
+      templatesCount,
+      tagsCount,
+      averageBlocksPerPage,
+      lastUpdated
+    };
+  }
+
+  // Helper for auto-saving pages with debounce
+  async savePage(page: Page): Promise<Page> {
+    // This method ensures the page exists first
+    const existing = await this.getPage(page.id);
+    
+    if (existing) {
+      console.log('💾 Updating existing page:', page.id);
+      return this.updatePage(page);
+    } else {
+      console.log('💾 Creating new page:', page.id);
+      const { id, createdAt, updatedAt, ...pageData } = page;
+      return this.createPage(pageData);
     }
   }
 }

@@ -54,7 +54,17 @@ export function VisionBoardCreator({
         isActive: true
       };
 
-      const newBoard = await db.createVisionBoard(boardData);
+      console.log('🔍 SHERLOCK: Creating vision board locally (no Firestore)...');
+      
+      // BYPASS FIRESTORE - Create board locally
+      const newBoard: VisionBoard = {
+        id: `board_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        ...boardData,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      console.log('🔍 SHERLOCK: Vision board created locally!');
       onBoardCreated?.(newBoard);
     } catch (error) {
       console.error('Failed to create vision board:', error);

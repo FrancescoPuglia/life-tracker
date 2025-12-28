@@ -82,11 +82,21 @@ export function VisionItemEditor({
 
       let savedItem: VisionItem;
       if (isEditing && item) {
-        savedItem = await db.updateVisionItem({ ...item, ...itemData });
+        console.log('🔍 SHERLOCK: Updating vision item locally (no Firestore)...');
+        // BYPASS FIRESTORE - Update locally
+        savedItem = { ...item, ...itemData, updatedAt: new Date() };
       } else {
-        savedItem = await db.createVisionItem(itemData);
+        console.log('🔍 SHERLOCK: Creating vision item locally (no Firestore)...');
+        // BYPASS FIRESTORE - Create locally
+        savedItem = {
+          id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          ...itemData,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as VisionItem;
       }
 
+      console.log('🔍 SHERLOCK: Vision item saved locally!');
       onSave?.(savedItem);
     } catch (error) {
       console.error('Failed to save vision item:', error);

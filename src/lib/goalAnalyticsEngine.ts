@@ -1,5 +1,5 @@
 import { 
-  Goal, Session, TimeBlock, GoalAnalytics, GoalTimeInvestment, 
+  Goal, KeyResult, Session, TimeBlock, GoalAnalytics, GoalTimeInvestment, 
   GoalROI, GoalCompletion, GoalEfficiency, GoalTrends, 
   GoalRecommendation, StrategicAllocation 
 } from '@/types';
@@ -91,7 +91,7 @@ export class GoalAnalyticsEngine {
     if (!goal) throw new Error(`Goal ${goalId} not found`);
 
     const hoursInvested = await this.getTotalHoursInvested(goalId, days);
-    const progressAchieved = this.calculateProgressAchieved(goal);
+    const progressAchieved = await this.calculateProgressAchieved(goal);
     const progressPerHour = hoursInvested > 0 ? progressAchieved / hoursInvested : 0;
     
     // Efficiency rating based on progress per hour
@@ -123,7 +123,7 @@ export class GoalAnalyticsEngine {
     const goal = await db.read<Goal>('goals', goalId);
     if (!goal) throw new Error(`Goal ${goalId} not found`);
 
-    const currentProgress = this.calculateProgressAchieved(goal);
+    const currentProgress = await this.calculateProgressAchieved(goal);
     
     // Machine learning-style prediction based on velocity
     const velocity = await this.calculateProgressVelocity(goalId);
@@ -144,7 +144,7 @@ export class GoalAnalyticsEngine {
     const bottlenecks = await this.identifyBottlenecks(goalId);
     
     // Generate milestones
-    const milestones = this.generateMilestones(goal, velocity);
+    const milestones = await this.generateMilestones(goal, velocity);
     
     // Risk factor analysis
     const riskFactors = await this.analyzeRiskFactors(goalId, velocity, daysUntilDeadline);
@@ -408,10 +408,24 @@ export class GoalAnalyticsEngine {
     return this.calculateTotalHoursInvested(sessions, timeBlocks);
   }
 
-  private calculateProgressAchieved(goal: Goal): number {
-    if (goal.keyResults.length === 0) return 0;
-    const totalProgress = goal.keyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0);
-    return totalProgress / goal.keyResults.length;
+  private async calculateProgressAchieved(goal: Goal): Promise<number> {
+    // 🔥 FIX: Get keyResults safely
+    let keyResults: KeyResult[] = [];
+    
+    try {
+      if (goal.keyResults && Array.isArray(goal.keyResults)) {
+        keyResults = goal.keyResults;
+      } else {
+        keyResults = await db.getByIndex<KeyResult>('keyResults', 'goalId', goal.id);
+      }
+    } catch (error) {
+      console.warn('Error loading keyResults for progress calculation:', error);
+      return 0;
+    }
+
+    if (!keyResults || keyResults.length === 0) return 0;
+    const totalProgress = keyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0);
+    return totalProgress / keyResults.length;
   }
 
   private categorizeEfficiency(progressPerHour: number): 'exceptional' | 'high' | 'medium' | 'low' | 'critical' {
@@ -426,15 +440,35 @@ export class GoalAnalyticsEngine {
     const goal = await db.read<Goal>('goals', goalId);
     if (!goal) return 0;
 
-    // Calculate velocity based on recent progress changes
-    const keyResults = goal.keyResults;
+    // 🔥 FIX: Get keyResults from separate collection, not from goal object
+    let keyResults: KeyResult[] = [];
+    
+    try {
+      // Try to get keyResults from goal object first (if populated)
+      if (goal.keyResults && Array.isArray(goal.keyResults)) {
+        keyResults = goal.keyResults;
+      } else {
+        // Fall back to loading keyResults from separate collection
+        keyResults = await db.getByIndex<KeyResult>('keyResults', 'goalId', goalId);
+      }
+    } catch (error) {
+      console.warn('Error loading keyResults for goal', goalId, error);
+      return 0;
+    }
+
+    // Safe calculation with empty array fallback
+    if (!keyResults || keyResults.length === 0) {
+      return 0;
+    }
+
     const totalVelocity = keyResults.reduce((sum, kr) => {
       // Simplified velocity calculation (would be more sophisticated in real implementation)
-      const daysSinceCreation = Math.max(1, Math.ceil((Date.now() - kr.createdAt.getTime()) / (1000 * 60 * 60 * 24)));
+      const createdAt = kr.createdAt ? new Date(kr.createdAt) : new Date();
+      const daysSinceCreation = Math.max(1, Math.ceil((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)));
       return sum + ((kr.progress ?? 0) / daysSinceCreation);
     }, 0);
 
-    return keyResults.length > 0 ? totalVelocity / keyResults.length : 0;
+    return totalVelocity / keyResults.length;
   }
 
   private determineTrackStatus(daysToCompletion: number, daysUntilDeadline: number): 'ahead' | 'on_track' | 'behind' | 'critical' {
@@ -520,9 +554,9 @@ export class GoalAnalyticsEngine {
     return bottlenecks;
   }
 
-  private generateMilestones(goal: Goal, velocity: number): Array<{ date: Date; target: number; actual?: number }> {
+  private async generateMilestones(goal: Goal, velocity: number): Promise<Array<{ date: Date; target: number; actual?: number }>> {
     const milestones = [];
-    const currentProgress = this.calculateProgressAchieved(goal);
+    const currentProgress = await this.calculateProgressAchieved(goal);
     const daysUntilDeadline = Math.ceil((goal.targetDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     
     // Generate quarterly milestones

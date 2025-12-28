@@ -303,6 +303,11 @@ export class AudioManager {
     }
   }
 
+  levelUp(): void {
+    this.play('levelUp');
+    setTimeout(() => this.play('achievementUnlock'), 500);
+  }
+
   // ⚙️ SETTINGS
   
   setVolume(volume: number): void {

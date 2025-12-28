@@ -1,70 +1,106 @@
-/* ===== 🎯 LIFE TRACKER - PROFESSIONAL DESIGN SYSTEM ===== */
-@import '../styles/design-system.css';
+/* ===== 🎮 LIFE TRACKER - MODERN GAMIFIED PROFESSIONAL DESIGN SYSTEM ===== */
+@import '../styles/modern-gamified-design.css';
 
-/* Professional Fonts */
+/* Gaming Professional Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ===== GLOBAL OVERRIDES FOR CLEAN PROFESSIONAL LOOK ===== */
+/* ===== 🎮 GLOBAL MODERN GAMIFIED PROFESSIONAL SETUP ===== */
 
 html {
-  font-family: var(--font-sans);
-  background: var(--neutral-50);
-  color: var(--neutral-800);
+  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-primary);
+  color: var(--primary-800);
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
-  background: var(--neutral-50);
-  color: var(--neutral-800);
-  line-height: var(--leading-normal);
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  color: var(--primary-800);
+  line-height: 1.6;
   margin: 0;
   padding: 0;
+  min-height: 100vh;
+  font-feature-settings: 'liga' 1, 'kern' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Remove ALL neon/glow/gaming effects globally */
+/* Enable subtle gamified effects */
 * {
-  text-shadow: none !important;
-  box-shadow: none !important;
-  filter: none !important;
-  backdrop-filter: none !important;
-  background-image: none !important;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Clean card styles override */
+/* ===== 🎮 GAMIFIED CARD STYLES ===== */
 .card,
 .glass-card {
-  background: var(--neutral-0) !important;
-  border: 1px solid var(--neutral-200) !important;
-  border-radius: var(--radius-xl) !important;
-  box-shadow: var(--shadow-sm) !important;
-  backdrop-filter: none !important;
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-2xl) !important;
+  box-shadow: var(--shadow-xl) !important;
+  transition: all var(--transition-normal) !important;
+  position: relative !important;
+  overflow: hidden !important;
 }
 
-/* Professional button override */
+.card:hover,
+.glass-card:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: var(--shadow-2xl), var(--glow-blue) !important;
+}
+
+/* ===== ⚡ GAMIFIED BUTTON STYLES ===== */
 .btn,
 .btn-gaming,
 .button {
-  background: var(--primary-600) !important;
-  color: var(--neutral-0) !important;
-  border: 1px solid var(--primary-600) !important;
-  border-radius: var(--radius-lg) !important;
-  padding: var(--space-3) var(--space-4) !important;
-  font-weight: var(--font-medium) !important;
-  font-size: var(--text-sm) !important;
-  text-shadow: none !important;
-  box-shadow: none !important;
+  background: var(--accent-blue) !important;
+  border: none !important;
+  border-radius: var(--radius-xl) !important;
+  color: white !important;
+  font-weight: 600 !important;
+  padding: var(--space-3) var(--space-6) !important;
+  font-size: var(--font-sm) !important;
+  cursor: pointer !important;
   transition: all var(--transition-fast) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.btn::before,
+.btn-gaming::before,
+.button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  transition: width 0.6s ease, height 0.6s ease;
+  transform: translate(-50%, -50%);
+}
+
+.btn:active::before,
+.btn-gaming:active::before,
+.button:active::before {
+  width: 300px !important;
+  height: 300px !important;
 }
 
 .btn:hover,
-.btn-gaming:hover {
-  background: var(--primary-700) !important;
-  border-color: var(--primary-700) !important;
+.btn-gaming:hover,
+.button:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: var(--glow-blue) !important;
 }
 
 /* Clean text styles */

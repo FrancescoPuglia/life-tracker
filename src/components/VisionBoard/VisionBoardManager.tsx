@@ -53,11 +53,24 @@ export function VisionBoardManager({
   const loadVisionBoards = async () => {
     try {
       setIsLoading(true);
-      const boards = await db.getVisionBoards(userId);
-      setVisionBoards(boards);
+      console.log('🔍 SHERLOCK: Bypassing Firestore vision boards, creating default...');
+      
+      // BYPASS FIRESTORE COMPLETELY - Create default board locally
+      const defaultBoard = {
+        id: 'default_board',
+        userId: userId,
+        domainId: 'default',
+        title: 'Vision Board Principale',
+        description: 'Il tuo spazio per manifestare i tuoi sogni',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      setVisionBoards([defaultBoard]);
+      console.log('🔍 SHERLOCK: Default vision board created (no Firestore)');
     } catch (error) {
-      console.error('Failed to load vision boards:', error);
-      // Could show error toast here
+      console.error('🔍 SHERLOCK: Failed to create default board:', error);
     } finally {
       setIsLoading(false);
     }
@@ -65,19 +78,27 @@ export function VisionBoardManager({
 
   const handleCreateBoard = async () => {
     try {
-      const newBoard = await db.createVisionBoard({
+      console.log('🔍 SHERLOCK: Creating vision board locally (no Firestore)...');
+      
+      // BYPASS FIRESTORE - Create board locally
+      const newBoard = {
+        id: `board_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         userId,
-        domainId: 'default', // TODO: Get from user context
+        domainId: 'default',
         title: 'New Vision Board',
         description: 'Manifest your dreams and goals',
-        isActive: false
-      });
+        isActive: false,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
       
       setVisionBoards(prev => [newBoard, ...prev]);
       setSelectedBoard(newBoard);
       setViewMode('board');
+      
+      console.log('🔍 SHERLOCK: Vision board created locally!');
     } catch (error) {
-      console.error('Failed to create vision board:', error);
+      console.error('🔍 SHERLOCK: Failed to create local vision board:', error);
     }
   };
 

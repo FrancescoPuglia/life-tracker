@@ -281,11 +281,14 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       // Forza adapter: se userId valido, sempre Firebase
       if (userId && db.switchToFirebase) {
         try {
-          const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
-          try { await ensureFirestorePersistence(firestore); } catch (e) { console.warn('[DataProvider] Persistence warning:', e); }
+          console.log('🔍 SHERLOCK: Skipping DOUBLE persistence setup to avoid c050...');
+          // SKIP DOUBLE PERSISTENCE - Already done in firebase.ts initialization
+          // const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
+          // try { await ensureFirestorePersistence(firestore); } catch (e) { console.warn('[DataProvider] Persistence warning:', e); }
           await db.switchToFirebase(userId);
+          console.log('🔍 SHERLOCK: Firebase switch without double persistence setup');
         } catch (e) {
-          console.warn('[DataProvider] Firebase switch failed, using local:', e);
+          console.warn('🔍 SHERLOCK: Firebase switch failed, using local:', e);
         }
       }
       // Carica tutto

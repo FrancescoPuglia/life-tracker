@@ -176,6 +176,11 @@ export default function HabitsTracker({
           streakCount: newStreak,
           bestStreak: Math.max(habit.bestStreak, newStreak),
         });
+
+        // 🎉 TRIGGER DOPAMINE REWARD FOR HABIT COMPLETION!
+        if (typeof window !== 'undefined' && (window as any).strategicDopamine) {
+          (window as any).strategicDopamine.triggerHabitCompletion(habit.id, newStreak);
+        }
       } else {
         onUpdateHabit(habit.id, {
           streakCount: Math.max(0, habit.streakCount - 1),

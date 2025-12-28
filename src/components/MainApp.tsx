@@ -19,18 +19,21 @@ import BadgeSystem from '@/components/BadgeSystem';
 import AuthModal from '@/components/AuthModal';
 import SyncStatusIndicator from '@/components/SyncStatus';
 import GamingEffects from '@/components/GamingEffects';
-import AIInputBar from '@/components/AIInputBar';
+import AIInputBarV2 from '@/components/ai/AIInputBarV2';
 import SmartScheduler from '@/components/SmartScheduler';
 import RealTimeAdaptation from '@/components/RealTimeAdaptation';
-import MicroCoachDashboard from '@/components/MicroCoachDashboard';
-import VisionBoardStandalone from '@/components/VisionBoardStandalone';
+import VisionBoardEnhanced from '@/components/VisionBoardEnhanced';
+import DailyLoginStreakSystem from '@/components/DailyLoginStreakSystem';
+import DopamineRewardSystem from '@/components/DopamineRewardSystem';
+import StrategicDopamineSystem from '@/components/StrategicDopamineSystem';
+import NotesPage from '@/components/NotesPage';
 import { audioManager } from '@/lib/audioManager';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes';
 
 interface MainAppProps {
   buildId: string;
@@ -199,6 +202,8 @@ export default function MainApp({ buildId }: MainAppProps) {
     try {
       await data.createTimeBlock(blockData);
       audioManager.taskCompleted();
+      
+      // NO dopamine for creation - only for COMPLETION!
     } catch (error: any) {
       setTimeBlockError(error?.message || 'Failed to save time block');
     }
@@ -227,24 +232,63 @@ export default function MainApp({ buildId }: MainAppProps) {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen" data-testid="app-ready">
-      <GamingEffects />
-      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
-      <DailyMotivation />
+    <StrategicDopamineSystem
+      onTimeBlockCompleted={(timeBlockId) => {
+        console.log('🎉 Strategic dopamine: Time block completed!', timeBlockId);
+        audioManager.levelUp?.();
+      }}
+      onGoalAchieved={(goalId) => {
+        console.log('🎉🎉🎉 Strategic dopamine: GOAL ACHIEVED!', goalId);
+        audioManager.perfectDay?.();
+      }}
+    >
+      <div className="min-h-screen" data-testid="app-ready">
+        <GamingEffects />
+        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+        <DailyMotivation />
 
       {/* Header */}
-      <div className="bg-white/90 backdrop-blur-md border-b border-neutral-200 shadow-lg fixed top-0 left-0 right-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              ⚡ LifeTracker
+      <header className="gaming-card fixed top-0 left-0 right-0 z-40 border-0 border-b-2 border-blue-200/30">
+        <div className="max-w-7xl mx-auto px-6">
+          
+          {/* Top Row: Brand + User */}
+          <div className="flex items-center justify-between py-1">
+            <div className="flex items-center space-x-4">
+              <div className="text-2xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                ⚡ LifeTracker
+              </div>
+              <div className="achievement-badge">
+                v{buildId}
+              </div>
             </div>
-            <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-mono">
-              {buildId}
+            
+            <div className="flex items-center space-x-4">
+              <SyncStatusIndicator />
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg">
+                  {(user.displayName?.[0]) || (user.email?.[0]) || 'U'}
+                </div>
+                <div className="hidden lg:block">
+                  <div className="text-sm font-semibold text-gray-800">
+                    {user.displayName || 'Productivity Master'}
+                  </div>
+                  <div className="text-xs text-gray-500">{user.email}</div>
+                </div>
+                <button
+                  onClick={() => {
+                    signOut();
+                    audioManager.buttonFeedback();
+                  }}
+                  className="btn-gaming variant-danger text-xs px-4 py-2"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
           </div>
           
-          <div className="flex-1 mx-8">
+          {/* Bottom Row: NowBar */}
+          <div className="pb-1">
             <NowBar
               currentSession={currentSession}
               currentTimeBlock={currentTimeBlock}
@@ -253,39 +297,32 @@ export default function MainApp({ buildId }: MainAppProps) {
               onStopSession={handleStopSession}
             />
           </div>
-          
-          <div className="flex items-center space-x-4 ml-4">
-            <SyncStatusIndicator />
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-bold">
-                {(user.displayName?.[0]) || (user.email?.[0]) || 'U'}
-              </div>
-              <div className="hidden md:block">
-                <div className="text-sm font-medium text-neutral-900">
-                  {user.displayName || 'User'}
-                </div>
-                <div className="text-xs text-neutral-500">{user.email}</div>
-              </div>
-              <button
-                onClick={() => {
-                  signOut();
-                  audioManager.buttonFeedback();
-                }}
-                className="btn btn-outline text-xs px-3 py-1"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
         </div>
-      </div>
+      </header>
 
       {/* Main Content */}
-      <div className="pt-24 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
+      <div className="pt-16 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
         <div className="container mx-auto">
           <div className="grid-responsive gap-6">
             {/* Left Sidebar */}
             <div className="space-y-6">
+              {/* Daily Login Streak System */}
+              <DailyLoginStreakSystem 
+                showCompact={true}
+                className="w-full"
+                onStreakUpdate={(streak) => {
+                  // Strategic dopamine: Only trigger when streak increases
+                  if (typeof window !== 'undefined' && (window as any).strategicDopamine) {
+                    // Daily login reward is handled automatically by StrategicDopamineSystem
+                  }
+                  
+                  // Additional streak milestones (3, 7, 30 days)
+                  if (typeof window !== 'undefined' && (window as any).dopamineSystem && streak.currentStreak > 1) {
+                    (window as any).dopamineSystem.triggerStreakReward(streak.currentStreak);
+                  }
+                }}
+              />
+              
               {/* AI Assistant */}
               <div className="card-elevated card-body hover-lift transition-smooth">
                 <div className="mb-4">
@@ -295,16 +332,21 @@ export default function MainApp({ buildId }: MainAppProps) {
                   </h3>
                   <p className="text-small">Create tasks and blocks with natural language</p>
                 </div>
-                <AIInputBar
-                  onCreateTimeBlock={handleCreateTimeBlock}
-                  onCreateTask={data.createTask}
-                  onCreateGoal={data.createGoal}
-                  onCreateHabit={data.createHabit}
+                <AIInputBarV2
+                  userId={data.userId}
                   goals={data.goals}
-                  existingTasks={data.tasks}
-                  userPreferences={{}}
+                  projects={data.projects}
+                  tasks={data.tasks}
+                  timeBlocks={data.timeBlocks}
+                  sessions={[]} // TODO: Implementare sessions nel DataProvider
+                  habits={data.habits}
+                  habitLogs={data.habitLogs}
+                  domains={[]} // TODO: Implementare domains nel DataProvider
+                  onCreateTimeBlock={handleCreateTimeBlock}
+                  onUpdateTimeBlock={data.updateTimeBlock}
+                  onDeleteTimeBlock={data.deleteTimeBlock}
+                  onUpdateTask={data.updateTask}
                   className="w-full"
-                  currentUserId={data.userId}
                 />
               </div>
 
@@ -322,36 +364,61 @@ export default function MainApp({ buildId }: MainAppProps) {
               </div>
 
               {/* Module Navigation */}
-              <div className="card-elevated hover-lift transition-smooth">
-                <div className="card-header">
-                  <h3 className="heading-3">Modules</h3>
+              <div className="gaming-card">
+                <div className="p-4 border-b border-gray-200/50">
+                  <h3 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2">
+                    🎮 Modules
+                  </h3>
                 </div>
-                <div className="card-body">
-                  <div className="module-grid">
+                <div className="p-4">
+                  <div className="grid grid-cols-1 gap-3">
                     {[
-                      { id: 'planner', label: 'Time Planner', icon: '📅', description: 'Plan your day' },
-                      { id: 'smart_scheduler', label: 'Auto Scheduler', icon: '⚡', description: 'AI scheduling' },
-                      { id: 'adaptation', label: 'Auto-Replan', icon: '🔄', description: 'Real-time adaptation' },
-                      { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights' },
-                      { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track habits' },
-                      { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives' },
-                      { id: 'vision-board', label: 'Vision Board', icon: '✧', description: 'Manifest dreams' },
-                      { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data' },
-                      { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights' },
-                      { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones' },
-                    ].map(({ id, label, icon, description }) => (
-                      <div
+                      { id: 'planner', label: 'Time Planner', icon: '📅', description: 'Plan your day', color: 'from-blue-400 to-blue-600' },
+                      { id: 'smart_scheduler', label: 'Auto Scheduler', icon: '⚡', description: 'AI scheduling', color: 'from-yellow-400 to-orange-600' },
+                      { id: 'adaptation', label: 'Auto-Replan', icon: '🔄', description: 'Real-time adaptation', color: 'from-green-400 to-green-600' },
+                      { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights', color: 'from-purple-400 to-purple-600' },
+                      { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track habits', color: 'from-red-400 to-red-600' },
+                      { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives', color: 'from-indigo-400 to-indigo-600' },
+                      { id: 'notes', label: 'Second Brain', icon: '🧠', description: 'Smart notes', color: 'from-violet-400 to-violet-600' },
+                      { id: 'vision-board', label: 'Vision Board', icon: '✧', description: 'Manifest dreams', color: 'from-pink-400 to-purple-600' },
+                      { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data', color: 'from-cyan-400 to-cyan-600' },
+                      { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights', color: 'from-teal-400 to-teal-600' },
+                      { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones', color: 'from-amber-400 to-amber-600' },
+                    ].map(({ id, label, icon, description, color }) => (
+                      <button
                         key={id}
                         onClick={() => {
                           setActiveTab(id as ActiveTab);
                           audioManager.buttonFeedback();
+                          // NO dopamine for simple navigation - only for achievements!
                         }}
-                        className={`module-card ${activeTab === id ? 'active' : ''}`}
+                        className={`
+                          group relative p-4 rounded-xl transition-all duration-300 text-left
+                          ${activeTab === id 
+                            ? `bg-gradient-to-r ${color} text-white shadow-lg transform scale-105` 
+                            : 'bg-white/50 hover:bg-white/80 text-gray-700 hover:shadow-md hover:scale-102'
+                          }
+                          border-2 ${activeTab === id ? 'border-white/30' : 'border-gray-200/50 hover:border-gray-300/50'}
+                          backdrop-blur-sm
+                        `}
                       >
-                        <span className="module-icon">{icon}</span>
-                        <h4 className="module-title">{label}</h4>
-                        <p className="module-description">{description}</p>
-                      </div>
+                        <div className="flex items-center gap-3">
+                          <div className={`text-2xl ${activeTab === id ? '' : 'group-hover:scale-110'} transition-transform duration-200`}>
+                            {icon}
+                          </div>
+                          <div className="flex-1">
+                            <div className={`font-semibold ${activeTab === id ? 'text-white' : 'text-gray-800'}`}>
+                              {label}
+                            </div>
+                            <div className={`text-sm ${activeTab === id ? 'text-white/90' : 'text-gray-500'}`}>
+                              {description}
+                            </div>
+                          </div>
+                          {activeTab === id && (
+                            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                          )}
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -359,22 +426,33 @@ export default function MainApp({ buildId }: MainAppProps) {
             </div>
 
             {/* Main Content Area */}
-            <div className="card-elevated shadow-xl">
-              <div className="card-header">
-                <h2 className="heading-2">
+            <div className="gaming-card">
+              <div className="p-6 border-b border-gradient-to-r from-blue-200/30 to-purple-200/30">
+                <h2 className="text-3xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent flex items-center gap-3">
                   {activeTab === 'planner' && '📅 Time Planner'}
                   {activeTab === 'smart_scheduler' && '⚡ Auto Scheduler'}
                   {activeTab === 'adaptation' && '🔄 Auto Replan'}
                   {activeTab === 'micro_coach' && '🧠 AI Coach'}
                   {activeTab === 'habits' && '🔥 Habits Tracker'}
                   {activeTab === 'okr' && '🎯 Goals & Projects'}
+                  {activeTab === 'notes' && '🧠 Second Brain'}
                   {activeTab === 'vision-board' && '✧ Vision Board'}
                   {activeTab === 'analytics' && '📊 Analytics Dashboard'}
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
                   {activeTab === 'badges' && '🏆 Achievements'}
+                  <div className="achievement-badge ml-auto">ACTIVE</div>
                 </h2>
               </div>
-              <div className="card-body">
+              <div className="p-6 particle-container relative overflow-hidden">
+                {/* Animated background particles */}
+                <div className="absolute top-0 left-0 w-4 h-4 particle" style={{ top: '10%', left: '5%' }}></div>
+                <div className="absolute top-0 left-0 w-3 h-3 particle" style={{ top: '30%', left: '15%', animationDelay: '2s' }}></div>
+                <div className="absolute top-0 left-0 w-2 h-2 particle" style={{ top: '60%', left: '8%', animationDelay: '4s' }}></div>
+                <div className="absolute top-0 left-0 w-3 h-3 particle" style={{ top: '80%', left: '20%', animationDelay: '1s' }}></div>
+                <div className="absolute top-0 right-0 w-4 h-4 particle" style={{ top: '20%', right: '10%', animationDelay: '3s' }}></div>
+                <div className="absolute top-0 right-0 w-2 h-2 particle" style={{ top: '50%', right: '5%', animationDelay: '5s' }}></div>
+                
+                {/* Content */}
                 {activeTab === 'planner' && (
                   <>
                     {timeBlockError && (
@@ -429,19 +507,31 @@ export default function MainApp({ buildId }: MainAppProps) {
                 )}
 
                 {activeTab === 'micro_coach' && (
-                  <MicroCoachDashboard
-                    goals={data.goals}
-                    keyResults={data.keyResults}
-                    tasks={data.tasks}
-                    sessions={[]}
-                    habitLogs={data.habitLogs}
-                    timeBlocks={data.timeBlocks}
-                    onInsightAction={(action, insight) => {
-                      if (action === 'implement') {
-                        audioManager.perfectDay();
-                      }
-                    }}
-                  />
+                  <div className="p-6">
+                    <div className="max-w-4xl mx-auto">
+                      <div className="mb-6">
+                        <h1 className="text-2xl font-bold text-gray-900 mb-2">🧠 AI Assistant</h1>
+                        <p className="text-gray-600">Il tuo assistente intelligente che vede tutto e ti aiuta a ottimizzare la produttività</p>
+                      </div>
+                      
+                      <AIInputBarV2
+                        userId={data.userId}
+                        goals={data.goals}
+                        projects={data.projects}
+                        tasks={data.tasks}
+                        timeBlocks={data.timeBlocks}
+                        sessions={[]}
+                        habits={data.habits}
+                        habitLogs={data.habitLogs}
+                        domains={[]}
+                        onCreateTimeBlock={data.createTimeBlock}
+                        onUpdateTimeBlock={data.updateTimeBlock}
+                        onDeleteTimeBlock={data.deleteTimeBlock}
+                        onUpdateTask={data.updateTask}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
                 )}
 
                 {activeTab === 'habits' && (
@@ -484,6 +574,12 @@ export default function MainApp({ buildId }: MainAppProps) {
                   />
                 )}
 
+                {activeTab === 'notes' && (
+                  <div className="w-full h-full">
+                    <NotesPage />
+                  </div>
+                )}
+
                 {activeTab === 'analytics' && (
                   <AnalyticsDashboard
                     data={analyticsData || emptyAnalyticsData}
@@ -509,13 +605,29 @@ export default function MainApp({ buildId }: MainAppProps) {
                 )}
 
                 {activeTab === 'vision-board' && (
-                  <VisionBoardStandalone />
+                  <VisionBoardEnhanced 
+                    onBack={() => setActiveTab('planner')}
+                  />
                 )}
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Dopamine Reward System */}
+      <DopamineRewardSystem 
+        onRewardTriggered={(reward) => {
+          // Play sound effects based on reward rarity
+          if (reward.rarity === 'legendary') {
+            audioManager.perfectDay?.();
+          } else if (reward.rarity === 'epic') {
+            audioManager.levelUp?.();
+          } else {
+            audioManager.taskCompleted?.();
+          }
+        }}
+      />
 
       {/* Footer */}
       <footer className="border-t border-neutral-200 bg-neutral-50 py-3">
@@ -526,6 +638,7 @@ export default function MainApp({ buildId }: MainAppProps) {
           </div>
         </div>
       </footer>
-    </div>
+      </div>
+    </StrategicDopamineSystem>
   );
 }

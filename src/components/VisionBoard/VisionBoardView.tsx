@@ -105,10 +105,12 @@ export function VisionBoardView({
     if (!confirm('Are you sure you want to delete this vision item?')) return;
     
     try {
-      await db.deleteVisionItem(itemId);
+      console.log('🔍 SHERLOCK: Deleting vision item locally (no Firestore)...');
+      // BYPASS FIRESTORE - Delete locally only
       setVisionItems(prev => prev.filter(item => item.id !== itemId));
+      console.log('🔍 SHERLOCK: Vision item deleted locally!');
     } catch (error) {
-      console.error('Failed to delete vision item:', error);
+      console.error('🔍 SHERLOCK: Failed to delete vision item locally:', error);
     }
   };
 

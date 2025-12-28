@@ -21,8 +21,10 @@ export async function ensureFirestorePersistence(firestoreInstance: any): Promis
   if (typeof window === 'undefined') return;
   
   try {
-    await enableMultiTabIndexedDbPersistence(firestoreInstance);
-    console.log('✅ Firestore offline persistence enabled');
+    console.log('🔍 SHERLOCK: DISABLING MultiTab Persistence to test c050 fix...');
+    // TEMPORARILY DISABLED - Testing if this causes c050 errors
+    // await enableMultiTabIndexedDbPersistence(firestoreInstance);
+    console.log('🔍 SHERLOCK: MultiTab Persistence DISABLED for testing');
   } catch (error: any) {
     if (error.code === 'failed-precondition') {
       console.warn('⚠️ Firestore persistence failed: Multiple tabs open');

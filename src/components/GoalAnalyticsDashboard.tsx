@@ -29,21 +29,31 @@ export default function GoalAnalyticsDashboard({
   const loadAnalytics = async () => {
     setLoading(true);
     try {
-      // Load analytics for all active goals
+      // 🔥 SAFE LOADING: Process goals one by one to isolate errors
       const activeGoals = goals.filter(g => g.status === 'active');
-      const analyticsPromises = activeGoals.map(goal => 
-        goalAnalyticsEngine.calculateGoalAnalytics(goal.id, selectedPeriod)
-      );
+      const analytics: GoalAnalytics[] = [];
       
-      const [analytics, allocation] = await Promise.all([
-        Promise.all(analyticsPromises),
-        goalAnalyticsEngine.calculateStrategicAllocation(userId)
-      ]);
+      for (const goal of activeGoals) {
+        try {
+          const goalAnalytics = await goalAnalyticsEngine.calculateGoalAnalytics(goal.id, selectedPeriod);
+          analytics.push(goalAnalytics);
+        } catch (goalError) {
+          console.warn(`🚨 Failed to load analytics for goal "${goal.title}" (${goal.id}):`, goalError);
+          // Continue with other goals instead of failing completely
+        }
+      }
+      
+      let allocation: StrategicAllocation | null = null;
+      try {
+        allocation = await goalAnalyticsEngine.calculateStrategicAllocation(userId);
+      } catch (allocationError) {
+        console.warn('🚨 Failed to load strategic allocation:', allocationError);
+      }
 
       setGoalAnalytics(analytics);
       setStrategicAllocation(allocation);
     } catch (error) {
-      console.error('Failed to load goal analytics:', error);
+      console.error('🚨 Critical error loading goal analytics:', error);
     } finally {
       setLoading(false);
     }
