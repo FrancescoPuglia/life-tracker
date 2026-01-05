@@ -8,6 +8,12 @@ import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from
 
 type ViewMode = 'day' | 'week' | 'month';
 
+// Temporary type for modal UI state
+interface TimeBlockModalData extends Partial<TimeBlock> {
+  repeatWeekly?: boolean;
+  selectedDays?: boolean[];
+}
+
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
   tasks: Task[];
@@ -41,7 +47,7 @@ export default function TimeBlockPlanner({
   const [dragPreview, setDragPreview] = useState<{ startTime: Date; endTime: Date } | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newBlockData, setNewBlockData] = useState<Partial<TimeBlock>>({});
+  const [newBlockData, setNewBlockData] = useState<TimeBlockModalData>({});
   const plannerRef = useRef<HTMLDivElement>(null);
 
   const HOUR_HEIGHT = 80;
@@ -205,7 +211,7 @@ export default function TimeBlockPlanner({
         return;
       }
 
-      const newBlock: Partial<TimeBlock> = {
+      const newBlock: TimeBlockModalData = {
         startTime: startTime < endTime ? startTime : endTime,
         endTime: startTime < endTime ? endTime : startTime,
         title: 'New Time Block',
@@ -249,7 +255,7 @@ export default function TimeBlockPlanner({
       endTimeDate: endTime.toDateString()
     });
 
-    const newBlock: Partial<TimeBlock> = {
+    const newBlock: TimeBlockModalData = {
       startTime,
       endTime,
       title: 'New Time Block',
@@ -807,7 +813,7 @@ export default function TimeBlockPlanner({
                                   console.error('Cannot create time block: userId not available');
                                   return;
                                 }
-                                const newBlock: Partial<TimeBlock> = {
+                                const newBlock: TimeBlockModalData = {
                                   startTime: clickDate,
                                   endTime: new Date(clickDate.getTime() + 60*60*1000),
                                   title: 'New Time Block',
@@ -832,7 +838,7 @@ export default function TimeBlockPlanner({
                                   if (!isReady || !currentUserId) return;
                                   const clickDate = new Date(date);
                                   clickDate.setHours(hour, 0, 0, 0);
-                                  const newBlock: Partial<TimeBlock> = {
+                                  const newBlock: TimeBlockModalData = {
                                     startTime: clickDate,
                                     endTime: new Date(clickDate.getTime() + 60*60*1000),
                                     title: 'New Time Block',
