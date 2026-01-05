@@ -266,14 +266,61 @@ export default function TimeBlockPlanner({
 
   const handleCreateBlock = () => {
     if (newBlockData.startTime && newBlockData.endTime) {
-      const blockToCreate = {
-        ...newBlockData,
-        id: `block-${Date.now()}`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      // 🔥 NEW FEATURE: Weekly Repeat Logic
+      if (newBlockData.repeatWeekly && viewMode === 'week') {
+        const selectedDays = newBlockData.selectedDays || [true, true, true, true, true, true, true];
+        const weekDates = getViewPeriodDates(selectedDate, 'week');
+        
+        // Create time blocks for each selected day
+        selectedDays.forEach((isSelected, dayIndex) => {
+          if (isSelected && weekDates[dayIndex]) {
+            const targetDate = weekDates[dayIndex];
+            
+            // Create start and end times for this specific day
+            const dayStartTime = new Date(targetDate);
+            dayStartTime.setHours(
+              newBlockData.startTime!.getHours(),
+              newBlockData.startTime!.getMinutes(),
+              0, 0
+            );
+            
+            const dayEndTime = new Date(targetDate);
+            dayEndTime.setHours(
+              newBlockData.endTime!.getHours(),
+              newBlockData.endTime!.getMinutes(),
+              0, 0
+            );
+            
+            const blockToCreate = {
+              ...newBlockData,
+              id: `block-${Date.now()}-${dayIndex}`,
+              startTime: dayStartTime,
+              endTime: dayEndTime,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              // Remove temporary properties
+              repeatWeekly: undefined,
+              selectedDays: undefined,
+            };
+            
+            onCreateTimeBlock(blockToCreate);
+          }
+        });
+      } else {
+        // Single block creation (original logic)
+        const blockToCreate = {
+          ...newBlockData,
+          id: `block-${Date.now()}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          // Remove temporary properties
+          repeatWeekly: undefined,
+          selectedDays: undefined,
+        };
+        
+        onCreateTimeBlock(blockToCreate);
+      }
       
-      onCreateTimeBlock(blockToCreate);
       setShowCreateModal(false);
       setNewBlockData({});
     }
@@ -805,12 +852,9 @@ export default function TimeBlockPlanner({
 
                           {/* Time blocks for this day */}
                           {dayBlocks.map((block) => {
-                            // 🔧 SHERLOCK FIX: Use consistent date reference for both start and end times
-                            const blockCreationDate = block.startTime instanceof Date 
-                              ? new Date(block.startTime.getFullYear(), block.startTime.getMonth(), block.startTime.getDate())
-                              : date;
-                            const startTime = toDateSafe(block.startTime, blockCreationDate);
-                            const endTime = toDateSafe(block.endTime, blockCreationDate);
+                            // 🔧 SHERLOCK EMERGENCY FIX: Use consistent date reference like Day View
+                            const startTime = toDateSafe(block.startTime, date);
+                            const endTime = toDateSafe(block.endTime, date);
                             
                             // 🛠️ SHERLOCK DATA REPAIR: Fix corrupted multi-day time blocks (STABLE MODE)
                             let displayEndTime;
@@ -1099,6 +1143,90 @@ export default function TimeBlockPlanner({
                   <option value="break">☕ Break - Emerald Zen</option>
                   <option value="admin">⚙️ Admin - Steel Gray</option>
                 </select>
+              </div>
+
+              {/* 🔥 NEW FEATURE: Weekly Repeat Option */}
+              {viewMode === 'week' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-3 flex items-center">
+                    📅 Repeat Options
+                  </label>
+                  <div className="space-y-3">
+                    <label className="flex items-center space-x-3 p-3 border-2 border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-all duration-200">
+                      <input
+                        type="checkbox"
+                        checked={newBlockData.repeatWeekly || false}
+                        onChange={(e) => setNewBlockData({ ...newBlockData, repeatWeekly: e.target.checked })}
+                        className="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                      />
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">📄 Repeat across entire week</div>
+                        <div className="text-sm text-gray-600">Create this time block for all 7 days (Mon-Sun)</div>
+                      </div>
+                    </label>
+
+                    {newBlockData.repeatWeekly && (
+                      <div className="ml-8 space-y-3">
+                        <div className="text-sm font-medium text-gray-700">Select days to include:</div>
+                        
+                        {/* Quick presets */}
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          <button
+                            type="button"
+                            onClick={() => setNewBlockData({ ...newBlockData, selectedDays: [true, true, true, true, true, true, true] })}
+                            className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+                          >
+                            📅 All week
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewBlockData({ ...newBlockData, selectedDays: [true, true, true, true, true, false, false] })}
+                            className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors"
+                          >
+                            💼 Weekdays only
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewBlockData({ ...newBlockData, selectedDays: [false, false, false, false, false, true, true] })}
+                            className="px-3 py-1 text-xs bg-orange-100 text-orange-700 rounded-full hover:bg-orange-200 transition-colors"
+                          >
+                            🏠 Weekends only
+                          </button>
+                        </div>
+                        
+                        <div className="grid grid-cols-7 gap-2">
+                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
+                            <label key={day} className="flex flex-col items-center space-y-1 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={(newBlockData.selectedDays || [true, true, true, true, true, true, true])[index]}
+                                onChange={(e) => {
+                                  const currentDays = newBlockData.selectedDays || [true, true, true, true, true, true, true];
+                                  const newDays = [...currentDays];
+                                  newDays[index] = e.target.checked;
+                                  setNewBlockData({ ...newBlockData, selectedDays: newDays });
+                                }}
+                                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-1"
+                              />
+                              <span className="text-xs font-medium text-gray-600">{day}</span>
+                            </label>
+                          ))}
+                        </div>
+                        
+                        {/* Preview message */}
+                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="text-sm text-blue-800">
+                            <strong>📅 Will create:</strong> {(newBlockData.selectedDays || [true, true, true, true, true, true, true]).filter(Boolean).length} time blocks 
+                            ({newBlockData.startTime && newBlockData.endTime ? 
+                              String(newBlockData.startTime.getHours()).padStart(2, '0') + ':' + String(newBlockData.startTime.getMinutes()).padStart(2, '0') + ' to ' + String(newBlockData.endTime.getHours()).padStart(2, '0') + ':' + String(newBlockData.endTime.getMinutes()).padStart(2, '0')
+                              : 'time not set'} for selected days)
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
                 
                 {/* Custom Color Picker */}
                 <div className="mt-3">
@@ -1305,14 +1433,17 @@ export default function TimeBlockPlanner({
                     type="time"
                     value={
                       newBlockData.startTime 
-                        ? `${String(newBlockData.startTime.getHours()).padStart(2, '0')}:${String(newBlockData.startTime.getMinutes()).padStart(2, '0')}`
+                        ? String(newBlockData.startTime.getHours()).padStart(2, '0') + ':' + String(newBlockData.startTime.getMinutes()).padStart(2, '0')
                         : ''
                     }
                     onChange={(e) => {
                       const [hours, minutes] = e.target.value.split(':');
-                      const time = new Date(selectedDate);
-                      time.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                      setNewBlockData({ ...newBlockData, startTime: time });
+                      // 🔧 SHERLOCK FIX: Use the correct base date from existing startTime or selectedDate
+                      const baseDate = newBlockData.startTime instanceof Date 
+                        ? new Date(newBlockData.startTime.getFullYear(), newBlockData.startTime.getMonth(), newBlockData.startTime.getDate())
+                        : new Date(selectedDate);
+                      baseDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+                      setNewBlockData({ ...newBlockData, startTime: baseDate });
                     }}
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
                     style={{ color: '#111827', backgroundColor: '#ffffff' }}
@@ -1327,20 +1458,22 @@ export default function TimeBlockPlanner({
                     type="time"
                     value={
                       newBlockData.endTime 
-                        ? `${String(newBlockData.endTime.getHours()).padStart(2, '0')}:${String(newBlockData.endTime.getMinutes()).padStart(2, '0')}`
+                        ? String(newBlockData.endTime.getHours()).padStart(2, '0') + ':' + String(newBlockData.endTime.getMinutes()).padStart(2, '0')
                         : ''
                     }
                     onChange={(e) => {
                       const [hours, minutes] = e.target.value.split(':');
-                      const time = new Date(selectedDate);
-                      time.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                      setNewBlockData({ ...newBlockData, endTime: time });
+                      // 🔧 SHERLOCK FIX: Use the correct base date from existing startTime or selectedDate
+                      const baseDate = newBlockData.startTime instanceof Date 
+                        ? new Date(newBlockData.startTime.getFullYear(), newBlockData.startTime.getMonth(), newBlockData.startTime.getDate())
+                        : new Date(selectedDate);
+                      baseDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+                      setNewBlockData({ ...newBlockData, endTime: baseDate });
                     }}
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-gray-900 bg-white"
                     style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   />
                 </div>
-              </div>
               </div>
             
               <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
@@ -1356,13 +1489,13 @@ export default function TimeBlockPlanner({
                   className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-medium shadow-lg transform hover:scale-105"
                   type="button"
                 >
-                  ✨ Create Block
+                  Create Block
                 </button>
               </div>
             </div>
           </div>
-        </div>
-        , document.body
+        </div>,
+        document.body
       )}
     </div>
   );
