@@ -11,15 +11,15 @@ import { getDeadlineInfo, type DeadlineInfo } from './DeadlineBadge';
 
 const QUOTES = [
   { text: "Il successo non e' definitivo, il fallimento non e' fatale: quello che conta e' il coraggio di continuare.", author: "Winston Churchill" },
-  { text: "La disciplina e' la radice di tutte le buone qualita'.", author: "Ioannis Chrysostomos" },
-  { text: "Il modo per iniziare e' smettere di parlare e iniziare a fare.", author: "Walt Disney" },
+  { text: "La disciplina e' il ponte tra i tuoi obiettivi e i tuoi risultati.", author: "Jim Rohn" },
   { text: "Non aspettare. Il momento non sara' mai quello giusto.", author: "Napoleon Hill" },
-  { text: "Il successo e' la somma di piccoli sforzi ripetuti giorno dopo giorno.", author: "Robert Collier" },
-  { text: "La differenza tra l'ordinario e lo straordinario e' quel piccolo extra.", author: "Jimmy Johnson" },
-  { text: "Non si tratta di quanto velocemente arrivi, ma di non fermarti mai.", author: "Confucio" },
-  { text: "L'unica persona che sei destinato a diventare e' la persona che decidi di essere.", author: "Ralph Waldo Emerson" },
-  { text: "Ogni mattina ci vengono date 24 ore d'oro. Ogni sera, non ne resta nessuna.", author: "John Mason" },
-  { text: "Fai le cose difficili mentre sono facili, fai le grandi cose mentre sono piccole.", author: "Lao Tzu" },
+  { text: "L'ostacolo sulla via diventa la via.", author: "Marco Aurelio" },
+  { text: "Conoscere non basta, dobbiamo applicare. Volere non basta, dobbiamo fare.", author: "Bruce Lee" },
+  { text: "Non temere il fallimento. Non e' il fallimento, ma il mirare basso, che e' il crimine.", author: "Bruce Lee" },
+  { text: "La tattica e' sapere cosa fare quando c'e' qualcosa da fare. La strategia e' sapere cosa fare quando non c'e' nulla da fare.", author: "Garry Kasparov" },
+  { text: "Il duro lavoro batte il talento quando il talento non lavora duro.", author: "Conor McGregor" },
+  { text: "Hai potere sulla tua mente, non sugli eventi esterni. Realizza questo, e troverai la forza.", author: "Marco Aurelio" },
+  { text: "La mente e' il limite. Finche' la mente puo' immaginare che puoi fare qualcosa, puoi farla.", author: "Arnold Schwarzenegger" },
 ];
 
 // ============================================================================
@@ -92,14 +92,16 @@ export default function DailyMotivation() {
     if (!stats) return '';
     const parts: string[] = [];
 
-    if (urgentDeadlines.length > 0 && urgentDeadlines[0].info.daysRemaining <= 7) {
-      parts.push(`Hai ${urgentDeadlines.length} deadline ravvicinate. Concentrati sulle priorita'.`);
+    if (urgentDeadlines.length > 0 && urgentDeadlines[0].info.daysRemaining <= 3) {
+      parts.push(`${urgentDeadlines.length} scadenze entro 3 giorni. Smetti di rimandare. Agisci.`);
+    } else if (urgentDeadlines.length > 0 && urgentDeadlines[0].info.daysRemaining <= 7) {
+      parts.push(`${urgentDeadlines.length} scadenze questa settimana. Ogni ora conta.`);
     } else if (stats.completedToday > 0) {
-      parts.push(`Hai gia' completato ${stats.completedToday} blocchi oggi. Continua cosi'!`);
+      parts.push(`${stats.completedToday} blocchi completati. Mantieni il ritmo.`);
     } else if (stats.todayTasks > 0) {
-      parts.push(`${stats.todayTasks} task ti aspettano. Inizia dal piu' urgente.`);
+      parts.push(`${stats.todayTasks} task pendenti. La giornata non si pianifica da sola.`);
     } else {
-      parts.push('Nuova giornata, nuove possibilita\'. Pianifica il tuo focus.');
+      parts.push('Nessun blocco completato. Il piano decide la giornata. Inizia ora.');
     }
 
     return parts.join(' ');
@@ -165,21 +167,26 @@ export default function DailyMotivation() {
 
           {/* Real Stats */}
           {stats && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-2">
               <div className="bg-gray-800/50 rounded-lg p-3 text-center border border-gray-700/30">
-                <Target className="w-5 h-5 mx-auto mb-1 text-blue-400" />
-                <div className="text-xl font-bold text-white">{stats.activeGoals}</div>
-                <div className="text-[10px] text-gray-500 uppercase">Goals attivi</div>
+                <Target className="w-4 h-4 mx-auto mb-1 text-blue-400" />
+                <div className="text-lg font-bold text-white">{stats.activeGoals}</div>
+                <div className="text-[9px] text-gray-500 uppercase">Goals</div>
               </div>
               <div className="bg-gray-800/50 rounded-lg p-3 text-center border border-gray-700/30">
-                <Flame className="w-5 h-5 mx-auto mb-1 text-orange-400" />
-                <div className="text-xl font-bold text-white">{stats.activeHabitsWithStreak}</div>
-                <div className="text-[10px] text-gray-500 uppercase">Streak attive</div>
+                <Clock className="w-4 h-4 mx-auto mb-1 text-cyan-400" />
+                <div className="text-lg font-bold text-white">{stats.completedToday}</div>
+                <div className="text-[9px] text-gray-500 uppercase">Completati</div>
               </div>
               <div className="bg-gray-800/50 rounded-lg p-3 text-center border border-gray-700/30">
-                <TrendingUp className="w-5 h-5 mx-auto mb-1 text-green-400" />
-                <div className="text-xl font-bold text-white">{stats.todayTasks}</div>
-                <div className="text-[10px] text-gray-500 uppercase">Task pending</div>
+                <Flame className="w-4 h-4 mx-auto mb-1 text-orange-400" />
+                <div className="text-lg font-bold text-white">{stats.activeHabitsWithStreak}</div>
+                <div className="text-[9px] text-gray-500 uppercase">Streak</div>
+              </div>
+              <div className="bg-gray-800/50 rounded-lg p-3 text-center border border-gray-700/30">
+                <TrendingUp className="w-4 h-4 mx-auto mb-1 text-green-400" />
+                <div className="text-lg font-bold text-white">{stats.todayTasks}</div>
+                <div className="text-[9px] text-gray-500 uppercase">Pending</div>
               </div>
             </div>
           )}

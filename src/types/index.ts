@@ -629,7 +629,8 @@ export interface VisionItem extends BaseEntity {
 // IMPORTANT EVENTS
 // ============================================================================
 
-export type EventCategory = 'deadline' | 'milestone' | 'meeting' | 'personal' | 'review' | 'other';
+export type EventCategory = 'deadline' | 'milestone' | 'meeting' | 'personal' | 'review' | 'tournament' | 'exam' | 'appointment' | 'mission' | 'other';
+export type EventPriority = 'high' | 'medium' | 'low';
 
 export interface ImportantEvent {
   id: string;
@@ -639,6 +640,7 @@ export interface ImportantEvent {
   date: Date;
   endDate?: Date;
   category: EventCategory;
+  priority?: EventPriority;
   goalId?: string;
   projectId?: string;
   color?: string;

@@ -1,36 +1,26 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Flame, Quote } from 'lucide-react';
-import { HEROES, getHeroOfTheDay, getQuoteOfTheDay, type Hero } from '@/lib/heroData';
-
-const CATEGORY_COLORS: Record<string, string> = {
-  bodybuilding: 'from-red-900/40 to-orange-900/20 border-red-500/30',
-  martial_arts: 'from-yellow-900/30 to-amber-900/20 border-yellow-500/30',
-  boxing: 'from-blue-900/30 to-indigo-900/20 border-blue-500/30',
-  fighting: 'from-orange-900/30 to-red-900/20 border-orange-500/30',
-  chess: 'from-purple-900/30 to-violet-900/20 border-purple-500/30',
-  philosophy: 'from-teal-900/30 to-cyan-900/20 border-teal-500/30',
-  leadership: 'from-green-900/30 to-emerald-900/20 border-green-500/30',
-};
+import { ChevronLeft, ChevronRight, Quote } from 'lucide-react';
+import { HEROES, getHeroOfTheDay, getQuoteOfTheDay } from '@/lib/heroData';
 
 interface HeroWallProps {
   className?: string;
+  compact?: boolean;
 }
 
-export default function HeroWall({ className = '' }: HeroWallProps) {
+export default function HeroWall({ className = '', compact = false }: HeroWallProps) {
   const todayHero = useMemo(() => getHeroOfTheDay(), []);
-  const todayQuote = useMemo(() => getQuoteOfTheDay(todayHero), [todayHero]);
   const [activeHeroIndex, setActiveHeroIndex] = useState(
     HEROES.findIndex(h => h.id === todayHero.id)
   );
+  const [imgError, setImgError] = useState<Set<string>>(new Set());
 
   const activeHero = HEROES[activeHeroIndex];
   const activeQuote = useMemo(
     () => getQuoteOfTheDay(activeHero),
     [activeHero]
   );
-  const colorClass = CATEGORY_COLORS[activeHero.category] || CATEGORY_COLORS.leadership;
 
   const goToPrev = () => {
     setActiveHeroIndex((i) => (i - 1 + HEROES.length) % HEROES.length);
@@ -39,65 +29,109 @@ export default function HeroWall({ className = '' }: HeroWallProps) {
     setActiveHeroIndex((i) => (i + 1) % HEROES.length);
   };
 
+  const showImage = !imgError.has(activeHero.id);
+
+  if (compact) {
+    return (
+      <div className={`bg-gray-900 rounded-2xl border border-gray-700/50 overflow-hidden ${className}`}>
+        <div className={`relative bg-gradient-to-br ${activeHero.imageFallbackColor} p-4`}>
+          <div className="flex items-center gap-3">
+            <div className="text-4xl">{activeHero.emoji}</div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-base font-bold text-white truncate">{activeHero.name}</h3>
+              <p className="text-xs text-white/60">{activeHero.title}</p>
+            </div>
+            <div className="flex gap-1">
+              <button onClick={goToPrev} className="p-1 hover:bg-white/10 rounded transition-colors">
+                <ChevronLeft className="w-4 h-4 text-white/60" />
+              </button>
+              <button onClick={goToNext} className="p-1 hover:bg-white/10 rounded transition-colors">
+                <ChevronRight className="w-4 h-4 text-white/60" />
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 bg-black/30 rounded-lg p-3">
+            <p className="text-xs italic text-white/80 leading-relaxed">"{activeQuote}"</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`bg-gray-900 rounded-2xl border border-gray-700/50 overflow-hidden ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-700/50">
-        <div className="flex items-center gap-2">
-          <Flame className="w-5 h-5 text-orange-400" />
-          <h2 className="text-lg font-bold text-white">Hero Wall</h2>
-        </div>
-        <span className="text-xs text-gray-500">
-          Eroe del giorno: {todayHero.emoji} {todayHero.name}
-        </span>
-      </div>
+      {/* Main Hero Card - Large and Impactful */}
+      <div className={`relative bg-gradient-to-br ${activeHero.imageFallbackColor} min-h-[320px]`}>
+        {/* Background image */}
+        {showImage && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={activeHero.imageUrl}
+            alt={activeHero.name}
+            className="absolute inset-0 w-full h-full object-cover opacity-30"
+            onError={() => setImgError(prev => new Set(prev).add(activeHero.id))}
+          />
+        )}
 
-      {/* Featured Hero */}
-      <div className={`relative bg-gradient-to-br ${colorClass} border-b border-gray-700/30`}>
-        <div className="p-6 text-center">
-          {/* Hero Avatar */}
-          <div className="text-6xl mb-3">{activeHero.emoji}</div>
-          <h3 className="text-2xl font-bold text-white mb-1">{activeHero.name}</h3>
-          <p className="text-sm text-gray-400 mb-4">{activeHero.title}</p>
+        {/* Gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent" />
 
-          {/* Quote */}
-          <div className="max-w-lg mx-auto bg-gray-900/40 rounded-xl p-5 border border-gray-700/30">
-            <Quote className="w-5 h-5 text-gray-500 mx-auto mb-2" />
-            <p className="text-base italic text-gray-200 leading-relaxed">
+        {/* Content */}
+        <div className="relative z-10 flex flex-col justify-end h-full p-6 min-h-[320px]">
+          {/* Hero identity */}
+          <div className="mb-4">
+            <div className="text-5xl mb-3">{activeHero.emoji}</div>
+            <h2 className="text-3xl font-black text-white tracking-tight">{activeHero.name}</h2>
+            <p className="text-sm text-white/50 font-medium uppercase tracking-widest mt-1">{activeHero.title}</p>
+          </div>
+
+          {/* Quote - prominent */}
+          <div className="bg-black/40 backdrop-blur-sm rounded-xl p-5 border border-white/10">
+            <Quote className="w-5 h-5 text-white/30 mb-2" />
+            <p className="text-lg italic text-white/90 leading-relaxed font-medium">
               "{activeQuote}"
             </p>
           </div>
 
           {/* Navigation */}
-          <div className="flex items-center justify-center gap-4 mt-4">
-            <button onClick={goToPrev} className="p-2 hover:bg-gray-800/50 rounded-lg transition-colors">
-              <ChevronLeft className="w-5 h-5 text-gray-400" />
+          <div className="flex items-center justify-between mt-4">
+            <button onClick={goToPrev} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
+              <ChevronLeft className="w-5 h-5 text-white" />
             </button>
-            <span className="text-xs text-gray-500">
-              {activeHeroIndex + 1} / {HEROES.length}
-            </span>
-            <button onClick={goToNext} className="p-2 hover:bg-gray-800/50 rounded-lg transition-colors">
-              <ChevronRight className="w-5 h-5 text-gray-400" />
+
+            <div className="flex items-center gap-1">
+              {HEROES.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setActiveHeroIndex(i)}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    i === activeHeroIndex ? 'bg-white w-6' : 'bg-white/30 hover:bg-white/50'
+                  }`}
+                />
+              ))}
+            </div>
+
+            <button onClick={goToNext} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
+              <ChevronRight className="w-5 h-5 text-white" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* All Heroes Grid */}
-      <div className="p-4">
-        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Tutti gli eroi</h4>
+      {/* Hero Grid - Secondary */}
+      <div className="p-4 border-t border-gray-800">
         <div className="grid grid-cols-4 gap-2">
           {HEROES.map((hero, i) => (
             <button
               key={hero.id}
               onClick={() => setActiveHeroIndex(i)}
-              className={`p-2 rounded-lg text-center transition-all ${
+              className={`p-2.5 rounded-lg text-center transition-all ${
                 i === activeHeroIndex
-                  ? 'bg-gray-700 ring-1 ring-cyan-500/50'
+                  ? `bg-gradient-to-br ${hero.imageFallbackColor} ring-1 ring-white/20`
                   : 'bg-gray-800/50 hover:bg-gray-800'
               }`}
             >
-              <div className="text-2xl mb-0.5">{hero.emoji}</div>
+              <div className="text-xl mb-0.5">{hero.emoji}</div>
               <div className="text-[10px] text-gray-400 truncate">{hero.name.split(' ').pop()}</div>
             </button>
           ))}

@@ -281,14 +281,11 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
   };
 
   useEffect(() => {
-    const persistedIds = loadPersistedBadges();
+    // TRUTH RULE: Badges are ONLY unlocked if current real stats meet the requirement.
+    // No inflation from old persisted state. Recompute from scratch every time.
     const currentlyMet = ACHIEVEMENT_BADGES.filter(checkBadgeRequirements);
-
-    // Merge: badges met now + badges previously persisted
-    const allUnlockedIds = new Set([...persistedIds, ...currentlyMet.map(b => b.id)]);
-    const nowUnlocked = ACHIEVEMENT_BADGES
-      .filter(b => allUnlockedIds.has(b.id))
-      .map(badge => ({ ...badge, unlockedAt: new Date() }));
+    const currentIds = currentlyMet.map(b => b.id);
+    const nowUnlocked = currentlyMet.map(badge => ({ ...badge, unlockedAt: new Date() }));
 
     const previousIds = unlockedBadges.map(b => b.id);
     const newBadges = nowUnlocked.filter(badge => !previousIds.includes(badge.id));
@@ -300,7 +297,8 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
     }
 
     setUnlockedBadges(nowUnlocked);
-    persistBadges(Array.from(allUnlockedIds));
+    // Persist only currently-earned badges (no accumulation of stale badges)
+    persistBadges(currentIds);
   }, [userStats]);
 
   const getRarityColor = (rarity: Badge['rarity']) => {

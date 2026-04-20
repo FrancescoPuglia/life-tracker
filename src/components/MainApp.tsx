@@ -18,6 +18,8 @@ import StreakCounter from '@/components/StreakCounter';
 import GamingEffects from '@/components/GamingEffects';
 import DopamineRewardSystem from '@/components/DopamineRewardSystem';
 import StrategicDopamineSystem from '@/components/StrategicDopamineSystem';
+import BlockCountdown from '@/components/BlockCountdown';
+import ContextualMotivation from '@/components/ContextualMotivation';
 import { audioManager } from '@/lib/audioManager';
 import { calculateStreak, StreakData } from '@/lib/streakCalculator';
 
@@ -36,12 +38,13 @@ const VisionBoardEnhanced = lazy(() => import('@/components/VisionBoardEnhanced'
 const NotesPage = lazy(() => import('@/components/NotesPage'));
 const EventsCalendar = lazy(() => import('@/components/EventsCalendar'));
 const HeroWall = lazy(() => import('@/components/HeroWall'));
+const WeeklyExecution = lazy(() => import('@/components/WeeklyExecution'));
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly';
 
 interface MainAppProps {
   buildId: string;
@@ -160,7 +163,7 @@ export default function MainApp({ buildId }: MainAppProps) {
           weeklyReview,
         });
       } catch (error) {
-        console.error('❌ Analytics loading failed:', error);
+        console.error('Analytics loading failed:', error);
       } finally {
         setAnalyticsLoading(false);
       }
@@ -300,8 +303,7 @@ export default function MainApp({ buildId }: MainAppProps) {
   }, [data]);
 
   // ========== OTHER HANDLERS ==========
-  const handleBadgeUnlocked = (badge: any) => {
-    console.log('Badge unlocked:', badge.name);
+  const handleBadgeUnlocked = () => {
     audioManager.play('achievementUnlock');
   };
 
@@ -324,12 +326,10 @@ export default function MainApp({ buildId }: MainAppProps) {
 
   return (
     <StrategicDopamineSystem
-      onTimeBlockCompleted={(timeBlockId) => {
-        console.log('🎉 Strategic dopamine: Time block completed!', timeBlockId);
+      onTimeBlockCompleted={() => {
         audioManager.levelUp?.();
       }}
-      onGoalAchieved={(goalId) => {
-        console.log('🎉🎉🎉 Strategic dopamine: GOAL ACHIEVED!', goalId);
+      onGoalAchieved={() => {
         audioManager.perfectDay?.();
       }}
     >
@@ -337,6 +337,7 @@ export default function MainApp({ buildId }: MainAppProps) {
         <GamingEffects />
         <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
         <DailyMotivation />
+        <BlockCountdown />
 
       {/* Header */}
       <header className="gaming-card fixed top-0 left-0 right-0 z-40 border-0 border-b-2 border-blue-200/30">
@@ -456,22 +457,30 @@ export default function MainApp({ buildId }: MainAppProps) {
                 />
               </div>
 
+              {/* Contextual Motivation - Real data alerts */}
+              <ContextualMotivation />
+
               {/* KPI Dashboard */}
               <div className="sidebar-card kpi-card card-elevated hover-lift transition-smooth">
                 <div className="card-header">
-                  <h3 className="heading-3">Today's Progress</h3>
+                  <h3 className="heading-3">Today&apos;s Progress</h3>
                 </div>
                 <div className="card-body" style={{minHeight: '140px', contain: 'layout'}}>
-                  <KPIDashboard 
+                  <KPIDashboard
                     kpis={data.kpis}
                     onRefresh={data.refreshKPIs}
                   />
                 </div>
               </div>
 
+              {/* Weekly Execution */}
+              <Suspense fallback={null}>
+                <WeeklyExecution />
+              </Suspense>
+
               {/* Hero Wall - Daily Motivation */}
               <Suspense fallback={null}>
-                <HeroWall />
+                <HeroWall compact={true} />
               </Suspense>
 
               {/* Module Navigation */}
@@ -494,7 +503,8 @@ export default function MainApp({ buildId }: MainAppProps) {
                       { id: 'vision-board', label: 'Vision Board', icon: '✧', description: 'Manifest dreams', color: 'from-pink-400 to-purple-600' },
                       { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data', color: 'from-cyan-400 to-cyan-600' },
                       { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights', color: 'from-teal-400 to-teal-600' },
-                      { id: 'events', label: 'Eventi', icon: '📆', description: 'Calendario eventi', color: 'from-rose-400 to-rose-600' },
+                      { id: 'weekly', label: 'Weekly Execution', icon: '📈', description: 'Piano vs realta', color: 'from-emerald-400 to-emerald-600' },
+                      { id: 'events', label: 'Calendario', icon: '📆', description: 'Eventi strategici', color: 'from-rose-400 to-rose-600' },
                       { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones', color: 'from-amber-400 to-amber-600' },
                     ].map(({ id, label, icon, description, color }) => (
                       <button
@@ -551,7 +561,8 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'vision-board' && '✧ Vision Board'}
                   {activeTab === 'analytics' && '📊 Analytics Dashboard'}
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
-                  {activeTab === 'events' && '📆 Eventi Importanti'}
+                  {activeTab === 'weekly' && '📈 Weekly Execution'}
+                  {activeTab === 'events' && '📆 Calendario Strategico'}
                   {activeTab === 'badges' && '🏆 Achievements'}
                   <div className="achievement-badge ml-auto">ACTIVE</div>
                 </h2>
@@ -594,7 +605,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                     tasks={data.tasks}
                     existingTimeBlocks={data.timeBlocks}
                     goals={data.goals}
-                    onScheduleGenerated={(schedule) => console.log('Schedule generated:', schedule)}
+                    onScheduleGenerated={() => {}}
                     onTimeBlocksCreated={async (blocks) => {
                       for (const block of blocks) {
                         await data.createTimeBlock(block);
@@ -715,6 +726,13 @@ export default function MainApp({ buildId }: MainAppProps) {
                     userStats={userStats}
                     onBadgeUnlocked={handleBadgeUnlocked}
                   />
+                )}
+
+                {activeTab === 'weekly' && (
+                  <div className="space-y-6">
+                    <WeeklyExecution />
+                    <HeroWall />
+                  </div>
                 )}
 
                 {activeTab === 'events' && (
