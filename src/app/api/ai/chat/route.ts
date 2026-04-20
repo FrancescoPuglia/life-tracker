@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { chat } from '@/lib/ai/openai-integration';
 import { isAIAvailable, getAIConfig } from '@/lib/ai/provider';
 
+// Required for static export (GitHub Pages). These routes only work in local dev.
+export const dynamic = 'force-static';
+
 // Simple in-memory rate limiter
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
 

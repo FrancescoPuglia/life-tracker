@@ -3,6 +3,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+// Required for static export (GitHub Pages). These routes only work in local dev.
+export const dynamic = 'force-static';
+
+export async function GET() {
+  return NextResponse.json({ status: 'available', route: 'notion-test' });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { token } = await request.json();
