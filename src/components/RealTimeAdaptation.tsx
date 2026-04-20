@@ -1,7 +1,7 @@
 'use client';
 
 // 🔄 REAL-TIME ADAPTATION COMPONENT - Dynamic Schedule Intelligence
-// MODALITÀ PSICOPATICO ESTREMO 🔥🔥🔥🔥
+
 
 import { useState, useEffect, useRef } from 'react';
 import { rePlanningEngine } from '@/lib/rePlanningEngine';

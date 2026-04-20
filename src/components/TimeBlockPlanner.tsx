@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TimeBlock, Task, Project, Goal } from '@/types';
 import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from '@/utils/dateUtils';
+import { audioManager } from '@/lib/audioManager';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -236,24 +237,11 @@ export default function TimeBlockPlanner({
       return;
     }
 
-    console.log('🔥 PSYCHOPATH: QuickCreateBlock called with:', {
-      hour,
-      selectedDate: selectedDate.toDateString(),
-      currentHour: new Date().getHours()
-    });
-    
     const startTime = new Date(selectedDate);
     startTime.setHours(hour, 0, 0, 0);
-    
+
     const endTime = new Date(selectedDate);
     endTime.setHours(hour + 1, 0, 0, 0);
-
-    console.log('🔥 PSYCHOPATH: Created times:', {
-      startTime: startTime.toString(),
-      startTimeDate: startTime.toDateString(),
-      endTime: endTime.toString(),
-      endTimeDate: endTime.toDateString()
-    });
 
     const newBlock: TimeBlockModalData = {
       startTime,
@@ -264,8 +252,7 @@ export default function TimeBlockPlanner({
       userId: currentUserId,
       domainId: 'domain-1',
     };
-    
-    console.log('🔥 PSYCHOPATH: NewBlockData set to:', newBlock);
+
     setNewBlockData(newBlock);
     setShowCreateModal(true);
   };
@@ -443,7 +430,7 @@ export default function TimeBlockPlanner({
   };
 
 
-  // 🔧 SHERLOCK MEMOIZATION FIX: Prevent infinite re-rendering
+  // Prevent infinite re-rendering
   const filteredBlocks = useMemo(() => timeBlocks.filter((block, index) => {
     try {
       const blockDate = toDateSafe(block.startTime, selectedDate);
@@ -646,7 +633,7 @@ export default function TimeBlockPlanner({
                   <div className="text-lg font-bold truncate mb-2 drop-shadow-sm">
                     {getBlockIcon(block)} {block.title}
                   </div>
-                  {/* 🔥 PSYCHOPATH FIX: Description più piccola e meno prominente */}
+                  {/* Description più piccola e meno prominente */}
                   {block.description && (
                     <div className="text-xs opacity-75 truncate mb-1 drop-shadow-sm italic">
                       {block.description}
@@ -659,27 +646,37 @@ export default function TimeBlockPlanner({
                   </div>
                 </div>
                 <div className="flex flex-col space-y-2">
-                  {/* TOGGLE COMPLETED: Always visible */}
+                  {/* Enhanced Completion Button */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       const newStatus = block.status === 'completed' ? 'planned' : 'completed';
-                      onUpdateTimeBlock(block.id, { 
+                      onUpdateTimeBlock(block.id, {
                         status: newStatus,
                         ...(newStatus === 'completed' && !block.actualStartTime ? {
                           actualStartTime: block.startTime,
                           actualEndTime: block.endTime
                         } : {})
                       });
+                      if (newStatus === 'completed') {
+                        audioManager.taskCompleted();
+                      }
                     }}
-                    className={`text-lg transition-all duration-200 hover:scale-110 ${
-                      block.status === 'completed' 
-                        ? 'text-green-400 hover:text-green-300' 
-                        : 'text-gray-300 hover:text-green-400'
+                    className={`text-lg transition-all duration-200 hover:scale-125 relative ${
+                      block.status === 'completed'
+                        ? 'text-green-400 hover:text-green-300'
+                        : 'text-gray-400 hover:text-green-400 animate-pulse'
                     }`}
-                    title={block.status === 'completed' ? 'Mark as planned' : 'Mark as completed'}
+                    title={
+                      block.status === 'completed'
+                        ? 'Completed - Click to mark as planned'
+                        : 'Click to COMPLETE and add to Analytics!'
+                    }
                   >
                     {block.status === 'completed' ? '✅' : '⭕'}
+                    {block.status !== 'completed' && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></span>
+                    )}
                   </button>
                   
                   {/* Status indicator */}
@@ -772,7 +769,7 @@ export default function TimeBlockPlanner({
                 <div className="grid grid-cols-7 min-w-full" style={{minHeight: '480px', contain: 'layout'}}>
                   {getViewPeriodDates(selectedDate, 'week').map((date, dayIndex) => {
                     const dayBlocks = filteredBlocks.filter(block => {
-                      // 🔧 SHERLOCK FIX: Use block's actual creation date as reference, not the current view date
+                      // Use block's actual creation date as reference, not the current view date
                       // This prevents time blocks from "jumping" when navigating between weeks
                       const blockCreationDate = block.startTime instanceof Date 
                         ? new Date(block.startTime.getFullYear(), block.startTime.getMonth(), block.startTime.getDate())
@@ -858,11 +855,11 @@ export default function TimeBlockPlanner({
 
                           {/* Time blocks for this day */}
                           {dayBlocks.map((block) => {
-                            // 🔧 SHERLOCK EMERGENCY FIX: Use consistent date reference like Day View
+                            // Use consistent date reference like Day View
                             const startTime = toDateSafe(block.startTime, date);
                             const endTime = toDateSafe(block.endTime, date);
                             
-                            // 🛠️ SHERLOCK DATA REPAIR: Fix corrupted multi-day time blocks (STABLE MODE)
+                            // Fix corrupted multi-day time blocks (STABLE MODE)
                             let displayEndTime;
                             const duration = endTime.getTime() - startTime.getTime();
                             const maxReasonableDuration = 24 * 60 * 60 * 1000; // 24 hours max for single block
@@ -888,7 +885,7 @@ export default function TimeBlockPlanner({
                               displayEndTime = endTime <= startTime ? new Date(startTime.getTime() + 60*60*1000) : endTime;
                             }
                             
-                            // 🛡️ SHERLOCK PROTECTION: Prevent excessive block heights (max 8 hours)
+                            // Prevent excessive block heights (max 8 hours)
                             const maxDuration = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
                             const actualDuration = displayEndTime.getTime() - startTime.getTime();
                             const safeDuration = Math.min(actualDuration, maxDuration);
@@ -907,7 +904,7 @@ export default function TimeBlockPlanner({
                                 className={`absolute left-1 right-1 ${block.color ? 'font-bold rounded-lg hover:shadow-lg transform hover:scale-105 transition-all duration-200 border text-white' : getBlockColor(block)} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 z-10 border`}
                                 style={{
                                   top: `${getPositionFromTime(startTime)}px`,
-                                  height: `${finalHeight}px`, // 🔧 SHERLOCK FIX: Use calculated safe height
+                                  height: `${finalHeight}px`, // Use calculated safe height
                                   minHeight: '30px',
                                   ...(block.color ? {
                                     backgroundColor: block.color,
@@ -938,21 +935,35 @@ export default function TimeBlockPlanner({
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         const newStatus = block.status === 'completed' ? 'planned' : 'completed';
-                                        onUpdateTimeBlock(block.id, { 
+                                        onUpdateTimeBlock(block.id, {
                                           status: newStatus,
                                           ...(newStatus === 'completed' && !block.actualStartTime ? {
                                             actualStartTime: block.startTime,
                                             actualEndTime: block.endTime
                                           } : {})
                                         });
+                                        if (newStatus === 'completed') {
+                                          audioManager.taskCompleted();
+                                        }
                                       }}
-                                      className="text-xs hover:scale-110 transition-transform"
-                                      title={block.status === 'completed' ? 'Mark as planned' : 'Mark as completed'}
+                                      className={`text-xs hover:scale-125 transition-transform relative ${
+                                        block.status === 'completed'
+                                          ? 'text-green-400'
+                                          : 'text-gray-400 animate-pulse'
+                                      }`}
+                                      title={
+                                        block.status === 'completed'
+                                          ? 'Completed - Click to mark as planned'
+                                          : 'Click to COMPLETE and add to Analytics!'
+                                      }
                                     >
                                       {block.status === 'completed' ? '✅' : '⭕'}
+                                      {block.status !== 'completed' && (
+                                        <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping"></span>
+                                      )}
                                     </button>
                                     
-                                    {/* 🗑️ SHERLOCK DELETE BUTTON - Requested feature */}
+                                    {/* Requested feature */}
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -1444,7 +1455,7 @@ export default function TimeBlockPlanner({
                     }
                     onChange={(e) => {
                       const [hours, minutes] = e.target.value.split(':');
-                      // 🔧 SHERLOCK FIX: Use the correct base date from existing startTime or selectedDate
+                      // Use the correct base date from existing startTime or selectedDate
                       const baseDate = newBlockData.startTime instanceof Date 
                         ? new Date(newBlockData.startTime.getFullYear(), newBlockData.startTime.getMonth(), newBlockData.startTime.getDate())
                         : new Date(selectedDate);
@@ -1469,7 +1480,7 @@ export default function TimeBlockPlanner({
                     }
                     onChange={(e) => {
                       const [hours, minutes] = e.target.value.split(':');
-                      // 🔧 SHERLOCK FIX: Use the correct base date from existing startTime or selectedDate
+                      // Use the correct base date from existing startTime or selectedDate
                       const baseDate = newBlockData.startTime instanceof Date 
                         ? new Date(newBlockData.startTime.getFullYear(), newBlockData.startTime.getMonth(), newBlockData.startTime.getDate())
                         : new Date(selectedDate);

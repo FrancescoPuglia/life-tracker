@@ -62,12 +62,12 @@ export class FirebaseAdapter implements DatabaseAdapter {
   private unsubscribers: Map<string, () => void> = new Map();
 
   constructor() {
-    // 🔥 CRITICAL FIX: Restore userId immediately in constructor
+    // FIX: Restore userId immediately in constructor
     this.restoreUserId();
   }
 
   async init(): Promise<void> {
-    // 🔥 CRITICAL: Always try to restore userId first
+    // NOTE: Always try to restore userId first
     this.restoreUserId();
     
     if (this.isInitialized) {
@@ -104,7 +104,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
     }
   }
 
-  // 🔥 CRITICAL: Restore userId from sessionStorage
+  // NOTE: Restore userId from sessionStorage
   private restoreUserId(): void {
     if (typeof window === 'undefined') {
       return;
@@ -131,7 +131,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
   }
 
   private getUserCollection(collectionName: string): string {
-    // 🔥 CRITICAL: Always restore before accessing
+    // NOTE: Always restore before accessing
     this.restoreUserId();
     
     if (!this.userId) {
@@ -293,7 +293,7 @@ export class FirebaseAdapter implements DatabaseAdapter {
       throw new Error('Firebase Firestore not initialized');
     }
     
-    // 🔥 CRITICAL: If no userId, return empty array (don't crash)
+    // NOTE: If no userId, return empty array (don't crash)
     if (!this.userId) {
       console.warn('⚠️ Firebase getAll: userId not set, returning empty array');
       return [];

@@ -1,6 +1,6 @@
 // src/types/blocks.ts
 // 🎨 BLOCK EDITOR TYPES - Sistema Notion-like
-// MODALITÀ PSICOPATICO CERTOSINO 🔥
+
 // VERSIONE 2.0 - POST SHERLOCK AUDIT
 
 // ============================================================================
@@ -76,6 +76,7 @@ export interface RichText {
     code?: boolean;
     color?: string;
     backgroundColor?: string;
+    fontSize?: string;
   };
   link?: string;
 }

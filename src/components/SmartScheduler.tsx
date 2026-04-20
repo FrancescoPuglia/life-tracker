@@ -1,7 +1,7 @@
 'use client';
 
 // ⚡ SMART SCHEDULER COMPONENT - AI-Powered Schedule Optimization
-// MODALITÀ PSICOPATICO SUPREMO 🔥🔥🔥
+
 
 import { useState, useEffect } from 'react';
 import { autoScheduler } from '@/lib/autoScheduler';
@@ -66,8 +66,8 @@ export default function SmartScheduler({
       // Build comprehensive constraints
       const constraints: SchedulingConstraints = buildSchedulingConstraints();
 
-      // 🔥 PSYCHOPATH MODE: Generate optimal schedule
-      const result = await autoScheduler.schedule(tasks, constraints);
+      // Generate optimal schedule with REAL GOALS DATA
+      const result = await autoScheduler.schedule(tasks, constraints, goals);
       
       console.log('⚡ SCHEDULER RESULT:', result);
 
@@ -255,13 +255,13 @@ export default function SmartScheduler({
         <div>
           <h2 className="text-2xl font-bold holographic-text flex items-center space-x-3">
             <span>⚡</span>
-            <span>SMART SCHEDULER</span>
+            <span>PIANIFICATORE INTELLIGENTE</span>
             <span className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-1 rounded-full animate-pulse">
-              SUPREMO MODE
+              MODALITÀ SUPREMA
             </span>
           </h2>
           <p className="text-gray-300 text-sm mt-1">
-            AI-powered optimization with constraint-based scheduling
+            Ottimizzazione AI con pianificazione basata sui tuoi dati reali
           </p>
         </div>
 
@@ -274,10 +274,10 @@ export default function SmartScheduler({
           {state.isGenerating ? (
             <div className="flex items-center space-x-2">
               <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>Optimizing...</span>
+              <span>Ottimizzazione...</span>
             </div>
           ) : (
-            <span>⚡ Generate Optimal Schedule</span>
+            <span>⚡ Genera Programma Ottimale</span>
           )}
         </button>
       </div>
@@ -285,35 +285,35 @@ export default function SmartScheduler({
       {/* 🔧 OPTIMIZATION CONTROLS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass-card p-4">
-          <label className="block text-sm font-bold text-cyan-400 mb-2">Optimization Mode</label>
+          <label className="block text-sm font-bold text-cyan-400 mb-2">Modalità Ottimizzazione</label>
           <select
             value={optimizationMode}
             onChange={(e) => setOptimizationMode(e.target.value as any)}
             className="w-full bg-gray-900 border border-cyan-400/30 rounded text-white p-2"
           >
-            <option value="balanced">🎯 Balanced</option>
-            <option value="deadline">⏰ Deadline-Focused</option>
-            <option value="energy">⚡ Energy-Optimized</option>
-            <option value="goals">🎖️ Goal-Aligned</option>
+            <option value="balanced">🎯 Bilanciato</option>
+            <option value="deadline">⏰ Focalizzato su Scadenze</option>
+            <option value="energy">⚡ Ottimizzato per Energia</option>
+            <option value="goals">🎖️ Allineato agli Obiettivi</option>
           </select>
         </div>
 
         <div className="glass-card p-4">
-          <label className="block text-sm font-bold text-cyan-400 mb-2">Scheduling Window</label>
+          <label className="block text-sm font-bold text-cyan-400 mb-2">Finestra Temporale</label>
           <select
             value={schedulingWindow}
             onChange={(e) => setSchedulingWindow(Number(e.target.value))}
             className="w-full bg-gray-900 border border-cyan-400/30 rounded text-white p-2"
           >
-            <option value={3}>3 Days</option>
-            <option value={7}>1 Week</option>
-            <option value={14}>2 Weeks</option>
-            <option value={30}>1 Month</option>
+            <option value={3}>3 Giorni</option>
+            <option value={7}>1 Settimana</option>
+            <option value={14}>2 Settimane</option>
+            <option value={30}>1 Mese</option>
           </select>
         </div>
 
         <div className="glass-card p-4">
-          <label className="block text-sm font-bold text-cyan-400 mb-2">Working Hours</label>
+          <label className="block text-sm font-bold text-cyan-400 mb-2">Orario di Lavoro</label>
           <div className="flex space-x-2">
             <input
               type="time"
@@ -337,17 +337,17 @@ export default function SmartScheduler({
           {/* PRIMARY SCHEDULE */}
           <div className="glass-card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold neon-text">Generated Schedule</h3>
+              <h3 className="text-xl font-bold neon-text">Programma Generato</h3>
               <div className="flex items-center space-x-4">
                 <div className={`text-sm font-mono ${getConfidenceColor(state.result.confidence)}`}>
-                  {Math.round(state.result.confidence * 100)}% confidence
+                  {Math.round(state.result.confidence * 100)}% confidenza
                 </div>
                 <button
                   onClick={() => onTimeBlocksCreated?.(state.result!.schedule)}
                   onMouseEnter={() => audioManager.buttonHover()}
                   className="btn-gaming px-4 py-2 text-sm bg-gradient-to-r from-green-600 to-green-700"
                 >
-                  ✅ Apply Schedule
+                  ✅ Applica Programma
                 </button>
               </div>
             </div>
@@ -356,7 +356,7 @@ export default function SmartScheduler({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-blue-900/20 border border-blue-400/30 rounded-lg p-4">
                 <div className="text-2xl font-bold text-blue-400">{state.result.schedule.length}</div>
-                <div className="text-sm text-gray-300">Time Blocks</div>
+                <div className="text-sm text-gray-300">Blocchi Temporali</div>
               </div>
               <div className="bg-green-900/20 border border-green-400/30 rounded-lg p-4">
                 <div className="text-2xl font-bold text-green-400">
@@ -367,11 +367,11 @@ export default function SmartScheduler({
                     }, 0) * 10
                   ) / 10}h
                 </div>
-                <div className="text-sm text-gray-300">Total Time</div>
+                <div className="text-sm text-gray-300">Tempo Totale</div>
               </div>
               <div className="bg-purple-900/20 border border-purple-400/30 rounded-lg p-4">
                 <div className="text-2xl font-bold text-purple-400">{state.result.conflicts.length}</div>
-                <div className="text-sm text-gray-300">Conflicts</div>
+                <div className="text-sm text-gray-300">Conflitti</div>
               </div>
             </div>
 
@@ -381,10 +381,10 @@ export default function SmartScheduler({
               return (
                 <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-4 mb-6">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-bold text-cyan-400">Schedule Quality Analysis</h4>
+                    <h4 className="font-bold text-cyan-400">Analisi Qualità Programma</h4>
                     <div className="flex items-center space-x-2">
                       <div className="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
-                        <div 
+                        <div
                           className="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500"
                           style={{ width: `${analysis.score * 100}%` }}
                         ></div>
@@ -407,19 +407,19 @@ export default function SmartScheduler({
 
             {/* REASONING */}
             <div className="bg-blue-900/10 border border-blue-400/20 rounded-lg p-4 mb-4">
-              <h4 className="font-bold text-blue-400 mb-2">🧠 AI Reasoning</h4>
+              <h4 className="font-bold text-blue-400 mb-2">🧠 Ragionamento AI</h4>
               <p className="text-gray-300 text-sm">{state.result.reasoning}</p>
             </div>
 
             {/* CONFLICTS */}
             {state.result.conflicts.length > 0 && (
               <div className="space-y-3">
-                <h4 className="font-bold text-red-400">⚠️ Scheduling Conflicts</h4>
+                <h4 className="font-bold text-red-400">⚠️ Conflitti di Pianificazione</h4>
                 {state.result.conflicts.map((conflict, index) => (
                   <div key={index} className={`border rounded-lg p-3 ${getConflictSeverityColor(conflict.severity)}`}>
                     <div className="font-medium">{conflict.description}</div>
                     <div className="text-sm mt-2 space-y-1">
-                      <div className="font-medium">Suggestions:</div>
+                      <div className="font-medium">Suggerimenti:</div>
                       {conflict.suggestions.map((suggestion, i) => (
                         <div key={i} className="text-sm opacity-90">• {suggestion}</div>
                       ))}
@@ -433,10 +433,10 @@ export default function SmartScheduler({
           {/* ALTERNATIVE SCHEDULES */}
           {state.result.alternatives.length > 0 && (
             <div className="glass-card p-6">
-              <h3 className="text-xl font-bold neon-text mb-4">Alternative Schedules</h3>
+              <h3 className="text-xl font-bold neon-text mb-4">Programmi Alternativi</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {state.result.alternatives.map((alt, index) => (
-                  <div 
+                  <div
                     key={index}
                     className={`border rounded-lg p-4 cursor-pointer transition-all duration-300 ${
                       state.selectedAlternative === index
@@ -453,7 +453,7 @@ export default function SmartScheduler({
                     </div>
                     <p className="text-gray-300 text-sm mb-3">{alt.description}</p>
                     <div className="space-y-1">
-                      <div className="text-xs font-medium text-gray-400">Tradeoffs:</div>
+                      <div className="text-xs font-medium text-gray-400">Compromessi:</div>
                       {alt.tradeoffs.map((tradeoff, i) => (
                         <div key={i} className="text-xs text-gray-400">• {tradeoff}</div>
                       ))}
@@ -469,29 +469,29 @@ export default function SmartScheduler({
       {/* 📈 STATISTICS */}
       {tasks.length > 0 && (
         <div className="glass-card p-6">
-          <h3 className="text-lg font-bold neon-text mb-4">📈 Scheduling Statistics</h3>
+          <h3 className="text-lg font-bold neon-text mb-4">📈 Statistiche Pianificazione</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-400">{tasks.length}</div>
-              <div className="text-sm text-gray-400">Tasks to Schedule</div>
+              <div className="text-sm text-gray-400">Task da Pianificare</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-green-400">
                 {Math.round(tasks.reduce((sum, t) => sum + (t.estimatedMinutes || 60), 0) / 60 * 10) / 10}h
               </div>
-              <div className="text-sm text-gray-400">Total Work</div>
+              <div className="text-sm text-gray-400">Lavoro Totale</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-purple-400">
                 {tasks.filter(t => t.dueDate).length}
               </div>
-              <div className="text-sm text-gray-400">With Deadlines</div>
+              <div className="text-sm text-gray-400">Con Scadenze</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-cyan-400">
                 {tasks.filter(t => t.priority === 'high').length}
               </div>
-              <div className="text-sm text-gray-400">High Priority</div>
+              <div className="text-sm text-gray-400">Alta Priorità</div>
             </div>
           </div>
         </div>
@@ -501,15 +501,15 @@ export default function SmartScheduler({
       <div className="glass-card p-4">
         <details className="text-sm">
           <summary className="cursor-pointer font-bold text-cyan-400 hover:text-cyan-300">
-            💡 Smart Scheduling Tips
+            💡 Suggerimenti Pianificazione Intelligente
           </summary>
           <div className="mt-3 space-y-2 text-gray-300">
-            <p>• <strong>Balanced Mode:</strong> Considers all factors equally for optimal overall schedule</p>
-            <p>• <strong>Deadline-Focused:</strong> Prioritizes urgent tasks and deadline compliance</p>
-            <p>• <strong>Energy-Optimized:</strong> Schedules demanding tasks during your peak energy hours</p>
-            <p>• <strong>Goal-Aligned:</strong> Groups related tasks for focused progress on objectives</p>
-            <p>• Longer scheduling windows provide more optimization opportunities but may feel less immediate</p>
-            <p>• The AI considers your energy patterns, task complexity, and contextual constraints automatically</p>
+            <p>• <strong>Modalità Bilanciata:</strong> Considera tutti i fattori equamente per un programma ottimale</p>
+            <p>• <strong>Focalizzato su Scadenze:</strong> Prioritizza task urgenti e rispetto delle scadenze</p>
+            <p>• <strong>Ottimizzato per Energia:</strong> Pianifica task impegnativi durante le ore di picco energetico</p>
+            <p>• <strong>Allineato agli Obiettivi:</strong> Raggruppa task correlati per progresso focalizzato sugli obiettivi</p>
+            <p>• Finestre temporali più lunghe offrono più opportunità di ottimizzazione ma possono sembrare meno immediate</p>
+            <p>• L'AI considera automaticamente i tuoi pattern energetici, la complessità dei task e i vincoli contestuali</p>
           </div>
         </details>
       </div>

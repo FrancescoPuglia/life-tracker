@@ -12,7 +12,8 @@ import {
 import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
 import { RichNoteEditor } from './RichNoteEditor';
 import { GoalRoadmapView } from './GoalRoadmapView';
-import { LazyVisionBoardView } from './VisionBoard';
+import VisionBoardEnhanced from './VisionBoardEnhanced';
+import DeadlineBadge from './DeadlineBadge';
 import { useDataContext } from '@/providers/DataProvider';
 
 
@@ -497,7 +498,7 @@ function useGoalMetrics(goal: Goal) {
 
     // 🎯 CHRISTMAS FIX: Prioritize ACTUAL HOURS over Key Results for life tracking
     // This is a goal-centric time tracking app - hours are the primary metric!
-    // 🔧 SHERLOCK FIX: Preserve small percentages (0.1% shouldn't become 0%)
+    // Preserve small percentages (0.1% shouldn't become 0%)
     const progress = targetHours > 0 && actualHours > 0 ? Math.round(hoursProgress * 10) / 10 : (krProgress !== null ? krProgress : 0);
     const variance = actualHours - targetHours;
     const efficiency = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
@@ -555,7 +556,7 @@ function useProjectMetrics(project: Project) {
     const completedTasks = projectTasks.filter((t) => t.status === "completed").length;
     const totalTasks = projectTasks.length;
 
-    // 🔧 SHERLOCK FIX: Always prioritize HOURS over tasks for progress calculation
+    // Always prioritize HOURS over tasks for progress calculation
     // This aligns with the GOAL-CENTRIC time tracking philosophy!
     let progress = 0;
     const actualHours = actualResult.totalMinutes / 60;
@@ -837,10 +838,7 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes,
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <StatusBadge status={goal.status} />
         <PriorityBadge priority={goal.priority} />
-        <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-          <Calendar className="w-3 h-3" />
-          {formatDateSafe(goal.targetDate)}
-        </span>
+        <DeadlineBadge targetDate={goal.targetDate} status={goal.status} size="sm" />
       </div>
 
       <div className="space-y-2 mb-4">
@@ -2113,23 +2111,11 @@ export default function OKRManager(props: OKRManagerProps) {
                   setShowVisionBoardSection(false);
                 }}
                 onShowVisionBoard={(goalId) => {
-                  console.log('🔍 SHERLOCK DEBUG: Vision Board clicked!', {
-                    goalId,
-                    currentUserId,
-                    visibleGoalsLength: visibleGoals.length,
-                    goalExists: visibleGoals.find(g => g.id === goalId),
-                    beforeSelectedGoalId: selectedGoalId
-                  });
                   setSelectedGoalId(goalId);
                   setActiveTab('vision-board');
                   setShowVisionBoardSection(true);
                   setShowNotesSection(false);
                   setShowRoadmapSection(false);
-                  console.log('🔍 SHERLOCK DEBUG: State updated!', {
-                    newSelectedGoalId: goalId,
-                    activeTab: 'vision-board',
-                    showVisionBoardSection: true
-                  });
                 }}
               />
             ))}
@@ -2138,11 +2124,6 @@ export default function OKRManager(props: OKRManagerProps) {
 
         {/* Details panel (selected goal) */}
         {(() => {
-          console.log('🔍 SHERLOCK DEBUG: Details panel render check', {
-            selectedGoal: !!selectedGoal,
-            selectedGoalId,
-            selectedGoalTitle: selectedGoal?.title
-          });
           return selectedGoal;
         })() && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2420,25 +2401,10 @@ export default function OKRManager(props: OKRManagerProps) {
               )}
 
               {(() => {
-                console.log('🔍 SHERLOCK DEBUG: Vision Board section render check', {
-                  activeTab,
-                  showVisionBoardSection,
-                  selectedGoal: !!selectedGoal,
-                  allConditionsMet: activeTab === 'vision-board' && showVisionBoardSection && selectedGoal
-                });
                 return activeTab === 'vision-board' && showVisionBoardSection && selectedGoal;
               })() && (
                 <div className="space-y-4">
-                  <LazyVisionBoardView
-                    goalId={selectedGoal?.id}
-                    userId={currentUserId || 'guest'}
-                    domainId={selectedGoal?.domainId}
-                    goals={goals}
-                    projects={projects}
-                    tasks={tasks}
-                    onRitualMode={() => {
-                      console.log('Opening Ritual Mode for goal:', selectedGoal?.title);
-                    }}
+                  <VisionBoardEnhanced
                     onBack={() => {
                       setShowVisionBoardSection(false);
                       setActiveTab('notes');

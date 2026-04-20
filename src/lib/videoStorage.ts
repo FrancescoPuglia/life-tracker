@@ -1,5 +1,5 @@
 // Video Storage using IndexedDB for large files
-// 🔍 SHERLOCK HOLMES SOLUTION for unlimited video storage
+// IndexedDB video storage for unlimited video storage
 
 interface VideoRecord {
   id: string;
@@ -21,13 +21,13 @@ class VideoStorageDB {
       const request = indexedDB.open(this.dbName, this.version);
       
       request.onerror = () => {
-        console.error('🔍 SHERLOCK: VideoStorage IndexedDB failed to open');
+        console.error('VideoStorage IndexedDB failed to open');
         reject(request.error);
       };
       
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('🔍 SHERLOCK: VideoStorage IndexedDB opened successfully');
+        console.log('VideoStorage IndexedDB opened successfully');
         resolve();
       };
       
@@ -37,7 +37,7 @@ class VideoStorageDB {
         if (!db.objectStoreNames.contains(this.storeName)) {
           const store = db.createObjectStore(this.storeName, { keyPath: 'id' });
           store.createIndex('timestamp', 'timestamp', { unique: false });
-          console.log('🔍 SHERLOCK: VideoStorage store created');
+          console.log('VideoStorage store created');
         }
       };
     });
@@ -62,12 +62,12 @@ class VideoStorageDB {
       const request = store.add(videoRecord);
       
       request.onsuccess = () => {
-        console.log(`🔍 SHERLOCK: Video stored successfully - ID: ${videoId}, Size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+        console.log(`Video stored successfully - ID: ${videoId}, Size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
         resolve(videoId);
       };
       
       request.onerror = () => {
-        console.error('🔍 SHERLOCK: Failed to store video', request.error);
+        console.error('Failed to store video', request.error);
         reject(request.error);
       };
     });
@@ -84,13 +84,13 @@ class VideoStorageDB {
       request.onsuccess = () => {
         const result = request.result;
         if (result) {
-          console.log(`🔍 SHERLOCK: Video retrieved - ID: ${videoId}, Size: ${(result.fileSize / 1024 / 1024).toFixed(2)}MB`);
+          console.log(`Video retrieved - ID: ${videoId}, Size: ${(result.fileSize / 1024 / 1024).toFixed(2)}MB`);
         }
         resolve(result || null);
       };
       
       request.onerror = () => {
-        console.error('🔍 SHERLOCK: Failed to retrieve video', request.error);
+        console.error('Failed to retrieve video', request.error);
         reject(request.error);
       };
     });
@@ -102,7 +102,7 @@ class VideoStorageDB {
     
     // Create blob URL for video playback
     const url = URL.createObjectURL(record.data);
-    console.log(`🔍 SHERLOCK: Video URL created for playback - ${videoId}`);
+    console.log(`Video URL created for playback - ${videoId}`);
     return url;
   }
 
@@ -115,12 +115,12 @@ class VideoStorageDB {
       const request = store.delete(videoId);
       
       request.onsuccess = () => {
-        console.log(`🔍 SHERLOCK: Video deleted successfully - ${videoId}`);
+        console.log(`Video deleted successfully - ${videoId}`);
         resolve();
       };
       
       request.onerror = () => {
-        console.error('🔍 SHERLOCK: Failed to delete video', request.error);
+        console.error('Failed to delete video', request.error);
         reject(request.error);
       };
     });
@@ -136,12 +136,12 @@ class VideoStorageDB {
       
       request.onsuccess = () => {
         const videos = request.result;
-        console.log(`🔍 SHERLOCK: Found ${videos.length} stored videos`);
+        console.log(`Found ${videos.length} stored videos`);
         resolve(videos);
       };
       
       request.onerror = () => {
-        console.error('🔍 SHERLOCK: Failed to list videos', request.error);
+        console.error('Failed to list videos', request.error);
         reject(request.error);
       };
     });
@@ -151,7 +151,7 @@ class VideoStorageDB {
     const videos = await this.listVideos();
     const totalSize = videos.reduce((sum, video) => sum + video.fileSize, 0);
     
-    console.log(`🔍 SHERLOCK: Storage stats - Videos: ${videos.length}, Total size: ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
+    console.log(`Storage stats - Videos: ${videos.length}, Total size: ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
     
     return {
       count: videos.length,

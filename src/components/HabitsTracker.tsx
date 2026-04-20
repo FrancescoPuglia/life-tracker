@@ -5,16 +5,17 @@ import { createPortal } from 'react-dom';
 import { Habit, HabitLog } from '@/types';
 import { formatDateSafe, formatDateStringSafe } from '@/utils/dateUtils';
 import { CheckCircle, Circle, Flame, Calendar, Plus, Edit, Trash2 } from 'lucide-react';
+import { audioManager } from '@/lib/audioManager';
 
-interface HabitsTrackerProps {
+type HabitsTrackerProps = {
   habits: Habit[];
   habitLogs: HabitLog[];
   onCreateHabit: (habit: Partial<Habit>) => void;
   onUpdateHabit: (id: string, updates: Partial<Habit>) => void;
   onDeleteHabit: (id: string) => void;
   onLogHabit: (habitId: string, completed: boolean, value?: number, notes?: string) => void;
-  currentUserId?: string; // 🔥 CRITICAL FIX
-}
+  currentUserId?: string;
+};
 
 export default function HabitsTracker({
   habits,
@@ -176,11 +177,7 @@ export default function HabitsTracker({
           streakCount: newStreak,
           bestStreak: Math.max(habit.bestStreak, newStreak),
         });
-
-        // 🎉 TRIGGER DOPAMINE REWARD FOR HABIT COMPLETION!
-        if (typeof window !== 'undefined' && (window as any).strategicDopamine) {
-          (window as any).strategicDopamine.triggerHabitCompletion(habit.id, newStreak);
-        }
+        audioManager.habitCompleted(newStreak);
       } else {
         onUpdateHabit(habit.id, {
           streakCount: Math.max(0, habit.streakCount - 1),

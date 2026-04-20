@@ -4,10 +4,17 @@ import { useEditor, EditorContent, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
+import { TextStyle } from '@tiptap/extension-text-style';
+import { Color } from '@tiptap/extension-color';
+import { FontFamily } from '@tiptap/extension-font-family';
+import { Underline } from '@tiptap/extension-underline';
+import { TextAlign } from '@tiptap/extension-text-align';
+import { Highlight } from '@tiptap/extension-highlight';
 import { useState, useCallback, useRef } from 'react';
 import { 
   Bold, Italic, List, ListOrdered, Quote, Code, Image as ImageIcon, 
-  Save, FileText, Upload, Eye 
+  Save, FileText, Upload, Eye, Underline as UnderlineIcon, Palette, 
+  Type, AlignLeft, AlignCenter, AlignRight, Highlighter
 } from 'lucide-react';
 import type { Note, NoteTemplate } from '@/types';
 
@@ -60,7 +67,7 @@ function Toolbar({ editor, onSave, onImageUpload, isSaving }: ToolbarProps) {
   if (!editor) return null;
 
   return (
-    <div className="border-b border-gray-200 dark:border-gray-700 p-2 flex items-center gap-1">
+    <div className="border-b border-gray-200 dark:border-gray-700 p-2 flex flex-wrap items-center gap-1">
       {/* Text Formatting */}
       <button
         onClick={() => editor.chain().focus().toggleBold().run()}
@@ -148,6 +155,167 @@ function Toolbar({ editor, onSave, onImageUpload, isSaving }: ToolbarProps) {
 
       <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1" />
 
+      {/* Advanced Formatting Controls */}
+      
+      {/* Underline */}
+      <button
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+        className={`p-2 rounded-md transition-colors ${
+          editor.isActive('underline')
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+        }`}
+        type="button"
+        title="Underline"
+      >
+        <UnderlineIcon className="h-4 w-4" />
+      </button>
+
+      {/* Highlight */}
+      <button
+        onClick={() => editor.chain().focus().toggleHighlight().run()}
+        className={`p-2 rounded-md transition-colors ${
+          editor.isActive('highlight')
+            ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+        }`}
+        type="button"
+        title="Highlight"
+      >
+        <Highlighter className="h-4 w-4" />
+      </button>
+
+      <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1" />
+
+      {/* Text Alignment */}
+      <button
+        onClick={() => editor.chain().focus().setTextAlign('left').run()}
+        className={`p-2 rounded-md transition-colors ${
+          editor.isActive({ textAlign: 'left' })
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+        }`}
+        type="button"
+        title="Align Left"
+      >
+        <AlignLeft className="h-4 w-4" />
+      </button>
+
+      <button
+        onClick={() => editor.chain().focus().setTextAlign('center').run()}
+        className={`p-2 rounded-md transition-colors ${
+          editor.isActive({ textAlign: 'center' })
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+        }`}
+        type="button"
+        title="Align Center"
+      >
+        <AlignCenter className="h-4 w-4" />
+      </button>
+
+      <button
+        onClick={() => editor.chain().focus().setTextAlign('right').run()}
+        className={`p-2 rounded-md transition-colors ${
+          editor.isActive({ textAlign: 'right' })
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+        }`}
+        type="button"
+        title="Align Right"
+      >
+        <AlignRight className="h-4 w-4" />
+      </button>
+
+      <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1" />
+
+      {/* Font Family Selector */}
+      <select
+        value={editor.getAttributes('textStyle').fontFamily || 'Inter'}
+        onChange={(e) => {
+          if (e.target.value === 'Inter') {
+            editor.chain().focus().unsetFontFamily().run();
+          } else {
+            editor.chain().focus().setFontFamily(e.target.value).run();
+          }
+        }}
+        className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        title="Font Family"
+      >
+        <option value="Inter">Inter (Default)</option>
+        <option value="Georgia, serif">Georgia</option>
+        <option value="Times New Roman, serif">Times New Roman</option>
+        <option value="Arial, sans-serif">Arial</option>
+        <option value="Helvetica, sans-serif">Helvetica</option>
+        <option value="Courier New, monospace">Courier New</option>
+        <option value="Monaco, monospace">Monaco</option>
+        <option value="Playfair Display, serif">Playfair Display</option>
+        <option value="Roboto, sans-serif">Roboto</option>
+        <option value="Open Sans, sans-serif">Open Sans</option>
+        <option value="Merriweather, serif">Merriweather</option>
+      </select>
+
+      {/* Font Size Selector */}
+      <select
+        value={
+          (() => {
+            const attrs = editor.getAttributes('textStyle');
+            return attrs.fontSize || '16px';
+          })()
+        }
+        onChange={(e) => {
+          const fontSize = e.target.value;
+          if (fontSize === '16px') {
+            editor.chain().focus().unsetMark('textStyle').run();
+          } else {
+            editor.chain().focus().setMark('textStyle', { fontSize }).run();
+          }
+        }}
+        className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors min-w-[60px]"
+        title="Font Size"
+      >
+        <option value="12px">12px</option>
+        <option value="14px">14px</option>
+        <option value="16px">16px</option>
+        <option value="18px">18px</option>
+        <option value="20px">20px</option>
+        <option value="24px">24px</option>
+        <option value="32px">32px</option>
+        <option value="48px">48px</option>
+        <option value="64px">64px</option>
+      </select>
+
+      {/* Text Color Picker */}
+      <div className="relative">
+        <input
+          type="color"
+          value={editor.getAttributes('textStyle').color || '#000000'}
+          onChange={(e) => editor.chain().focus().setColor(e.target.value).run()}
+          className="w-8 h-8 border-0 rounded-md cursor-pointer bg-transparent"
+          title="Text Color"
+        />
+        <Palette className="h-3 w-3 absolute bottom-0 right-0 pointer-events-none text-gray-600" />
+      </div>
+
+      {/* Background/Highlight Color Picker */}
+      <div className="relative">
+        <input
+          type="color"
+          value="#ffff00"
+          onChange={(e) => {
+            if (editor.isActive('highlight')) {
+              editor.chain().focus().unsetHighlight().run();
+            }
+            editor.chain().focus().toggleHighlight({ color: e.target.value }).run();
+          }}
+          className="w-8 h-8 border-0 rounded-md cursor-pointer bg-transparent"
+          title="Highlight Color"
+        />
+        <Highlighter className="h-3 w-3 absolute bottom-0 right-0 pointer-events-none text-gray-600" />
+      </div>
+
+      <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1" />
+
       {/* Image Upload */}
       <button
         onClick={handleImageClick}
@@ -232,6 +400,40 @@ export function RichNoteEditor({
   const editor = useEditor({
     extensions: [
       StarterKit,
+      TextStyle.configure({
+        HTMLAttributes: {
+          class: 'rich-text-style',
+        },
+      }).extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            fontSize: {
+              default: null,
+              parseHTML: element => element.style.fontSize.replace('px', ''),
+              renderHTML: attributes => {
+                if (!attributes.fontSize) {
+                  return {}
+                }
+                return {
+                  style: `font-size: ${attributes.fontSize}px`,
+                }
+              },
+            },
+          }
+        },
+      }),
+      Color,
+      FontFamily.configure({
+        types: ['textStyle'],
+      }),
+      Underline,
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+      }),
+      Highlight.configure({
+        multicolor: true,
+      }),
       Image.configure({
         inline: false,
         HTMLAttributes: {
@@ -410,6 +612,40 @@ export function NoteViewer({ note, className = "", showTitle = true, showMeta = 
   const editor = useEditor({
     extensions: [
       StarterKit,
+      TextStyle.configure({
+        HTMLAttributes: {
+          class: 'rich-text-style',
+        },
+      }).extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            fontSize: {
+              default: null,
+              parseHTML: element => element.style.fontSize.replace('px', ''),
+              renderHTML: attributes => {
+                if (!attributes.fontSize) {
+                  return {}
+                }
+                return {
+                  style: `font-size: ${attributes.fontSize}px`,
+                }
+              },
+            },
+          }
+        },
+      }),
+      Color,
+      FontFamily.configure({
+        types: ['textStyle'],
+      }),
+      Underline,
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+      }),
+      Highlight.configure({
+        multicolor: true,
+      }),
       Image.configure({
         inline: false,
         HTMLAttributes: {

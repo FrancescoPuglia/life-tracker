@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Area, AreaChart
 } from 'recharts';
-import { Calendar, TrendingUp, Clock, Target, Zap, Brain } from 'lucide-react';
+import { Calendar, TrendingUp, Clock, Target, Zap, Brain, Award, Trophy } from 'lucide-react';
 
 interface AnalyticsData {
   planVsActual: Array<{
@@ -31,6 +31,15 @@ interface AnalyticsData {
     correlation: number;
     significance: string;
   }>;
+  activityRankings: Array<{
+    activityName: string;
+    plannedHours: number;
+    actualHours: number;
+    discrepancy: number;
+    adherenceRate: number;
+    domain: string;
+    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
+  }>;
   weeklyReview: {
     highlights: string[];
     challenges: string[];
@@ -50,7 +59,7 @@ export default function AnalyticsDashboard({
   timeRange, 
   onTimeRangeChange 
 }: AnalyticsDashboardProps) {
-  const [selectedChart, setSelectedChart] = useState<'overview' | 'planvsactual' | 'allocation' | 'correlations'>('overview');
+  const [selectedChart, setSelectedChart] = useState<'overview' | 'planvsactual' | 'allocation' | 'rankings' | 'correlations'>('overview');
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316'];
 
@@ -284,6 +293,143 @@ export default function AnalyticsDashboard({
     );
   };
 
+  const ActivityRankings = () => {
+    if (data.activityRankings.length === 0) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Activity Rankings</h3>
+          <div className="bg-gray-50 rounded-lg p-8 text-center">
+            <Trophy className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h4 className="text-lg font-medium text-gray-600 mb-2">No Activity Data</h4>
+            <p className="text-sm text-gray-500 mb-4">
+              Complete some time blocks to see which activities you focus on most and least.
+            </p>
+            <div className="text-xs text-gray-400">
+              Rankings show planned vs actual time spent on different activities.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const mostDone = data.activityRankings.filter(a => a.rank === 'most_done').slice(0, 5);
+    const leastDone = data.activityRankings.filter(a => a.rank === 'least_done').slice(0, 5);
+    const overplanned = data.activityRankings.filter(a => a.rank === 'overplanned').slice(0, 3);
+    const underplanned = data.activityRankings.filter(a => a.rank === 'underplanned').slice(0, 3);
+
+    const getRankColor = (rank: string, positive?: boolean) => {
+      switch (rank) {
+        case 'most_done': return positive ? 'text-green-600 bg-green-50' : 'text-green-700';
+        case 'least_done': return positive ? 'text-red-600 bg-red-50' : 'text-red-700';
+        case 'overplanned': return positive ? 'text-orange-600 bg-orange-50' : 'text-orange-700';
+        case 'underplanned': return positive ? 'text-blue-600 bg-blue-50' : 'text-blue-700';
+        default: return 'text-gray-600';
+      }
+    };
+
+    const RankingCard = ({ title, activities, icon, description }: {
+      title: string;
+      activities: typeof data.activityRankings;
+      icon: React.ReactNode;
+      description: string;
+    }) => (
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center mb-3">
+          {icon}
+          <div className="ml-3">
+            <h4 className="font-semibold text-gray-900">{title}</h4>
+            <p className="text-xs text-gray-500">{description}</p>
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+          {activities.map((activity, index) => (
+            <div key={activity.activityName} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+              <div className="flex items-center space-x-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${getRankColor(activity.rank, true)}`}>
+                  {index + 1}
+                </div>
+                <div>
+                  <div className="font-medium text-sm text-gray-900">{activity.activityName}</div>
+                  <div className="text-xs text-gray-500">{activity.domain}</div>
+                </div>
+              </div>
+              
+              <div className="text-right">
+                <div className="flex space-x-2 text-xs">
+                  <span className="text-blue-600">{activity.plannedHours}h planned</span>
+                  <span className="text-green-600">{activity.actualHours}h actual</span>
+                </div>
+                <div className={`text-xs font-medium ${activity.discrepancy >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {activity.discrepancy >= 0 ? '+' : ''}{activity.discrepancy}h
+                  ({activity.adherenceRate}%)
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">🏆 Activity Performance Rankings</h3>
+          <div className="text-sm text-gray-500">
+            Planned vs Actual time analysis
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {mostDone.length > 0 && (
+            <RankingCard 
+              title="🎯 Most Completed Activities"
+              activities={mostDone}
+              icon={<Trophy className="w-5 h-5 text-green-600" />}
+              description="Activities with highest actual time invested"
+            />
+          )}
+          
+          {leastDone.length > 0 && (
+            <RankingCard 
+              title="⚠️ Least Completed Activities"
+              activities={leastDone}
+              icon={<Clock className="w-5 h-5 text-red-600" />}
+              description="Activities with low actual vs planned time"
+            />
+          )}
+          
+          {overplanned.length > 0 && (
+            <RankingCard 
+              title="📈 Overplanned Activities"
+              activities={overplanned}
+              icon={<TrendingUp className="w-5 h-5 text-orange-600" />}
+              description="You spent more time than planned"
+            />
+          )}
+          
+          {underplanned.length > 0 && (
+            <RankingCard 
+              title="📉 Underplanned Activities"
+              activities={underplanned}
+              icon={<Target className="w-5 h-5 text-blue-600" />}
+              description="You spent less time than planned"
+            />
+          )}
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <h4 className="font-semibold text-blue-800 mb-2">💡 Insights</h4>
+          <ul className="space-y-1 text-sm text-blue-700">
+            <li>• <strong>Green activities:</strong> Well executed, high actual time</li>
+            <li>• <strong>Red activities:</strong> Need attention, low completion rate</li>
+            <li>• <strong>Orange/Blue:</strong> Adjust planning - over/under estimating time</li>
+          </ul>
+        </div>
+      </div>
+    );
+  };
+
   const WeeklyReview = () => (
     <div className="space-y-6">
       <h3 className="text-lg font-semibold text-gray-900">Weekly Review</h3>
@@ -370,6 +516,50 @@ export default function AnalyticsDashboard({
         </div>
       </div>
 
+      {/* Analytics Guidance Banner */}
+      {(totalPlannedHours === 0 && totalActualHours === 0) && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-400 p-6 mx-6 mt-4 rounded-lg">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <Target className="h-6 w-6 text-blue-400" />
+            </div>
+            <div className="ml-3">
+              <h3 className="text-lg font-medium text-blue-800">
+                📊 Start Tracking to See Analytics
+              </h3>
+              <div className="mt-2 text-sm text-blue-700">
+                <p className="mb-3">Your analytics are empty because you haven't completed any time blocks yet!</p>
+                
+                <div className="bg-white bg-opacity-50 rounded-lg p-4 space-y-3">
+                  <h4 className="font-semibold text-blue-900">🎯 How to populate your analytics:</h4>
+                  <ol className="space-y-2 text-sm">
+                    <li className="flex items-center space-x-2">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                      <span>Create time blocks in the <strong>Time Planner</strong></span>
+                    </li>
+                    <li className="flex items-center space-x-2">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                      <span>Click the <span className="bg-gray-200 px-2 py-1 rounded text-xs">⭕</span> circle to mark blocks as completed <span className="bg-green-200 px-2 py-1 rounded text-xs">✅</span></span>
+                    </li>
+                    <li className="flex items-center space-x-2">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                      <span>Completed blocks will automatically appear in your analytics!</span>
+                    </li>
+                  </ol>
+                </div>
+
+                <div className="mt-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg">
+                  <p className="text-yellow-800 text-xs">
+                    <strong>💡 Pro Tip:</strong> Only completed time blocks (✅) count toward your analytics. 
+                    This follows your "ORE REALI FATTE" principle - tracking actual time spent, not just planned time.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chart Navigation */}
       <div className="border-b border-gray-200">
         <nav className="flex space-x-8 px-6">
@@ -377,6 +567,7 @@ export default function AnalyticsDashboard({
             { id: 'overview', label: 'Overview', icon: Calendar },
             { id: 'planvsactual', label: 'Plan vs Actual', icon: Target },
             { id: 'allocation', label: 'Time Allocation', icon: Clock },
+            { id: 'rankings', label: 'Activity Rankings', icon: Trophy },
             { id: 'correlations', label: 'Correlations', icon: TrendingUp },
           ].map(({ id, label, icon: Icon }) => (
             <button
@@ -400,6 +591,7 @@ export default function AnalyticsDashboard({
         {selectedChart === 'overview' && <WeeklyReview />}
         {selectedChart === 'planvsactual' && <PlanVsActualChart />}
         {selectedChart === 'allocation' && <TimeAllocationChart />}
+        {selectedChart === 'rankings' && <ActivityRankings />}
         {selectedChart === 'correlations' && <CorrelationsView />}
       </div>
     </div>

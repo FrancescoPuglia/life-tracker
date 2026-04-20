@@ -6,10 +6,9 @@ import {
 import { db } from './database';
 
 /**
- * 🎯 GOAL-CENTRIC ANALYTICS ENGINE
- * 
- * This is the BEAST that powers all goal-focused analytics.
- * Every calculation here is SURGICAL PRECISION for maximum insight.
+ * Goal-centric analytics engine.
+ * Computes time investment, ROI, completion predictions, and recommendations.
+ * All calculations are derived from real tracked data (sessions, timeblocks, key results).
  */
 export class GoalAnalyticsEngine {
   
@@ -616,43 +615,73 @@ export class GoalAnalyticsEngine {
   }
 
   private async calculateVelocityTrend(goalId: string, periods: string[]): Promise<Array<{ period: string; velocity: number }>> {
-    // Implementation would calculate velocity for each period
-    return periods.map(period => ({
-      period,
-      velocity: Math.random() * 2 // Placeholder
-    }));
+    const results = [];
+    for (const period of periods) {
+      const periodStart = new Date(period);
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 7);
+      const blocks = await this.getGoalTimeBlocks(goalId, periodStart, periodEnd);
+      const completedBlocks = blocks.filter(b => b.status === 'completed');
+      const hours = completedBlocks.reduce((sum, b) => {
+        const start = b.actualStartTime || b.startTime;
+        const end = b.actualEndTime || b.endTime;
+        return sum + (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      }, 0);
+      results.push({ period, velocity: hours });
+    }
+    return results;
   }
 
   private async calculateConsistencyTrend(goalId: string, periods: string[]): Promise<Array<{ period: string; consistency: number }>> {
-    // Implementation would calculate consistency score for each period
-    return periods.map(period => ({
-      period,
-      consistency: Math.random() // Placeholder
-    }));
+    const results = [];
+    for (const period of periods) {
+      const periodStart = new Date(period);
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 7);
+      const blocks = await this.getGoalTimeBlocks(goalId, periodStart, periodEnd);
+      const daysWithActivity = new Set(blocks.filter(b => b.status === 'completed').map(b => new Date(b.startTime).toDateString())).size;
+      results.push({ period, consistency: daysWithActivity / 7 });
+    }
+    return results;
   }
 
   private async calculateQualityTrend(goalId: string, periods: string[]): Promise<Array<{ period: string; quality: number }>> {
-    // Implementation would calculate quality score based on goal contribution
-    return periods.map(period => ({
-      period,
-      quality: Math.random() // Placeholder
-    }));
+    const results = [];
+    for (const period of periods) {
+      const periodStart = new Date(period);
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 7);
+      const sessions = await this.getGoalSessions(goalId, periodStart, periodEnd);
+      const avgFocus = sessions.length > 0 ? sessions.reduce((sum, s) => sum + (s.focus || 5), 0) / sessions.length / 10 : 0;
+      results.push({ period, quality: avgFocus });
+    }
+    return results;
   }
 
   private async calculateMotivationTrend(goalId: string, periods: string[]): Promise<Array<{ period: string; motivation: number }>> {
-    // Implementation would calculate motivation score based on mood/energy
-    return periods.map(period => ({
-      period,
-      motivation: Math.random() // Placeholder
-    }));
+    const results = [];
+    for (const period of periods) {
+      const periodStart = new Date(period);
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 7);
+      const sessions = await this.getGoalSessions(goalId, periodStart, periodEnd);
+      const avgMood = sessions.length > 0 ? sessions.reduce((sum, s) => sum + (s.mood || 5), 0) / sessions.length / 10 : 0;
+      results.push({ period, motivation: avgMood });
+    }
+    return results;
   }
 
   private async calculateBlockerTrend(goalId: string, periods: string[]): Promise<Array<{ period: string; blockers: string[] }>> {
-    // Implementation would aggregate blockers for each period
-    return periods.map(period => ({
-      period,
-      blockers: ['sample blocker'] // Placeholder
-    }));
+    const results = [];
+    for (const period of periods) {
+      const periodStart = new Date(period);
+      const periodEnd = new Date(periodStart);
+      periodEnd.setDate(periodEnd.getDate() + 7);
+      const sessions = await this.getGoalSessions(goalId, periodStart, periodEnd);
+      const blockers = sessions.flatMap(s => s.blockers || []).filter(Boolean);
+      results.push({ period, blockers: [...new Set(blockers)] });
+    }
+    return results;
   }
 
   // ===== IMPLEMENTATION HELPERS =====
@@ -692,12 +721,12 @@ export class GoalAnalyticsEngine {
       
       const weekSessions = sessions.filter(s => s.startTime >= weekStart && s.startTime < weekEnd);
       const hours = weekSessions.reduce((sum, s) => sum + ((s.duration || 0) / 3600), 0);
-      const efficiency = weekSessions.length > 0 ? Math.random() * 100 : 0; // Placeholder calculation
+      const avgFocus = weekSessions.length > 0 ? weekSessions.reduce((sum, s) => sum + (s.focus || 5), 0) / weekSessions.length * 10 : 0;
       
       weeklyData.push({
         week: weekStart.toISOString().split('T')[0],
         hours,
-        efficiency
+        efficiency: avgFocus
       });
     }
     
@@ -722,7 +751,7 @@ export class GoalAnalyticsEngine {
       monthlyData.push({
         month: monthStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
         hours,
-        progress: Math.random() * 20 // Placeholder
+        progress: hours // Use actual hours as progress indicator
       });
     }
     

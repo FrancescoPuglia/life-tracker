@@ -197,6 +197,21 @@ interface BadgeSystemProps {
   onBadgeUnlocked: (badge: Badge) => void;
 }
 
+const BADGE_STORAGE_KEY = 'life_tracker_unlocked_badges';
+
+function loadPersistedBadges(): string[] {
+  try {
+    const stored = localStorage.getItem(BADGE_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch { return []; }
+}
+
+function persistBadges(badgeIds: string[]) {
+  try {
+    localStorage.setItem(BADGE_STORAGE_KEY, JSON.stringify(badgeIds));
+  } catch { /* localStorage unavailable */ }
+}
+
 export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemProps) {
   const [unlockedBadges, setUnlockedBadges] = useState<Badge[]>([]);
   const [newlyUnlocked, setNewlyUnlocked] = useState<Badge[]>([]);
@@ -266,23 +281,26 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
   };
 
   useEffect(() => {
-    const previousUnlocked = unlockedBadges.map(b => b.id);
-    const nowUnlocked = ACHIEVEMENT_BADGES.filter(checkBadgeRequirements).map(badge => ({
-      ...badge,
-      unlockedAt: new Date()
-    }));
+    const persistedIds = loadPersistedBadges();
+    const currentlyMet = ACHIEVEMENT_BADGES.filter(checkBadgeRequirements);
 
-    const newBadges = nowUnlocked.filter(badge => !previousUnlocked.includes(badge.id));
-    
+    // Merge: badges met now + badges previously persisted
+    const allUnlockedIds = new Set([...persistedIds, ...currentlyMet.map(b => b.id)]);
+    const nowUnlocked = ACHIEVEMENT_BADGES
+      .filter(b => allUnlockedIds.has(b.id))
+      .map(badge => ({ ...badge, unlockedAt: new Date() }));
+
+    const previousIds = unlockedBadges.map(b => b.id);
+    const newBadges = nowUnlocked.filter(badge => !previousIds.includes(badge.id));
+
     if (newBadges.length > 0) {
       setNewlyUnlocked(newBadges);
       newBadges.forEach(onBadgeUnlocked);
-      
-      // Clear newly unlocked after 5 seconds
       setTimeout(() => setNewlyUnlocked([]), 5000);
     }
 
     setUnlockedBadges(nowUnlocked);
+    persistBadges(Array.from(allUnlockedIds));
   }, [userStats]);
 
   const getRarityColor = (rarity: Badge['rarity']) => {

@@ -45,6 +45,148 @@ interface BlockRendererProps {
 }
 
 // ============================================================================
+// FLOATING TOOLBAR FOR TEXT SELECTION
+// ============================================================================
+
+interface FloatingToolbarProps {
+  position: { x: number; y: number };
+  onFormatText: (format: string, value?: string) => void;
+  onClose: () => void;
+}
+
+function FloatingToolbar({ position, onFormatText, onClose }: FloatingToolbarProps) {
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.toString().length === 0) {
+        onClose();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('selectionchange', handleSelectionChange);
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={toolbarRef}
+      className="fixed z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl flex items-center gap-1 px-2 py-1"
+      style={{
+        left: Math.max(10, Math.min(window.innerWidth - 350, position.x - 175)),
+        top: Math.max(10, position.y - 50),
+      }}
+    >
+      {/* Bold */}
+      <button
+        onClick={() => onFormatText('bold')}
+        className="p-1.5 hover:bg-gray-700 rounded text-white text-sm font-bold"
+        title="Bold"
+      >
+        B
+      </button>
+
+      {/* Italic */}
+      <button
+        onClick={() => onFormatText('italic')}
+        className="p-1.5 hover:bg-gray-700 rounded text-white text-sm italic"
+        title="Italic"
+      >
+        I
+      </button>
+
+      {/* Underline */}
+      <button
+        onClick={() => onFormatText('underline')}
+        className="p-1.5 hover:bg-gray-700 rounded text-white text-sm underline"
+        title="Underline"
+      >
+        U
+      </button>
+
+      {/* Strikethrough */}
+      <button
+        onClick={() => onFormatText('strikethrough')}
+        className="p-1.5 hover:bg-gray-700 rounded text-white text-sm line-through"
+        title="Strikethrough"
+      >
+        S
+      </button>
+
+      <div className="w-px h-4 bg-gray-600 mx-1"></div>
+
+      {/* Code */}
+      <button
+        onClick={() => onFormatText('code')}
+        className="p-1.5 hover:bg-gray-700 rounded text-pink-400 text-sm font-mono"
+        title="Code"
+      >
+        {'</>'}
+      </button>
+
+      <div className="w-px h-4 bg-gray-600 mx-1"></div>
+
+      {/* Text Color */}
+      <input
+        type="color"
+        onChange={(e) => onFormatText('color', e.target.value)}
+        className="w-6 h-6 border border-gray-600 rounded cursor-pointer bg-transparent"
+        title="Text Color"
+        defaultValue="#ffffff"
+      />
+
+      {/* Background Color */}
+      <input
+        type="color"
+        onChange={(e) => onFormatText('backgroundColor', e.target.value)}
+        className="w-6 h-6 border border-gray-600 rounded cursor-pointer bg-transparent"
+        title="Highlight Color"
+        defaultValue="#ffff00"
+      />
+
+      <div className="w-px h-4 bg-gray-600 mx-1"></div>
+
+      {/* Font Size */}
+      <select
+        onChange={(e) => onFormatText('fontSize', e.target.value)}
+        className="text-xs bg-gray-700 text-white border border-gray-600 rounded px-1 py-0.5"
+        title="Font Size"
+        defaultValue="16"
+      >
+        <option value="12">12px</option>
+        <option value="14">14px</option>
+        <option value="16">16px</option>
+        <option value="18">18px</option>
+        <option value="20">20px</option>
+        <option value="24">24px</option>
+        <option value="32">32px</option>
+      </select>
+
+      {/* Clear Format */}
+      <button
+        onClick={() => onFormatText('clear')}
+        className="p-1.5 hover:bg-gray-700 rounded text-gray-400 text-xs"
+        title="Clear Formatting"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
 // RICH TEXT RENDERER - FIXED KEY HANDLING
 // ============================================================================
 
@@ -67,6 +209,7 @@ function RichTextRenderer({ content }: { content: RichText[] }) {
         if (item.annotations?.strikethrough) className += ' line-through';
         if (item.annotations?.color) styles.color = item.annotations.color;
         if (item.annotations?.backgroundColor) styles.backgroundColor = item.annotations.backgroundColor;
+        if (item.annotations?.fontSize) styles.fontSize = `${item.annotations.fontSize}px`;
         
         if (item.annotations?.code) {
           return (
@@ -119,9 +262,14 @@ interface EditableTextProps {
   onSlash?: (position: { x: number; y: number }) => void;
   readOnly?: boolean;
   autoFocus?: boolean;
+  onTextSelection?: (position: { x: number; y: number }, selectedText: string) => void;
 }
 
-function EditableText({
+interface EditableTextRef {
+  applyFormatting: (format: string, value?: string) => void;
+}
+
+const EditableText = React.forwardRef<EditableTextRef, EditableTextProps>(function EditableText({
   content,
   onChange,
   placeholder = 'Scrivi qualcosa...',
@@ -132,7 +280,8 @@ function EditableText({
   onSlash,
   readOnly = false,
   autoFocus = false,
-}: EditableTextProps) {
+  onTextSelection,
+}, forwardedRef) {
   const ref = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const lastExternalContent = useRef<string>('');
@@ -212,6 +361,130 @@ function EditableText({
       }
     }
   }, [multiline, onEnter, onBackspace, onSlash]);
+
+  // Handle text selection for floating toolbar
+  const handleMouseUp = useCallback(() => {
+    console.log('🖱️ FLOATING TOOLBAR: Mouse up detected');
+    
+    if (!onTextSelection) {
+      console.log('❌ FLOATING TOOLBAR: No onTextSelection handler');
+      return;
+    }
+    
+    // Delay per permettere alla selezione di stabilizzarsi
+    setTimeout(() => {
+      const selection = window.getSelection();
+      console.log('📝 FLOATING TOOLBAR: Selection found:', selection?.toString());
+      
+      if (selection && selection.rangeCount > 0 && selection.toString().length > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        // Considera scroll offset
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        
+        const position = {
+          x: rect.left + rect.width / 2 + scrollX, 
+          y: rect.top + scrollY
+        };
+        
+        console.log('✅ FLOATING TOOLBAR: Showing toolbar at position:', position);
+        onTextSelection(position, selection.toString());
+      } else {
+        console.log('❌ FLOATING TOOLBAR: No valid selection found');
+      }
+    }, 50); // Piccolo delay per stabilizzare la selezione
+  }, [onTextSelection]);
+
+  // Apply formatting to selected text
+  const applyFormatting = useCallback((format: string, value?: string) => {
+    const selection = window.getSelection();
+    if (!selection || selection.toString().length === 0) return;
+
+    const selectedText = selection.toString();
+    const range = selection.getRangeAt(0);
+    
+    // Find the selected text within our content
+    const allText = content.map(c => c.text).join('');
+    const startOffset = allText.indexOf(selectedText);
+    
+    if (startOffset === -1) return;
+
+    // Create new content with formatting applied
+    const newContent: RichText[] = [];
+    let currentOffset = 0;
+
+    content.forEach(richText => {
+      const textStart = currentOffset;
+      const textEnd = currentOffset + richText.text.length;
+      const selectionStart = startOffset;
+      const selectionEnd = startOffset + selectedText.length;
+
+      if (textEnd <= selectionStart || textStart >= selectionEnd) {
+        // Text doesn't overlap with selection
+        newContent.push(richText);
+      } else {
+        // Text overlaps with selection - split it
+        const beforeSelection = richText.text.substring(0, Math.max(0, selectionStart - textStart));
+        const inSelection = richText.text.substring(
+          Math.max(0, selectionStart - textStart),
+          Math.min(richText.text.length, selectionEnd - textStart)
+        );
+        const afterSelection = richText.text.substring(Math.min(richText.text.length, selectionEnd - textStart));
+
+        // Before selection (keep original formatting)
+        if (beforeSelection) {
+          newContent.push({ ...richText, text: beforeSelection });
+        }
+
+        // Selection (apply new formatting)
+        if (inSelection) {
+          const newAnnotations = { ...richText.annotations };
+          
+          if (format === 'clear') {
+            // Clear all formatting
+            newContent.push({ text: inSelection, annotations: {} });
+          } else if (format === 'color') {
+            newAnnotations.color = value;
+            newContent.push({ text: inSelection, annotations: newAnnotations });
+          } else if (format === 'backgroundColor') {
+            newAnnotations.backgroundColor = value;
+            newContent.push({ text: inSelection, annotations: newAnnotations });
+          } else if (format === 'fontSize') {
+            newAnnotations.fontSize = value;
+            newContent.push({ text: inSelection, annotations: newAnnotations });
+          } else {
+            // Toggle boolean formats (bold, italic, etc.)
+            const currentValue = newAnnotations[format as keyof typeof newAnnotations];
+            (newAnnotations as any)[format] = !currentValue;
+            newContent.push({ text: inSelection, annotations: newAnnotations });
+          }
+        }
+
+        // After selection (keep original formatting)
+        if (afterSelection) {
+          newContent.push({ ...richText, text: afterSelection });
+        }
+      }
+
+      currentOffset = textEnd;
+    });
+
+    onChange(newContent);
+    
+    // Clear selection after formatting
+    setTimeout(() => {
+      if (window.getSelection()) {
+        window.getSelection()?.removeAllRanges();
+      }
+    }, 0);
+  }, [content, onChange]);
+
+  // Expose formatting function to parent via useImperativeHandle
+  React.useImperativeHandle(forwardedRef, () => ({
+    applyFormatting
+  }), [applyFormatting]);
   
   if (readOnly) {
     return (
@@ -230,12 +503,13 @@ function EditableText({
       onKeyDown={handleKeyDown}
       onFocus={() => setIsFocused(true)}
       onBlur={() => setIsFocused(false)}
+      onMouseUp={handleMouseUp}
       className={`outline-none ${className} ${!plainText && !isFocused ? 'text-gray-500' : ''}`}
       data-placeholder={placeholder}
       style={{ minHeight: '1.5em' }}
     />
   );
-}
+});
 
 // ============================================================================
 // BLOCK MENU - FIXED WITH CLICK OUTSIDE
@@ -399,6 +673,10 @@ export function BlockRenderer({
   isLast,
 }: BlockRendererProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const [showFloatingToolbar, setShowFloatingToolbar] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 });
+  const [selectedText, setSelectedText] = useState('');
+  const editableTextRef = useRef<EditableTextRef>(null);
   
   const {
     attributes,
@@ -415,11 +693,39 @@ export function BlockRenderer({
     opacity: isDragging ? 0.5 : 1,
   };
 
+  // Handle text selection
+  const handleTextSelection = useCallback((position: { x: number; y: number }, text: string) => {
+    console.log('🎯 BLOCK RENDERER: Text selection handler called');
+    console.log('📍 Position:', position);
+    console.log('📝 Selected text:', text);
+    console.log('🔒 Read only:', readOnly);
+    
+    if (readOnly || !text.trim()) {
+      console.log('❌ BLOCK RENDERER: Ignoring selection - readOnly or empty text');
+      return;
+    }
+    
+    setToolbarPosition(position);
+    setSelectedText(text);
+    setShowFloatingToolbar(true);
+    
+    console.log('✅ BLOCK RENDERER: Floating toolbar should be visible now');
+  }, [readOnly]);
+
+  // Handle formatting
+  const handleFormatText = useCallback((format: string, value?: string) => {
+    if (editableTextRef.current) {
+      editableTextRef.current.applyFormatting(format, value);
+    }
+    setShowFloatingToolbar(false);
+  }, []);
+
   const renderBlockContent = () => {
     switch (block.type) {
       case 'paragraph':
         return (
           <EditableText
+            ref={editableTextRef}
             content={(block as ParagraphBlock).content}
             onChange={(content) => onUpdate({ content } as Partial<ParagraphBlock>)}
             placeholder="Scrivi qualcosa, o premi '/' per i comandi..."
@@ -427,6 +733,7 @@ export function BlockRenderer({
             onEnter={() => onAddAfter()}
             onBackspace={onDelete}
             onSlash={onSlashCommand}
+            onTextSelection={handleTextSelection}
             readOnly={readOnly}
             autoFocus={isFocused}
           />
@@ -442,6 +749,7 @@ export function BlockRenderer({
             onEnter={() => onAddAfter()}
             onBackspace={onDelete}
             onSlash={onSlashCommand}
+            onTextSelection={handleTextSelection}
             readOnly={readOnly}
             autoFocus={isFocused}
           />
@@ -457,6 +765,7 @@ export function BlockRenderer({
             onEnter={() => onAddAfter()}
             onBackspace={onDelete}
             onSlash={onSlashCommand}
+            onTextSelection={handleTextSelection}
             readOnly={readOnly}
             autoFocus={isFocused}
           />
@@ -472,6 +781,7 @@ export function BlockRenderer({
             onEnter={() => onAddAfter()}
             onBackspace={onDelete}
             onSlash={onSlashCommand}
+            onTextSelection={handleTextSelection}
             readOnly={readOnly}
             autoFocus={isFocused}
           />
@@ -721,6 +1031,7 @@ export function BlockRenderer({
               placeholder="Citazione..."
               className="text-gray-300 italic"
               multiline
+              onTextSelection={handleTextSelection}
               readOnly={readOnly}
               autoFocus={isFocused}
             />
@@ -1066,49 +1377,63 @@ export function BlockRenderer({
   };
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`group relative flex items-start gap-2 py-1 px-2 -mx-2 rounded-lg transition-colors
-                ${isSelected ? 'bg-gray-800/50' : ''}
-                ${isHovered && !readOnly ? 'bg-gray-800/30' : ''}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={onSelect}
-    >
-      {!readOnly && (
-        <div className={`flex items-center gap-1 pt-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
-          <button
-            {...attributes}
-            {...listeners}
-            className="p-1 cursor-grab hover:bg-gray-700 rounded transition-colors"
-          >
-            <GripVertical className="w-4 h-4 text-gray-500" />
-          </button>
-          
-          <button
-            onClick={(e) => { e.stopPropagation(); onAddAfter(); }}
-            className="p-1 hover:bg-gray-700 rounded transition-colors"
-          >
-            <Plus className="w-4 h-4 text-gray-500" />
-          </button>
-          
-          <BlockMenu
-            onDelete={onDelete}
-            onDuplicate={onDuplicate}
-            onMoveUp={onMoveUp}
-            onMoveDown={onMoveDown}
-            onTransform={onTransform}
-            isFirst={isFirst}
-            isLast={isLast}
-          />
+    <>
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={`group relative flex items-start gap-2 py-1 px-2 -mx-2 rounded-lg transition-colors
+                  ${isSelected ? 'bg-gray-800/50' : ''}
+                  ${isHovered && !readOnly ? 'bg-gray-800/30' : ''}`}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onClick={onSelect}
+      >
+        {!readOnly && (
+          <div className={`flex items-center gap-1 pt-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+            <button
+              {...attributes}
+              {...listeners}
+              className="p-1 cursor-grab hover:bg-gray-700 rounded transition-colors"
+            >
+              <GripVertical className="w-4 h-4 text-gray-500" />
+            </button>
+            
+            <button
+              onClick={(e) => { e.stopPropagation(); onAddAfter(); }}
+              className="p-1 hover:bg-gray-700 rounded transition-colors"
+            >
+              <Plus className="w-4 h-4 text-gray-500" />
+            </button>
+            
+            <BlockMenu
+              onDelete={onDelete}
+              onDuplicate={onDuplicate}
+              onMoveUp={onMoveUp}
+              onMoveDown={onMoveDown}
+              onTransform={onTransform}
+              isFirst={isFirst}
+              isLast={isLast}
+            />
+          </div>
+        )}
+        
+        <div className="flex-1 min-w-0" onClick={onFocus}>
+          {renderBlockContent()}
         </div>
-      )}
-      
-      <div className="flex-1 min-w-0" onClick={onFocus}>
-        {renderBlockContent()}
       </div>
-    </div>
+      
+      {/* Floating Toolbar for Text Formatting */}
+      {showFloatingToolbar && !readOnly && (
+        <>
+          {console.log('🎨 RENDERING FLOATING TOOLBAR:', { showFloatingToolbar, readOnly, position: toolbarPosition })}
+          <FloatingToolbar
+            position={toolbarPosition}
+            onFormatText={handleFormatText}
+            onClose={() => setShowFloatingToolbar(false)}
+          />
+        </>
+      )}
+    </>
   );
 }
 

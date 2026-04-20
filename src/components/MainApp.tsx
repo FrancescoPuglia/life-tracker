@@ -1,39 +1,47 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Session, TimeBlock, AnalyticsData } from '@/types';
 import { SessionManager } from '@/utils/sessionManager';
 import { db } from '@/lib/database';
 import { useAuthContext } from '@/providers/AuthProvider';
 import { useDataContext } from '@/providers/DataProvider';
 
+// Always-loaded components (small, needed immediately)
 import NowBar from '@/components/NowBar';
 import KPIDashboard from '@/components/KPIDashboard';
-import TimeBlockPlanner from '@/components/TimeBlockPlanner';
-import AnalyticsDashboard from '@/components/AnalyticsDashboard';
-import GoalAnalyticsDashboard from '@/components/GoalAnalyticsDashboard';
-import HabitsTracker from '@/components/HabitsTracker';
-import OKRManager from '@/components/OKRManager';
-import DailyMotivation from '@/components/DailyMotivation';
-import BadgeSystem from '@/components/BadgeSystem';
 import AuthModal from '@/components/AuthModal';
 import SyncStatusIndicator from '@/components/SyncStatus';
-import GamingEffects from '@/components/GamingEffects';
-import AIInputBarV2 from '@/components/ai/AIInputBarV2';
-import SmartScheduler from '@/components/SmartScheduler';
-import RealTimeAdaptation from '@/components/RealTimeAdaptation';
-import VisionBoardEnhanced from '@/components/VisionBoardEnhanced';
+import DailyMotivation from '@/components/DailyMotivation';
 import DailyLoginStreakSystem from '@/components/DailyLoginStreakSystem';
+import StreakCounter from '@/components/StreakCounter';
+import GamingEffects from '@/components/GamingEffects';
 import DopamineRewardSystem from '@/components/DopamineRewardSystem';
 import StrategicDopamineSystem from '@/components/StrategicDopamineSystem';
-import NotesPage from '@/components/NotesPage';
 import { audioManager } from '@/lib/audioManager';
+import { calculateStreak, StreakData } from '@/lib/streakCalculator';
+
+// Lazy-loaded heavy components (loaded on demand by tab)
+// This reduces initial bundle size by ~400KB
+const TimeBlockPlanner = lazy(() => import('@/components/TimeBlockPlanner'));
+const AnalyticsDashboard = lazy(() => import('@/components/AnalyticsDashboard'));
+const GoalAnalyticsDashboard = lazy(() => import('@/components/GoalAnalyticsDashboard'));
+const HabitsTracker = lazy(() => import('@/components/HabitsTracker'));
+const OKRManager = lazy(() => import('@/components/OKRManager'));
+const BadgeSystem = lazy(() => import('@/components/BadgeSystem'));
+const AIInputBarV2 = lazy(() => import('@/components/ai/AIInputBarV2'));
+const SmartScheduler = lazy(() => import('@/components/SmartScheduler'));
+const RealTimeAdaptation = lazy(() => import('@/components/RealTimeAdaptation'));
+const VisionBoardEnhanced = lazy(() => import('@/components/VisionBoardEnhanced'));
+const NotesPage = lazy(() => import('@/components/NotesPage'));
+const EventsCalendar = lazy(() => import('@/components/EventsCalendar'));
+const HeroWall = lazy(() => import('@/components/HeroWall'));
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events';
 
 interface MainAppProps {
   buildId: string;
@@ -52,8 +60,9 @@ export default function MainApp({ buildId }: MainAppProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState<ActiveTab>('planner');
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
-  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('7d');
+  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('90d'); // Changed to 90 days to capture all data
   const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => audioManager.isEnabled());
   
   // Session state
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
@@ -62,7 +71,16 @@ export default function MainApp({ buildId }: MainAppProps) {
   // Analytics (loaded separately, after main data)
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
-  
+
+  // Streak data (real activity-based momentum tracking)
+  const [streakData, setStreakData] = useState<StreakData>({
+    currentStreak: 0,
+    bestStreak: 0,
+    lastActivityDate: null,
+    totalActiveDays: 0,
+    streakHistory: []
+  });
+
   // User stats for badges
   const [userStats, setUserStats] = useState({
     maxStreak: 0,
@@ -117,7 +135,7 @@ export default function MainApp({ buildId }: MainAppProps) {
   // Load analytics (lazy, after mount)
   useEffect(() => {
     if (data.status !== 'ready') return;
-    
+
     const loadAnalytics = async () => {
       try {
         setAnalyticsLoading(true);
@@ -131,24 +149,96 @@ export default function MainApp({ buildId }: MainAppProps) {
           db.generateWeeklyReview(data.userId),
         ]);
 
+        const activityRankings: AnalyticsData['activityRankings'] = [];
+
         setAnalyticsData({
           planVsActual,
           timeAllocation,
           focusTrend,
           correlations,
+          activityRankings,
           weeklyReview,
         });
       } catch (error) {
-        console.error('Analytics loading failed:', error);
+        console.error('❌ Analytics loading failed:', error);
       } finally {
         setAnalyticsLoading(false);
       }
     };
-    
+
     // Delay analytics load to not block main thread
     const timeout = setTimeout(loadAnalytics, 100);
     return () => clearTimeout(timeout);
   }, [timeRange, data.userId, data.status]);
+
+  // Compute real user stats from actual data for badges
+  useEffect(() => {
+    if (data.status !== 'ready') return;
+
+    const completedBlocks = data.timeBlocks.filter(b => b.status === 'completed' && !b.deleted);
+    const totalFocusMinutes = completedBlocks.reduce((sum, b) => {
+      const start = b.actualStartTime || b.startTime;
+      const end = b.actualEndTime || b.endTime;
+      return sum + (end.getTime() - start.getTime()) / (1000 * 60);
+    }, 0);
+
+    const activeDays = new Set(completedBlocks.map(b => new Date(b.startTime).toDateString()));
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const weeklyFocusMinutes = completedBlocks
+      .filter(b => new Date(b.startTime) >= oneWeekAgo)
+      .reduce((sum, b) => {
+        const start = b.actualStartTime || b.startTime;
+        const end = b.actualEndTime || b.endTime;
+        return sum + (end.getTime() - start.getTime()) / (1000 * 60);
+      }, 0);
+
+    const earlyBlocks = completedBlocks.filter(b => new Date(b.startTime).getHours() < 8);
+    const eveningBlocks = completedBlocks.filter(b => new Date(b.startTime).getHours() >= 20);
+
+    setUserStats(prev => ({
+      maxStreak: Math.max(prev.maxStreak, streakData.bestStreak),
+      totalFocusMinutes: Math.round(totalFocusMinutes),
+      goalsCompleted: data.goals.filter(g => g.status === 'completed').length,
+      goalsCreated: data.goals.length,
+      totalSessions: completedBlocks.length,
+      timeBlocksCreated: data.timeBlocks.filter(b => !b.deleted).length,
+      daysTracked: activeDays.size,
+      earlySessionsCount: earlyBlocks.length,
+      eveningSessionsCount: eveningBlocks.length,
+      weeklyFocusMinutes: Math.round(weeklyFocusMinutes),
+    }));
+  }, [data.status, data.timeBlocks, data.goals, streakData.bestStreak]);
+
+  // Calculate streak from real activity data
+  useEffect(() => {
+    if (data.status !== 'ready') return;
+
+    const calculateActivityStreak = () => {
+      try {
+        const completedTasks = data.tasks.filter(t => t.completedAt && !t.deleted);
+        const streak = calculateStreak(
+          data.timeBlocks,
+          data.habitLogs,
+          completedTasks
+        );
+        setStreakData(streak);
+
+        // Sync maxStreak to userStats for badges
+        if (streak.bestStreak > userStats.maxStreak) {
+          setUserStats(prev => ({ ...prev, maxStreak: streak.bestStreak }));
+        }
+      } catch (error) {
+        console.error('Streak calculation failed:', error);
+      }
+    };
+
+    // Calculate immediately and refresh periodically
+    calculateActivityStreak();
+    const interval = setInterval(calculateActivityStreak, 60000); // Every minute
+
+    return () => clearInterval(interval);
+  }, [data.status, data.timeBlocks.length, data.habitLogs.length, data.tasks.length]);
 
   // Init audio (lazy)
   useEffect(() => {
@@ -221,6 +311,7 @@ export default function MainApp({ buildId }: MainAppProps) {
     timeAllocation: [],
     focusTrend: [],
     correlations: [],
+    activityRankings: [], // Add missing property
     weeklyReview: {
       highlights: ['Loading...'],
       challenges: ['Loading...'],
@@ -276,6 +367,18 @@ export default function MainApp({ buildId }: MainAppProps) {
                 </div>
                 <button
                   onClick={() => {
+                    const next = !soundEnabled;
+                    setSoundEnabled(next);
+                    audioManager.setEnabled(next);
+                    if (next) audioManager.buttonFeedback();
+                  }}
+                  className="text-lg px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                  title={soundEnabled ? 'Mute sounds' : 'Enable sounds'}
+                >
+                  {soundEnabled ? '🔊' : '🔇'}
+                </button>
+                <button
+                  onClick={() => {
                     signOut();
                     audioManager.buttonFeedback();
                   }}
@@ -307,7 +410,7 @@ export default function MainApp({ buildId }: MainAppProps) {
             {/* Left Sidebar */}
             <div className="sidebar-container space-y-6">
               {/* Daily Login Streak System */}
-              <DailyLoginStreakSystem 
+              <DailyLoginStreakSystem
                 showCompact={true}
                 className="w-full"
                 onStreakUpdate={(streak) => {
@@ -315,14 +418,17 @@ export default function MainApp({ buildId }: MainAppProps) {
                   if (typeof window !== 'undefined' && (window as any).strategicDopamine) {
                     // Daily login reward is handled automatically by StrategicDopamineSystem
                   }
-                  
+
                   // Additional streak milestones (3, 7, 30 days)
                   if (typeof window !== 'undefined' && (window as any).dopamineSystem && streak.currentStreak > 1) {
                     (window as any).dopamineSystem.triggerStreakReward(streak.currentStreak);
                   }
                 }}
               />
-              
+
+              {/* Activity Streak Counter - Real momentum tracking */}
+              <StreakCounter streak={streakData} compact={true} />
+
               {/* AI Assistant */}
               <div className="sidebar-card card-elevated card-body hover-lift transition-smooth">
                 <div className="mb-4">
@@ -363,6 +469,11 @@ export default function MainApp({ buildId }: MainAppProps) {
                 </div>
               </div>
 
+              {/* Hero Wall - Daily Motivation */}
+              <Suspense fallback={null}>
+                <HeroWall />
+              </Suspense>
+
               {/* Module Navigation */}
               <div className="gaming-card">
                 <div className="p-4 border-b border-gray-200/50">
@@ -383,6 +494,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                       { id: 'vision-board', label: 'Vision Board', icon: '✧', description: 'Manifest dreams', color: 'from-pink-400 to-purple-600' },
                       { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data', color: 'from-cyan-400 to-cyan-600' },
                       { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights', color: 'from-teal-400 to-teal-600' },
+                      { id: 'events', label: 'Eventi', icon: '📆', description: 'Calendario eventi', color: 'from-rose-400 to-rose-600' },
                       { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones', color: 'from-amber-400 to-amber-600' },
                     ].map(({ id, label, icon, description, color }) => (
                       <button
@@ -439,6 +551,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'vision-board' && '✧ Vision Board'}
                   {activeTab === 'analytics' && '📊 Analytics Dashboard'}
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
+                  {activeTab === 'events' && '📆 Eventi Importanti'}
                   {activeTab === 'badges' && '🏆 Achievements'}
                   <div className="achievement-badge ml-auto">ACTIVE</div>
                 </h2>
@@ -604,8 +717,12 @@ export default function MainApp({ buildId }: MainAppProps) {
                   />
                 )}
 
+                {activeTab === 'events' && (
+                  <EventsCalendar goals={data.goals} />
+                )}
+
                 {activeTab === 'vision-board' && (
-                  <VisionBoardEnhanced 
+                  <VisionBoardEnhanced
                     onBack={() => setActiveTab('planner')}
                   />
                 )}

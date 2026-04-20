@@ -1,5 +1,5 @@
 // 🧠 MICRO COACH - Pattern-Based Performance Optimization
-// MODALITÀ PSICOPATICO CERTOSINO 🔥🔥🔥🔥🔥
+// Micro Coach Engine
 
 import {
   MicroCoach, CoachingInsight, PatternDetection, UserAnalysisData, PerformanceMetrics

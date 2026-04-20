@@ -1,7 +1,7 @@
 'use client';
 
 // 🔍 SECOND BRAIN CHAT - Conversational AI Interface
-// MODALITÀ PSICOPATICO SUPREMO 🧠🔥🔥🔥🔥🔥
+
 
 import { useState, useEffect, useRef } from 'react';
 import { secondBrain } from '@/lib/secondBrain';
@@ -510,17 +510,86 @@ What would you like to know about your productivity journey?`,
 
       {/* ⌨️ INPUT AREA */}
       <div className="p-4 border-t border-gray-700">
-        <div className="flex space-x-3">
-          <input
-            ref={inputRef}
-            type="text"
-            value={currentInput}
-            onChange={(e) => setCurrentInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask me anything about your productivity data..."
-            className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-cyan-400"
-            disabled={isProcessing}
-          />
+        <div className="flex flex-col space-y-3">
+          {/* Advanced Rich Text Input */}
+          <div className="flex-1 bg-gray-900 border border-gray-600 rounded-lg overflow-hidden">
+            {/* Formatting Toolbar */}
+            <div className="flex items-center space-x-2 p-2 border-b border-gray-600 bg-gray-800">
+              <button
+                onClick={() => document.execCommand('bold')}
+                className="p-1 rounded hover:bg-gray-700 text-white"
+                title="Bold"
+              >
+                <strong>B</strong>
+              </button>
+              <button
+                onClick={() => document.execCommand('italic')}
+                className="p-1 rounded hover:bg-gray-700 text-white"
+                title="Italic"
+              >
+                <em>I</em>
+              </button>
+              <button
+                onClick={() => document.execCommand('underline')}
+                className="p-1 rounded hover:bg-gray-700 text-white"
+                title="Underline"
+              >
+                <u>U</u>
+              </button>
+              
+              <div className="w-px h-4 bg-gray-600"></div>
+              
+              {/* Font Size */}
+              <select
+                onChange={(e) => document.execCommand('fontSize', false, e.target.value)}
+                className="text-xs bg-gray-700 text-white border border-gray-600 rounded px-1 py-0.5"
+                title="Font Size"
+              >
+                <option value="1">Small</option>
+                <option value="3" selected>Normal</option>
+                <option value="5">Large</option>
+                <option value="7">XLarge</option>
+              </select>
+              
+              {/* Text Color */}
+              <input
+                type="color"
+                onChange={(e) => document.execCommand('foreColor', false, e.target.value)}
+                className="w-6 h-6 border border-gray-600 rounded cursor-pointer"
+                title="Text Color"
+                defaultValue="#ffffff"
+              />
+              
+              {/* Background Color */}
+              <input
+                type="color"
+                onChange={(e) => document.execCommand('hiliteColor', false, e.target.value)}
+                className="w-6 h-6 border border-gray-600 rounded cursor-pointer"
+                title="Highlight Color"
+                defaultValue="#ffff00"
+              />
+            </div>
+            
+            {/* Rich Text Input */}
+            <div
+              contentEditable
+              ref={inputRef as any}
+              onInput={(e) => setCurrentInput((e.target as HTMLDivElement).innerText)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              className="min-h-[80px] max-h-[200px] overflow-y-auto px-4 py-2 text-white placeholder-gray-400 focus:outline-none bg-transparent"
+              style={{ color: 'white' }}
+              suppressContentEditableWarning={true}
+            >
+              <div style={{ color: '#9CA3AF' }}>Ask me anything about your productivity data...</div>
+            </div>
+          </div>
+          
+          <div className="flex space-x-3">
           
           <button
             onClick={handleSendMessage}
@@ -534,6 +603,7 @@ What would you like to know about your productivity journey?`,
               <span>🧠 Ask</span>
             )}
           </button>
+          </div>
         </div>
 
         {/* QUICK ACTIONS */}

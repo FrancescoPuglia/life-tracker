@@ -2,7 +2,7 @@
 
 // 🧠 AI INPUT BAR v2 - INTEGRAZIONE CHATGPT COMPLETA
 // Vede tutto, analizza tutto, modifica tutto
-// MODALITÀ PSICOPATICO CERTOSINO 🔥
+
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { 
@@ -160,20 +160,22 @@ function generateDemoResponse(text: string, mode: AIMode, context: UserContext) 
       break;
 
     case 'analyze':
-      response = `📈 **Analisi produttività:**\n\n**Punti di forza:**\n• ${completedTasksToday.length > 0 ? 'Buona esecuzione dei task' : 'Focus su pianificazione strategica'}\n• Uso costante del sistema di tracking\n\n**Aree di miglioramento:**\n• ${todayTimeBlocks.length === 0 ? 'Aggiungi time blocks per strutturare la giornata' : 'Mantieni costanza nei blocchi temporali'}\n• Prioritizza task ad alto impatto\n\n📊 I tuoi pattern mostrano potenziale per ${Math.floor(Math.random() * 30 + 20)}% di miglioramento in efficienza.`;
+      response = `**Analisi produttivita:**\n\n**Punti di forza:**\n- ${completedTasksToday.length > 0 ? `${completedTasksToday.length} task completati oggi` : 'Focus su pianificazione strategica'}\n- Uso costante del sistema di tracking\n\n**Aree di miglioramento:**\n- ${todayTimeBlocks.length === 0 ? 'Aggiungi time blocks per strutturare la giornata' : `${todayTimeBlocks.length} blocchi pianificati`}\n- Prioritizza task ad alto impatto`;
       break;
 
     case 'coach':
       if (text.includes('abitudine') || text.includes('fallisco')) {
         response = `🎯 **Coaching abitudini:**\n\n**Analisi del fallimento:**\n• Le abitudini falliscono spesso per mancanza di trigger chiari\n• Il context switching riduce la forza di volontà\n\n**Piano if-then:**\n"SE finisco di fare colazione ALLORA dedico 5 minuti a [abitudine]"\n\n🔥 Inizia piccolo, sii costante. La costistenza batte l'intensità.`;
       } else {
-        response = `💪 **Weekly Review:**\n\n**Progressi questa settimana:**\n• Goals: ${Math.floor(Math.random() * 40 + 60)}% progresso medio\n• Costanza: ${context.habits.filter(h => h.streakCount > 0).length} abitudini attive\n\n**Focus prossima settimana:**\n• Mantieni momentum sui goal prioritari\n• Consolida le abitudini in corso\n\n🚀 Stai costruendo un sistema solido!`;
+        const activeHabitsCount = context.habits.filter(h => h.streakCount > 0).length;
+        const activeGoalsCount = context.goals.filter(g => g.status === 'active').length;
+        response = `**Weekly Review:**\n\n**Stato attuale:**\n- Goals attivi: ${activeGoalsCount}\n- Abitudini con streak: ${activeHabitsCount}\n\n**Focus prossima settimana:**\n- Mantieni momentum sui goal prioritari\n- Consolida le abitudini in corso`;
       }
       break;
   }
 
   return {
-    response: `${response}\n\n⚠️ *Modalità Demo - Quota OpenAI esaurita. Aggiungi credito per AI completa.*`,
+    response: `${response}\n\n*Modalita offline - Avvia Ollama per risposte AI complete.*`,
     proposedChanges
   };
 }
@@ -360,20 +362,13 @@ export default function AIInputBarV2({
 
         if (!response.ok) {
           const errorData = await response.json();
-          if (response.status === 429) {
-            throw new Error('QUOTA_EXCEEDED');
-          }
           throw new Error(errorData.error || `HTTP ${response.status}`);
         }
 
         data = await response.json();
-      } catch (error) {
-        if (error instanceof Error && error.message === 'QUOTA_EXCEEDED') {
-          // Modalità demo intelligente
-          data = generateDemoResponse(text, mode, context);
-        } else {
-          throw error;
-        }
+      } catch {
+        // AI non disponibile - fallback su risposte locali basate sui dati reali
+        data = generateDemoResponse(text, mode, context);
       }
       
       // Aggiorna messaggio con risposta
@@ -712,7 +707,7 @@ export default function AIInputBarV2({
         <div className="flex items-center justify-between mt-3 px-1">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Sparkles className="w-3 h-3" />
-            <span>ChatGPT vede {goals.length} goals, {tasks.length} tasks, {timeBlocks.length} blocchi</span>
+            <span>AI Coach: {goals.length} goals, {tasks.length} tasks, {timeBlocks.length} blocchi</span>
           </div>
           
           {showChat && messages.length > 0 && (

@@ -1,7 +1,7 @@
 'use client';
 
 // 🎨 SLASH COMMAND MENU & PAGE HEADER
-// MODALITÀ PSICOPATICO CERTOSINO 🔥
+
 
 import React, { useState, useEffect, useRef } from 'react';
 import {

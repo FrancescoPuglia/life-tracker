@@ -9,6 +9,7 @@ export interface BaseEntity {
   userId: string;
   domainId: string;
   deleted?: boolean;
+  deletedReason?: 'manual' | 'parent-goal-deleted' | 'parent-project-deleted';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -83,6 +84,10 @@ export interface Goal extends BaseEntity {
   estimatedHours?: number; // Total hours estimated to complete
   actualHoursSpent?: number; // Calculated field for analytics
   progressVelocity?: number; // Progress per hour (calculated)
+  
+  // Hierarchical rollup fields (standardized for rollup system)
+  actualMinutes?: number;
+  actualHours?: number;
 }
 
 export interface KeyResult extends BaseEntity {
@@ -116,6 +121,10 @@ export interface Project extends BaseEntity {
   dueDate?: Date;
   weeklyHoursTarget?: number;
   totalHoursTarget?: number;
+  
+  // Hierarchical rollup fields
+  actualMinutes?: number;
+  actualHours?: number;
 }
 
 export interface Task extends BaseEntity {
@@ -136,6 +145,7 @@ export interface Task extends BaseEntity {
   estimatedMinutes: number;
   estimatedDuration?: number; // Alias for estimatedMinutes for AI compatibility
   actualMinutes?: number;
+  actualHours?: number; // Calculated field for consistency with Project/Goal
 
   dueDate?: Date;
   deadline?: Date; // Alias for dueDate for AI compatibility
@@ -504,6 +514,15 @@ export interface AnalyticsData {
     correlation: number;
     significance: string;
   }>;
+  activityRankings: Array<{
+    activityName: string;
+    plannedHours: number;
+    actualHours: number;
+    discrepancy: number;
+    adherenceRate: number;
+    domain: string;
+    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
+  }>;
   weeklyReview: {
     highlights: string[];
     challenges: string[];
@@ -604,4 +623,29 @@ export interface VisionItem extends BaseEntity {
   rotation?: number;
   order: number; // For simple grid layout
   isPinned?: boolean; // Show in ritual mode
+}
+
+// ============================================================================
+// IMPORTANT EVENTS
+// ============================================================================
+
+export type EventCategory = 'deadline' | 'milestone' | 'meeting' | 'personal' | 'review' | 'other';
+
+export interface ImportantEvent {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  date: Date;
+  endDate?: Date;
+  category: EventCategory;
+  goalId?: string;
+  projectId?: string;
+  color?: string;
+  isRecurring?: boolean;
+  recurringPattern?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  reminder?: boolean;
+  completed?: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }

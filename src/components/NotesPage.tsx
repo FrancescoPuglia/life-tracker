@@ -8,12 +8,13 @@ import {
   Plus, Search, Filter, Grid, List, Calendar, 
   ArrowLeft, MoreVertical, Trash2, Copy,
   BookOpen, Target, Briefcase, CheckSquare,
-  Tag, Clock, Star, Eye, Edit3
+  Tag, Clock, Star, Eye, Edit3, Cloud
 } from 'lucide-react';
 import { BlockEditor } from '@/components/blocks';
 import { Page, createPage, createBlock } from '@/types/blocks';
 import { db } from '@/lib/database';
 import { useAuthContext } from '@/providers/AuthProvider';
+import NotionSync from '@/components/NotionSync';
 
 // ============================================================================
 // TYPES
@@ -23,7 +24,7 @@ interface NotesPageProps {
   className?: string;
 }
 
-type ViewMode = 'list' | 'grid' | 'editor';
+type ViewMode = 'list' | 'grid' | 'editor' | 'notion';
 type SortBy = 'updated' | 'created' | 'title' | 'blocks';
 type FilterBy = 'all' | 'templates' | 'recent' | 'linked';
 
@@ -522,6 +523,35 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
       </div>
     );
   }
+
+  if (viewMode === 'notion') {
+    return (
+      <div className={`w-full h-full bg-gray-950 ${className}`}>
+        {/* Notion Header */}
+        <div className="sticky top-0 z-20 bg-gray-950/80 backdrop-blur-sm border-b border-gray-800">
+          <div className="flex items-center justify-between px-4 py-3">
+            <button
+              onClick={() => setViewMode('list')}
+              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="text-sm">Torna alle pagine</span>
+            </button>
+            
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <Cloud className="w-4 h-4" />
+              <span>Notion Sync</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Notion Sync Component */}
+        <div className="h-[calc(100vh-120px)] overflow-auto p-4">
+          <NotionSync />
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div className={`w-full h-full bg-gray-950 ${className}`}>
@@ -539,6 +569,15 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
             </div>
             
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setViewMode('notion')}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 
+                         hover:from-purple-500 hover:to-blue-500 text-white rounded-lg transition-colors"
+              >
+                <Cloud className="w-5 h-5" />
+                Notion
+              </button>
+
               <button
                 onClick={() => handleCreatePage('New Page')}
                 className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 

@@ -68,7 +68,7 @@ function calculateGoalProgress(
     totalTargetHours = Math.max(100, totalActualHours * 2); // Default fallback
   }
 
-  // 🔧 SHERLOCK FIX: Apply same precision fix as OKRManager for 0.1% accuracy
+  // Apply same precision fix as OKRManager for 0.1% accuracy
   const progressPercentage = totalTargetHours > 0 ? 
     Math.round((totalActualHours / totalTargetHours) * 100 * 10) / 10 : 0;
 

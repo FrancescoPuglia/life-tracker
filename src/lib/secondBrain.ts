@@ -1,5 +1,5 @@
 // 🔍 SECOND BRAIN - RAG System per Intelligence sui Dati Utente  
-// MODALITÀ PSICOPATICO SUPREMO 🧠🔥🔥🔥🔥🔥
+
 
 import {
   SecondBrain, SemanticSearch, SearchResult, ConversationalQuery, ConversationalResponse

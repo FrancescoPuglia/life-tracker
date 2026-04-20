@@ -6,6 +6,7 @@ import {
 } from '@/types';
 import { db, sanitizeForStorage } from '@/lib/database';
 import { toDateSafe } from '@/utils/dateUtils';
+import { rollupForCompletedTimeBlock, performHierarchicalRollup } from '@/lib/hierarchicalRollup';
 
 // ============================================================================
 // DATA STATE MACHINE
@@ -281,14 +282,14 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       // Forza adapter: se userId valido, sempre Firebase
       if (userId && db.switchToFirebase) {
         try {
-          console.log('🔍 SHERLOCK: Skipping DOUBLE persistence setup to avoid c050...');
+          console.log('Skipping DOUBLE persistence setup to avoid c050...');
           // SKIP DOUBLE PERSISTENCE - Already done in firebase.ts initialization
           // const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
           // try { await ensureFirestorePersistence(firestore); } catch (e) { console.warn('[DataProvider] Persistence warning:', e); }
           await db.switchToFirebase(userId);
-          console.log('🔍 SHERLOCK: Firebase switch without double persistence setup');
+          console.log('Firebase switch without double persistence setup');
         } catch (e) {
-          console.warn('🔍 SHERLOCK: Firebase switch failed, using local:', e);
+          console.warn('Firebase switch failed, using local:', e);
         }
       }
       // Carica tutto
@@ -304,7 +305,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
         db.getAll<NoteTemplate>('noteTemplates').catch(() => []),
         db.getAll<GoalRoadmap>('goalRoadmaps').catch(() => []),
       ]);
-      // 🔇 SHERLOCK EMERGENCY: Disabled DataProvider logs to stop spam
+      // Disabled DataProvider logs to stop spam
       // console.logs disabled to prevent infinite loop spam
 
       // Debug timeBlock rehydration behind feature flag
@@ -352,7 +353,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       setLoadedForUser(userId);
       setStatus('ready');
       if (process.env.NODE_ENV !== 'production') {
-        // 🔇 SHERLOCK EMERGENCY: console.log disabled
+        // console.log disabled
       }
     })();
   }, [userId, db.getAdapterType()]);
@@ -374,7 +375,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     const startTime = data.startTime ? toDateSafe(data.startTime, today) : new Date();
     const endTime = data.endTime ? toDateSafe(data.endTime, today) : new Date(startTime.getTime() + 60 * 60 * 1000);
     const now = new Date();
-    
+
     const block: TimeBlock = {
       ...data,
       id: generateId('timeblock'),
@@ -386,6 +387,12 @@ export function DataProvider({ userId, children }: DataProviderProps) {
       createdAt: now,
       updatedAt: now,
     } as TimeBlock;
+
+    // Validate: TimeBlock must link to at least one entity
+    if (!block.taskId && !block.projectId && !block.goalId) {
+      console.error('[DataProvider] TimeBlock must be linked to at least one entity (Task/Project/Goal)');
+      throw new Error('TimeBlock must be linked to at least one entity (Task, Project, or Goal)');
+    }
 
     // Debug log behind feature flag
     if (process.env.NEXT_PUBLIC_DEBUG_TIMEBLOCK === '1') {
@@ -498,6 +505,91 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     setTimeBlocks(prev => prev.map(b => b.id === id ? updated : b));
     try {
       await db.update('timeBlocks', sanitizeForStorage(updated));
+      
+      // 🎯 HIERARCHICAL ROLLUP: When TimeBlock completion status changes, update hierarchy
+      const wasCompleted = existing.status === 'completed';
+      const isNowCompleted = updated.status === 'completed';
+      
+      if (!wasCompleted && isNowCompleted) {
+        // TimeBlock just completed - trigger focused rollup
+        console.log('🎯 TimeBlock completed, triggering hierarchical rollup:', {
+          blockId: id,
+          title: updated.title,
+          taskId: updated.taskId,
+          projectId: updated.projectId,
+          goalId: updated.goalId
+        });
+        
+        try {
+          const rollupResult = await rollupForCompletedTimeBlock(userId, id);
+          console.log('✅ Hierarchical rollup success:', rollupResult);
+          
+          // Update local state with new actual hours
+          if (rollupResult.taskUpdates.length > 0) {
+            setTasks(prev => prev.map(task => {
+              const update = rollupResult.taskUpdates.find(u => u.id === task.id);
+              return update ? { ...task, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : task;
+            }));
+          }
+          
+          if (rollupResult.projectUpdates.length > 0) {
+            setProjects(prev => prev.map(project => {
+              const update = rollupResult.projectUpdates.find(u => u.id === project.id);
+              return update ? { ...project, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : project;
+            }));
+          }
+          
+          if (rollupResult.goalUpdates.length > 0) {
+            setGoals(prev => prev.map(goal => {
+              const update = rollupResult.goalUpdates.find(u => u.id === goal.id);
+              return update ? { ...goal, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : goal;
+            }));
+          }
+          
+        } catch (rollupError) {
+          console.error('❌ Hierarchical rollup failed:', rollupError);
+          // Continue without failing the TimeBlock update
+        }
+        
+      } else if (wasCompleted && !isNowCompleted) {
+        // TimeBlock uncompleted - trigger full recalculation to ensure accuracy
+        console.log('🔄 TimeBlock uncompleted, triggering full hierarchical recalculation:', {
+          blockId: id,
+          title: updated.title
+        });
+        
+        try {
+          const rollupResult = await performHierarchicalRollup(userId);
+          console.log('✅ Full hierarchical recalculation success:', rollupResult);
+          
+          // Update local state with recalculated actual hours
+          if (rollupResult.taskUpdates.length > 0) {
+            setTasks(prev => prev.map(task => {
+              const update = rollupResult.taskUpdates.find(u => u.id === task.id);
+              return update ? { ...task, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : task;
+            }));
+          }
+          
+          if (rollupResult.projectUpdates.length > 0) {
+            setProjects(prev => prev.map(project => {
+              const update = rollupResult.projectUpdates.find(u => u.id === project.id);
+              return update ? { ...project, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : project;
+            }));
+          }
+          
+          if (rollupResult.goalUpdates.length > 0) {
+            setGoals(prev => prev.map(goal => {
+              const update = rollupResult.goalUpdates.find(u => u.id === goal.id);
+              return update ? { ...goal, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : goal;
+            }));
+          }
+          
+        } catch (rollupError) {
+          console.error('❌ Full hierarchical recalculation failed:', rollupError);
+          // Continue without failing the TimeBlock update
+        }
+      }
+      
       await refreshKPIs();
       if (process.env.NODE_ENV !== 'production') {
         console.log('[DataProvider] [PROGRESS] updateTimeBlock', {
@@ -517,6 +609,49 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     setTimeBlocks(prev => prev.filter(b => b.id !== id));
     try {
       await db.delete('timeBlocks', id);
+      
+      // 🎯 HIERARCHICAL ROLLUP: If deleting a completed TimeBlock, recalculate hierarchy
+      if (existing.status === 'completed') {
+        console.log('🔄 Deleting completed TimeBlock, triggering full hierarchical recalculation:', {
+          blockId: id,
+          title: existing.title,
+          taskId: existing.taskId,
+          projectId: existing.projectId,
+          goalId: existing.goalId
+        });
+        
+        try {
+          const rollupResult = await performHierarchicalRollup(userId);
+          console.log('✅ Full hierarchical recalculation after delete success:', rollupResult);
+          
+          // Update local state with recalculated actual hours
+          if (rollupResult.taskUpdates.length > 0) {
+            setTasks(prev => prev.map(task => {
+              const update = rollupResult.taskUpdates.find(u => u.id === task.id);
+              return update ? { ...task, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : task;
+            }));
+          }
+          
+          if (rollupResult.projectUpdates.length > 0) {
+            setProjects(prev => prev.map(project => {
+              const update = rollupResult.projectUpdates.find(u => u.id === project.id);
+              return update ? { ...project, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : project;
+            }));
+          }
+          
+          if (rollupResult.goalUpdates.length > 0) {
+            setGoals(prev => prev.map(goal => {
+              const update = rollupResult.goalUpdates.find(u => u.id === goal.id);
+              return update ? { ...goal, actualMinutes: update.actualMinutes, actualHours: update.actualHours } : goal;
+            }));
+          }
+          
+        } catch (rollupError) {
+          console.error('❌ Full hierarchical recalculation after delete failed:', rollupError);
+          // Continue without failing the TimeBlock delete
+        }
+      }
+      
       await refreshKPIs();
       if (process.env.NODE_ENV !== 'production') {
         console.log('[DataProvider] [PROGRESS] deleteTimeBlock', { id });
@@ -583,15 +718,35 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     const existing = goals.find(g => g.id === id);
     if (!existing) return;
 
+    // Find all affected children for cascade soft-delete
+    const affectedProjects = projects.filter(p => p.goalId === id);
+    const affectedProjectIds = new Set(affectedProjects.map(p => p.id));
+    const affectedTasks = tasks.filter(t => affectedProjectIds.has(t.projectId));
+
+    // Optimistic UI update
     setGoals(prev => prev.filter(g => g.id !== id));
+    setProjects(prev => prev.filter(p => !affectedProjectIds.has(p.id)));
+    setTasks(prev => prev.filter(t => !affectedProjectIds.has(t.projectId)));
 
     try {
-      await db.update('goals', { ...existing, deleted: true, updatedAt: new Date() });
+      // Cascade soft-delete: Projects → Tasks → Goal
+      await Promise.all([
+        ...affectedTasks.map(t =>
+          db.update('tasks', { ...t, deleted: true, deletedReason: 'parent-project-deleted', updatedAt: new Date() })
+        ),
+        ...affectedProjects.map(p =>
+          db.update('projects', { ...p, deleted: true, deletedReason: 'parent-goal-deleted', updatedAt: new Date() })
+        ),
+        db.update('goals', { ...existing, deleted: true, updatedAt: new Date() })
+      ]);
     } catch (error) {
       console.error('[DataProvider] Delete goal failed:', error);
+      // Rollback optimistic updates
       setGoals(prev => [...prev, existing]);
+      setProjects(prev => [...prev, ...affectedProjects]);
+      setTasks(prev => [...prev, ...affectedTasks]);
     }
-  }, [goals]);
+  }, [goals, projects, tasks]);
 
   // ========== CRUD: KeyResult ==========
   const createKeyResult = useCallback(async (data: Partial<KeyResult>): Promise<string | undefined> => {
@@ -708,15 +863,28 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     const existing = projects.find(p => p.id === id);
     if (!existing) return;
 
+    // Find all affected children (tasks)
+    const affectedTasks = tasks.filter(t => t.projectId === id);
+
+    // Optimistic UI update
     setProjects(prev => prev.filter(p => p.id !== id));
+    setTasks(prev => prev.filter(t => t.projectId !== id));
 
     try {
-      await db.delete('projects', id);
+      // Cascade soft-delete: Tasks → Project
+      await Promise.all([
+        ...affectedTasks.map(t =>
+          db.update('tasks', { ...t, deleted: true, deletedReason: 'parent-project-deleted', updatedAt: new Date() })
+        ),
+        db.update('projects', { ...existing, deleted: true, deletedReason: 'manual', updatedAt: new Date() })
+      ]);
     } catch (error) {
       console.error('[DataProvider] Delete project failed:', error);
+      // Rollback optimistic updates
       setProjects(prev => [...prev, existing]);
+      setTasks(prev => [...prev, ...affectedTasks]);
     }
-  }, [projects]);
+  }, [projects, tasks]);
 
   // ========== CRUD: Task ==========
   const createTask = useCallback(async (data: Partial<Task>): Promise<string | undefined> => {

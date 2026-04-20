@@ -1,190 +1,125 @@
-# 🎯 Life Tracker - Firebase Edition
+# 🎯 Life Tracker
 
-> **Know Every Second What To Do** - A comprehensive life tracking system with Firebase cloud sync
+A comprehensive personal life management application with goal tracking, time blocking, habits, notes, analytics, and AI coaching.
 
-![Life Tracker](https://img.shields.io/badge/Life-Tracker-blue?style=for-the-badge)
-![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=flat-square&logo=typescript)
-![PWA](https://img.shields.io/badge/PWA-Ready-green?style=flat-square)
-![Firebase](https://img.shields.io/badge/Firebase-Integrated-orange?style=flat-square&logo=firebase)
+## 🚀 Features
 
-## 🌟 Features
+- **OKR Management**: Goals → Projects → Tasks with hierarchical progress tracking
+- **Time Block Planner**: Google Calendar-style scheduling with weekly repeats
+- **Hierarchical Rollup**: Automatic progress calculation from completed time blocks
+- **Cascade Delete** (v1.1): Delete goals → auto-deletes projects → tasks (with audit trail)
+- **Habits Tracker**: Daily habits with streak counting
+- **Rich Notes**: Notion-like block editor powered by Tiptap
+- **Vision Board**: Visual goal manifestation
+- **Analytics Dashboard**: Charts, metrics, ROI analysis
+- **AI Coaching**: OpenAI-powered scheduling, risk prediction
+- **Dual-Mode Persistence**:
+  - Logged users: Firebase Firestore (cloud sync)
+  - Guest users: IndexedDB (local storage)
 
-### 🕐 **NOW Bar - Real-time Control**
-- **Live timer** with second-by-second updates
-- **Timeboxing countdown** with overrun indicators
-- **What/Why/How** implementation intentions
-- **Session controls** (Start/Pause/Stop) with automatic logging
-- **Dopamine-friendly** micro-rewards and celebrations
+## 📋 Prerequisites
 
-### 📅 **Smart Planner**
-- **Drag-and-drop timeboxing** for visual planning
-- **Automatic conflict detection** and resolution
-- **Buffer time** and travel time integration
-- **Focus mode** (Pomodoro/Deep Work)
-- **iCalendar compatibility** (RFC 5545) for import/export
+- **Node.js**: 18.x or higher
+- **npm**: 9.x or higher
+- **Firebase Project**: (optional, for production)
+- **OpenAI API Key**: (optional, for AI features)
 
-### 📊 **Real-time KPI Dashboard**
-- **Focus Minutes** tracking
-- **Plan vs Actual** adherence percentage
-- **Active Streaks** counter
-- **Key Results Progress** visualization
-- **Mood & Energy** tracking
-- **Daily Win** highlights
+## ⚙️ Setup
 
-### 🔥 **Habits Tracker**
-- **Streak calculation** with visual flame indicators
-- **Completion rates** over 7/30/90 day periods
-- **If-then planning** for habit formation
-- **Smart reminders** and contextual nudges
-- **Achievement system** with rarity levels
+### 1. Clone & Install
 
-### 🎯 **OKR Management**
-- **Goal hierarchy**: Goals → Key Results → Projects → Tasks
-- **Progress auto-calculation** from time tracking
-- **Implementation intentions** for every task
-- **Priority and deadline** management
-- **Visual progress tracking**
-
-### 📈 **Advanced Analytics**
-- **Plan vs Actual** stacked bar charts
-- **Time allocation** pie charts by domain
-- **Correlation analysis** (sleep → focus, exercise → mood)
-- **Calendar heatmaps** for adherence patterns
-- **Weekly reviews** with actionable insights
-
-## 🧬 **Scientific Foundation**
-
-### **Implementation Intentions** (d≈0.65 effect size)
-- If-then planning for automatic behavior execution
-- Context-dependent action triggers
-- Reduces cognitive load and increases follow-through
-
-### **Dopamine Optimization**
-- **Variable reinforcement** schedules for sustained motivation
-- **Reward prediction error** exploitation
-- **Progress visualization** for competence feedback
-
-### **Personal Informatics Model**
-- **Preparation** → **Collection** → **Integration** → **Reflection** → **Action**
-- Complete lifecycle support for behavior change
-- Evidence-based feedback loops
-
-### **Behavior Change Techniques (BCT)**
-- Self-monitoring and outcome feedback
-- Goal setting and action planning
-- Contextual prompts and cues
-- Progress review and adjustment
-
-## 🚀 **Getting Started**
-
-### Prerequisites
-- Node.js 18+ and npm
-- Modern browser with IndexedDB support
-- Firebase project (optional - works offline without it)
-
-### Quick Start
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/life-tracker.git
+git clone https://github.com/your-username/life-tracker.git
 cd life-tracker
-
-# Install dependencies
 npm install
-
-# Start development server
-npm run dev
-
-# Open browser
-# Navigate to http://localhost:3000
 ```
 
-### 🔥 Firebase Setup (Optional)
-For cloud sync and cross-device functionality:
+### 2. Environment Variables
 
-1. **Create a Firebase project** at [Firebase Console](https://console.firebase.google.com)
-2. **Copy `.env.example` to `.env.local`** and fill in your Firebase credentials
-3. **Enable Authentication** (Email/Password + Google) in Firebase Console
-4. **Create Firestore Database** in Firebase Console
-5. **Apply security rules**: `npm run firebase:rules`
+```bash
+cp .env.local.example .env.local
+# Edit .env.local with your credentials
+```
 
-📖 **Detailed instructions**: See `FIREBASE_SETUP.md`
+**⚠️ NEVER commit `.env.local` to Git!**
 
-### First Steps
-1. **Start a session** in the NOW bar
-2. **Create time blocks** in the planner
-3. **Add habits** to track daily
-4. **Set up OKRs** for goal alignment
-5. **Review analytics** for insights
+See `.env.local.example` for template and [SECURITY.md](SECURITY.md) for key rotation.
 
-## 🏗️ **Architecture**
+### 3. Run
 
-### **Frontend**
-- **Next.js 15** with App Router
-- **TypeScript** for type safety
-- **Tailwind CSS** for styling
-- **Recharts** for data visualization
-- **Lucide React** for icons
+```bash
+npm run dev  # Development at http://localhost:3000
+npm run build && npm start  # Production
+```
 
-### **Data Layer**
-- **IndexedDB** for offline-first storage
-- **Structured schema** with relationships
-- **Audit trail** and versioning
-- **Background sync** capability
+## 📜 Scripts
 
-### **PWA Features**
-- **Offline-first** architecture
-- **Push notifications** support
-- **Background sync** for data
-- **Install prompts** for mobile/desktop
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Development server |
+| `npm run build` | Production build |
+| `npm run lint` | Run ESLint |
+| `npm run test` | Run tests (watch) |
+| `npm run test:coverage` | Coverage report |
+| `npm run firebase:deploy` | Deploy to Firebase |
 
-## 📱 **Core Web Vitals**
+## 🧪 Testing
 
-- **LCP**: ≤ 2.5s (Large Contentful Paint)
-- **INP**: ≤ 200ms (Interaction to Next Paint)
-- **CLS**: ≤ 0.1 (Cumulative Layout Shift)
+```bash
+npm run test          # Watch mode
+npm run test:run      # Single run (CI)
+npm run test:coverage # With coverage
+npm run test:ui       # Interactive UI
+```
 
-## 🔒 **Privacy & Security**
+**Current Coverage**: 80%+ core logic, 70%+ API routes
 
-- **Local-first** data storage
-- **No cloud dependencies** by default
-- **GDPR compliant** with data export/delete
-- **Encrypted storage** option available
+See [CONTRIBUTING.md](CONTRIBUTING.md) for testing guidelines.
 
-## 🎨 **Customization**
+## 🔐 Security
 
-- **Widget library** for dashboard personalization
-- **Custom domains** and metrics
-- **Theme system** (light/dark modes)
-- **Configurable layouts** and shortcuts
+- **API Key Exposure**: See [SECURITY.md](SECURITY.md) for rotation instructions
+- **Rate Limiting**: 10 req/min per IP on `/api/ai/chat`
+- **Firestore Rules**: User-scoped access only
+- **Input Validation**: All API routes validate inputs
 
-## 📖 **Research References**
+Report vulnerabilities: See [SECURITY.md](SECURITY.md)
 
-1. **Implementation Intentions**: Gollwitzer & Sheeran (2006) meta-analysis
-2. **Dopamine & Reward Prediction**: Schultz et al. (1997) neuroscience
-3. **Personal Informatics**: Li et al. (2010) framework
-4. **BCT Taxonomy**: Michie et al. (2013) standardization
-5. **Self-Determination Theory**: Deci & Ryan (2000) motivation
+## 🐛 Troubleshooting
 
-## 🤝 **Contributing**
+**Build fails**: Check `tsconfig.json` paths, restart TS server
+**Firebase auth error**: Verify `.env.local` has correct Firebase config
+**OpenAI 401**: Check `OPENAI_API_KEY` is valid and not revoked
+**Rate limit**: Wait 1 minute, check for infinite API call loops
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
+## 🤝 Contributing
 
-## 📄 **License**
+See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Code style guidelines
+- Git workflow
+- Testing requirements
+- PR process
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 📊 Architecture
 
-## 🙏 **Acknowledgments**
+**Tech Stack**: Next.js 15 + TypeScript + Firebase + OpenAI
+**State**: React Context (DataProvider)
+**Persistence**: Adapter pattern (Firebase/IndexedDB/Memory)
+**Rollup**: TimeBlock → Task → Project → Goal (automatic)
 
-- Implementation Intentions research by Peter Gollwitzer
-- Personal Informatics framework by Ian Li
-- Behavior Change Technique Taxonomy by Susan Michie
-- Self-Determination Theory by Edward Deci & Richard Ryan
+See [CLAUDE.md](CLAUDE.md) for detailed architecture.
+
+## 📄 License
+
+MIT License
+
+## 🆘 Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-username/life-tracker/issues)
+- **Security**: [SECURITY.md](SECURITY.md)
+- **Docs**: [CLAUDE.md](CLAUDE.md)
 
 ---
 
-**Built with ❤️ for evidence-based productivity and well-being**
+**Version**: 1.1.0 (Cascade Delete + Test Framework + Security Hardening)
+**Last Updated**: 2026-01-11

@@ -29,7 +29,7 @@ export class SmartNLParser implements NaturalLanguageParser {
     console.log('🧠 AI PARSER: Processing input:', request.input);
     
     try {
-      // 🔥 PSYCHOPATH MODE: Try multiple parsing strategies
+      // Try multiple parsing strategies
       const strategies = [
         this.parseWithPatternMatching.bind(this),
         this.parseWithAIFallback.bind(this),

@@ -280,42 +280,7 @@ export default function GamingEffects({
         </div>
       )}
 
-      {/* 🏆 FLOATING XP COUNTER */}
-      <div className="fixed top-4 right-4 z-50">
-        <div className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg">
-          💎 {xpGained.toLocaleString()} XP
-        </div>
-      </div>
-
-      {/* 🎯 ACTION BUTTONS FOR TESTING */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col space-y-2">
-        <button
-          onClick={handleTaskComplete}
-          className="btn-gaming px-3 py-2 text-sm"
-        >
-          🎯 Complete Task
-        </button>
-        <button
-          onClick={() => handleHabitComplete(Math.floor(Math.random() * 50) + 1)}
-          className="btn-gaming px-3 py-2 text-sm"
-        >
-          🔥 Complete Habit
-        </button>
-        <button
-          onClick={() => handleGoalProgress(Math.floor(Math.random() * 100))}
-          className="btn-gaming px-3 py-2 text-sm"
-        >
-          📈 Goal Progress
-        </button>
-        <button
-          onClick={() => audioManager.perfectDay()}
-          className="btn-gaming px-3 py-2 text-sm"
-        >
-          🌟 Perfect Day
-        </button>
-      </div>
-
-      {/* 🎆 CELEBRATION EFFECTS */}
+      {/* Celebration Effects */}
       <style jsx global>{`
         .achievement-popup {
           animation: achievementAppear 3s ease-in-out;

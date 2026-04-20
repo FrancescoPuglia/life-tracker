@@ -1,5 +1,5 @@
 // ⚡ AUTO-SCHEDULER - Constraint-Based Optimization Engine
-// MODALITÀ PSICOPATICO SUPREMO 🔥🔥🔥
+
 
 import {
   AutoScheduler, SchedulingConstraints, SchedulingResult, SchedulingConflict,
@@ -47,13 +47,17 @@ export class SuperSmartAutoScheduler implements AutoScheduler {
   };
 
   // 🎯 MAIN SCHEDULING ENGINE
-  async schedule(tasks: Task[], constraints: SchedulingConstraints): Promise<SchedulingResult> {
-    console.log('⚡ AUTO-SCHEDULER: Starting SUPREMO mode for', tasks.length, 'tasks');
-    
+  async schedule(
+    tasks: Task[],
+    constraints: SchedulingConstraints,
+    goals: Goal[] = []
+  ): Promise<SchedulingResult> {
+    console.log('⚡ AUTO-SCHEDULER: Starting SUPREMO mode for', tasks.length, 'tasks with', goals.length, 'goals');
+
     try {
-      const context = this.buildSchedulingContext(constraints);
+      const context = this.buildSchedulingContext(constraints, goals);
       
-      // 🔥 PSYCHOPATH MODE: Multiple optimization passes
+      // Multiple optimization passes
       const optimizationPasses = [
         this.scheduleByDeadlinePressure.bind(this),
         this.scheduleByEnergyOptimization.bind(this),
@@ -343,14 +347,20 @@ export class SuperSmartAutoScheduler implements AutoScheduler {
   }
 
   // 🧠 HELPER METHODS
-  private buildSchedulingContext(constraints: SchedulingConstraints): SchedulingContext {
+  private buildSchedulingContext(
+    constraints: SchedulingConstraints,
+    goals: Goal[] = []
+  ): SchedulingContext {
+    // 🔍 INTELLIGENCE: Use real goals data for scheduling optimization
+    console.log('⚡ SCHEDULER: Building context with', goals.length, 'goals');
+
     return {
       user: constraints.userPreferences,
       energy: constraints.energyProfile,
       deadlines: constraints.deadlines,
       existingBlocks: constraints.existingBlocks,
       buffers: constraints.bufferPreferences,
-      goals: [] // Would be passed from main app
+      goals: goals // ✅ NOW USING REAL GOALS DATA
     };
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 // 🎨 BLOCK EDITOR - Editor Notion-like completo
-// MODALITÀ PSICOPATICO CERTOSINO 🔥
+
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {

@@ -1,7 +1,8 @@
 import { 
   User, Domain, Goal, KeyResult, Project, Task, TimeBlock, Session, 
   Habit, HabitLog, Metric, CalendarEvent, Deadline, JournalEntry, 
-  Insight, Achievement, KPI, DashboardState, VisionBoard, VisionItem, MediaAsset
+  Insight, Achievement, KPI, DashboardState, VisionBoard, VisionItem, MediaAsset,
+  TimeBlockStatus
 } from '@/types';
 import { Page } from '@/types/blocks';
 import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
@@ -298,28 +299,16 @@ class IndexedDBAdapter implements DatabaseAdapter {
   async create<T extends { id?: string }>(storeName: string, data: T): Promise<T> {
     const store = await this.getStore(storeName, 'readwrite');
     
-    // 🔥 PSYCHOPATH FIX: Generate unique ID if not provided
+    // Generate unique ID if not provided
     if (!data.id) {
       data.id = `${storeName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
-    
-    console.log('🔥 PSYCHOPATH: IndexedDB create called with:', {
-      storeName,
-      id: data.id,
-      data: data
-    });
-    
+
     return new Promise((resolve, reject) => {
-      // 🔥 PSYCHOPATH FIX: Use PUT instead of ADD to allow overwrites
+      // Use PUT instead of ADD to allow overwrites
       const request = store.put(sanitizeForStorage(data));
-      request.onsuccess = () => {
-        console.log('🔥 PSYCHOPATH: IndexedDB create SUCCESS:', data.id);
-        resolve(data);
-      };
-      request.onerror = () => {
-        console.error('🔥 PSYCHOPATH: IndexedDB create ERROR:', request.error);
-        reject(request.error);
-      };
+      request.onsuccess = () => resolve(data);
+      request.onerror = () => reject(request.error);
     });
   }
 
@@ -351,29 +340,15 @@ class IndexedDBAdapter implements DatabaseAdapter {
   }
 
   async getAll<T>(storeName: string): Promise<T[]> {
-    console.log(`🔥 PSYCHOPATH: IndexedDBAdapter.getAll() called for ${storeName}`);
-    
     try {
       const store = await this.getStore(storeName);
-      console.log(`🔥 PSYCHOPATH: IndexedDB store obtained for ${storeName}`);
-      
       return new Promise((resolve, reject) => {
         const request = store.getAll();
-        request.onsuccess = () => {
-          const result = request.result;
-          console.log(`🔥 PSYCHOPATH: IndexedDBAdapter.getAll() SUCCESS for ${storeName}:`, {
-            count: result.length,
-            items: result.length > 0 ? result.map((item: any) => ({ id: item.id, userId: item.userId })) : 'No items'
-          });
-          resolve(result);
-        };
-        request.onerror = () => {
-          console.error(`❌ PSYCHOPATH: IndexedDBAdapter.getAll() ERROR for ${storeName}:`, request.error);
-          reject(request.error);
-        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
       });
     } catch (error) {
-      console.error(`❌ PSYCHOPATH: IndexedDBAdapter.getAll() OUTER ERROR for ${storeName}:`, error);
+      console.error(`IndexedDB getAll error for ${storeName}:`, error);
       throw error;
     }
   }
@@ -480,22 +455,36 @@ class IndexedDBAdapter implements DatabaseAdapter {
     const plannedMinutes = timeBlocks.reduce((total, block) => 
       total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60), 0
     );
+    // Follow CLAUDE.md rules - count ALL completed blocks
     const actualMinutes = timeBlocks
-      .filter(block => block.actualStartTime && block.actualEndTime)
-      .reduce((total, block) => 
-        total + (block.actualEndTime!.getTime() - block.actualStartTime!.getTime()) / (1000 * 60), 0
-      );
+      .filter(block => block.status === 'completed')
+      .reduce((total, block) => {
+        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
+        if (block.actualStartTime && block.actualEndTime) {
+          return total + (block.actualEndTime.getTime() - block.actualStartTime.getTime()) / (1000 * 60);
+        } else {
+          // Fallback to planned duration for completed blocks (CLAUDE.md rule)
+          return total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60);
+        }
+      }, 0);
     const planVsActual = plannedMinutes > 0 ? (actualMinutes / plannedMinutes) * 100 : 0;
 
     // Get active streaks
     const habits = await this.getActiveHabits(userId);
     const activeStreaks = habits.filter(habit => habit.streakCount > 0).length;
 
+    // Calculate key results progress from actual data
+    const allKeyResults = await this.getAll<KeyResult>('keyResults');
+    const userKeyResults = allKeyResults.filter(kr => kr.userId === userId && !kr.deleted);
+    const keyResultsProgress = userKeyResults.length > 0
+      ? userKeyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0) / userKeyResults.length
+      : 0;
+
     return {
       focusMinutes: Math.round(focusMinutes),
       planVsActual: Math.round(planVsActual),
       activeStreaks,
-      keyResultsProgress: 0, // TODO: Calculate from goals
+      keyResultsProgress: Math.round(keyResultsProgress),
       mood: todaySessions.find(s => s.mood !== undefined)?.mood,
       energy: todaySessions.find(s => s.energy !== undefined)?.energy,
     };
@@ -508,8 +497,26 @@ class IndexedDBAdapter implements DatabaseAdapter {
     adherence: number;
   }>> {
     const endDate = new Date();
-    const startDate = new Date();
+
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    const userTimeBlocks = allTimeBlocks.filter(b => b.userId === userId && !b.deleted);
+
+    let startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
+
+    if (userTimeBlocks.length > 0) {
+      const earliestBlock = userTimeBlocks.reduce((earliest, block) => {
+        const blockDate = new Date(block.startTime);
+        return blockDate < earliest ? blockDate : earliest;
+      }, new Date());
+
+      const calculatedStartDate = new Date(earliestBlock);
+      calculatedStartDate.setHours(0, 0, 0, 0);
+
+      if (calculatedStartDate < startDate) {
+        startDate = calculatedStartDate;
+      }
+    }
 
     const result = [];
 
@@ -519,13 +526,32 @@ class IndexedDBAdapter implements DatabaseAdapter {
       const dayEnd = new Date(d);
       dayEnd.setHours(23, 59, 59, 999);
 
-      // Get all time blocks for this day
-      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-      const dayTimeBlocks = allTimeBlocks.filter(block => 
-        block.userId === userId &&
-        new Date(block.startTime) >= dayStart && 
-        new Date(block.startTime) <= dayEnd
-      );
+      // Filter time blocks for this day
+      const dayTimeBlocks = allTimeBlocks.filter(block => {
+        const blockStart = new Date(block.startTime);
+        return (
+          block.userId === userId &&
+          !block.deleted && // Exclude soft-deleted blocks
+          blockStart >= dayStart &&
+          blockStart <= dayEnd
+        );
+      });
+
+      // 🚨 DEBUG: Log per-day analysis
+      if ((process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_ANALYTICS === '1') && dayTimeBlocks.length > 0) {
+        console.log(`📊 Day ${d.toISOString().split('T')[0]}:`, {
+          dayTimeBlocks: dayTimeBlocks.length,
+          completedBlocks: dayTimeBlocks.filter(b => b.status === 'completed').length,
+          sampleBlocks: dayTimeBlocks.slice(0, 2).map(b => ({
+            title: b.title,
+            status: b.status,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            actualStartTime: b.actualStartTime,
+            actualEndTime: b.actualEndTime
+          }))
+        });
+      }
 
       // Calculate planned hours
       const plannedMinutes = dayTimeBlocks.reduce((total, block) => {
@@ -534,15 +560,22 @@ class IndexedDBAdapter implements DatabaseAdapter {
         return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
       }, 0);
 
-      // 🚀 ENHANCED: Calculate actual hours from Sessions + TimeBlocks
-      let actualMinutes = dayTimeBlocks.reduce((total, block) => {
-        if (block.actualStartTime && block.actualEndTime) {
-          const actualStart = new Date(block.actualStartTime);
-          const actualEnd = new Date(block.actualEndTime);
-          return total + (actualEnd.getTime() - actualStart.getTime()) / (1000 * 60);
-        }
-        return total;
-      }, 0);
+      // Unified logic following CLAUDE.md Progress Rules
+      let actualMinutes = dayTimeBlocks
+        .filter(block => block.status === 'completed')
+        .reduce((total, block) => {
+          // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
+          if (block.actualStartTime && block.actualEndTime) {
+            const actualStart = new Date(block.actualStartTime);
+            const actualEnd = new Date(block.actualEndTime);
+            return total + (actualEnd.getTime() - actualStart.getTime()) / (1000 * 60);
+          } else {
+            // Fallback to planned duration for completed blocks (CLAUDE.md rule)
+            const startTime = new Date(block.startTime);
+            const endTime = new Date(block.endTime);
+            return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
+          }
+        }, 0);
       
       // 🎯 INTELLIGENCE: Also include session data for more accurate tracking
       const allSessions = await this.getAll<Session>('sessions');
@@ -592,25 +625,50 @@ class IndexedDBAdapter implements DatabaseAdapter {
     const allDomains = await this.getAll<Domain>('domains');
     const userDomains = allDomains.filter(d => d.userId === userId);
 
-    // Get all sessions in the period
-    const allSessions = await this.getAll<Session>('sessions');
-    const periodSessions = allSessions.filter(session => 
-      session.userId === userId &&
-      new Date(session.startTime) >= startDate &&
-      new Date(session.startTime) <= endDate &&
-      session.status === 'completed'
+    // 🔧 FIX: Use TimeBlocks instead of Sessions (Sessions are rarely used)
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    const periodTimeBlocks = allTimeBlocks.filter(block =>
+      block.userId === userId &&
+      !block.deleted &&
+      block.status === 'completed' && // Only count completed blocks (actual time)
+      new Date(block.startTime) >= startDate &&
+      new Date(block.startTime) <= endDate
     );
+
+    // 📊 DEBUG: Log time allocation context
+    if (process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_ANALYTICS === '1') {
+      console.log('📊 calculateTimeAllocation:', {
+        userId,
+        days,
+        totalTimeBlocks: allTimeBlocks.length,
+        userTimeBlocks: allTimeBlocks.filter(b => b.userId === userId).length,
+        completedTimeBlocks: periodTimeBlocks.length,
+        userDomains: userDomains.length,
+        sampleBlocks: periodTimeBlocks.slice(0, 3).map(b => ({
+          id: b.id,
+          domainId: b.domainId,
+          title: b.title,
+          startTime: b.startTime,
+          endTime: b.endTime
+        }))
+      });
+    }
 
     // Default colors for domains
     const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
 
     const domainHours = new Map<string, number>();
 
-    // Calculate hours per domain
-    for (const session of periodSessions) {
-      const domain = userDomains.find(d => d.id === session.domainId);
+    // Calculate hours per domain from completed time blocks
+    for (const block of periodTimeBlocks) {
+      const domain = userDomains.find(d => d.id === block.domainId);
       const domainName = domain?.name || 'Uncategorized';
-      const hours = (session.duration || 0) / 3600; // Convert seconds to hours
+
+      // Calculate actual duration in hours
+      const startTime = new Date(block.actualStartTime || block.startTime);
+      const endTime = new Date(block.actualEndTime || block.endTime);
+      const durationMs = endTime.getTime() - startTime.getTime();
+      const hours = durationMs / (1000 * 60 * 60);
 
       domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
     }
@@ -817,6 +875,260 @@ class IndexedDBAdapter implements DatabaseAdapter {
     if (nextWeekGoals.length === 0) nextWeekGoals.push('Maintain current momentum');
 
     return { highlights, challenges, insights, nextWeekGoals };
+  }
+
+  // ========== USER STATISTICS FOR BADGES ==========
+
+  async getUserStats(userId: string): Promise<{
+    maxStreak: number;
+    totalFocusMinutes: number;
+    goalsCompleted: number;
+    goalsCreated: number;
+    totalSessions: number;
+    timeBlocksCreated: number;
+    daysTracked: number;
+    earlySessionsCount: number;
+    eveningSessionsCount: number;
+    weeklyFocusMinutes: number;
+  }> {
+    try {
+      // Calculate days tracked (unique days with any activity)
+      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+      const allSessions = await this.getAll<Session>('sessions');
+      const allHabitLogs = await this.getAll('habitLogs');
+      
+      const userTimeBlocks = allTimeBlocks.filter(tb => tb.userId === userId);
+      const userSessions = allSessions.filter(s => s.userId === userId);
+      const userHabitLogs = allHabitLogs.filter((hl: any) => hl.userId === userId);
+      
+      // Collect unique dates with activity
+      const activeDates = new Set<string>();
+      
+      userTimeBlocks.forEach(tb => {
+        const date = new Date(tb.startTime).toISOString().split('T')[0];
+        activeDates.add(date);
+      });
+      
+      userSessions.forEach(s => {
+        const date = new Date(s.startTime).toISOString().split('T')[0];
+        activeDates.add(date);
+      });
+      
+      userHabitLogs.forEach((hl: any) => {
+        activeDates.add(hl.dateKey);
+      });
+      
+      // Calculate focus time
+      const totalFocusMinutes = userSessions
+        .filter(s => s.status === 'completed' && s.tags.includes('focus'))
+        .reduce((total, s) => total + (s.duration || 0), 0) / 60;
+      
+      // Calculate weekly focus (last 7 days)
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const weeklyFocusMinutes = userSessions
+        .filter(s => s.status === 'completed' && 
+                     s.tags.includes('focus') && 
+                     new Date(s.startTime) >= weekAgo)
+        .reduce((total, s) => total + (s.duration || 0), 0) / 60;
+      
+      // Calculate early sessions (before 8:00 AM)
+      const earlySessionsCount = userSessions
+        .filter(s => {
+          const hour = new Date(s.startTime).getHours();
+          return hour < 8;
+        }).length;
+      
+      // Calculate evening sessions (after 6:00 PM)
+      const eveningSessionsCount = userSessions
+        .filter(s => {
+          const hour = new Date(s.startTime).getHours();
+          return hour >= 18;
+        }).length;
+      
+      // Calculate consecutive habit streaks
+      const allHabits = await this.getAll('habits');
+      const userHabits = allHabits.filter((h: any) => h.userId === userId);
+      
+      // Helper function to check if two dates are consecutive days
+      const isNextDay = (dateStr1: string, dateStr2: string): boolean => {
+        const date1 = new Date(dateStr1);
+        const date2 = new Date(dateStr2);
+        const diffTime = date2.getTime() - date1.getTime();
+        const diffDays = diffTime / (1000 * 60 * 60 * 24);
+        return diffDays === 1;
+      };
+      
+      let maxStreak = 0;
+      for (const habit of userHabits) {
+        const habitLogs = userHabitLogs
+          .filter((hl: any) => hl.habitId === (habit as any).id)
+          .sort((a: any, b: any) => a.dateKey.localeCompare(b.dateKey));
+        
+        if (habitLogs.length === 0) continue;
+        
+        let currentStreak = 0;
+        let tempMaxStreak = 0;
+        let lastDateKey: string | null = null;
+        
+        for (const log of habitLogs) {
+          if ((log as any).completed) {
+            // Check if this date continues the streak
+            if (lastDateKey === null || isNextDay(lastDateKey, (log as any).dateKey)) {
+              currentStreak++;
+            } else {
+              // Gap in dates, start new streak
+              currentStreak = 1;
+            }
+            tempMaxStreak = Math.max(tempMaxStreak, currentStreak);
+            lastDateKey = (log as any).dateKey;
+          } else {
+            // Incomplete day breaks the streak
+            currentStreak = 0;
+            lastDateKey = (log as any).dateKey;
+          }
+        }
+        
+        maxStreak = Math.max(maxStreak, tempMaxStreak);
+      }
+      
+      // Calculate goals
+      const allGoals = await this.getAll('goals');
+      const userGoals = allGoals.filter((g: any) => g.userId === userId);
+      const goalsCreated = userGoals.length;
+      const goalsCompleted = userGoals.filter((g: any) => g.status === 'completed').length;
+      
+      return {
+        maxStreak,
+        totalFocusMinutes: Math.round(totalFocusMinutes),
+        goalsCompleted,
+        goalsCreated,
+        totalSessions: userSessions.filter(s => s.status === 'completed').length,
+        timeBlocksCreated: userTimeBlocks.length,
+        daysTracked: activeDates.size,
+        earlySessionsCount,
+        eveningSessionsCount,
+        weeklyFocusMinutes: Math.round(weeklyFocusMinutes)
+      };
+    } catch (error) {
+      console.error('Error calculating user stats:', error);
+      return {
+        maxStreak: 0,
+        totalFocusMinutes: 0,
+        goalsCompleted: 0,
+        goalsCreated: 0,
+        totalSessions: 0,
+        timeBlocksCreated: 0,
+        daysTracked: 0,
+        earlySessionsCount: 0,
+        eveningSessionsCount: 0,
+        weeklyFocusMinutes: 0
+      };
+    }
+  }
+
+  // ========== HIERARCHICAL ROLLUP SYSTEM ==========
+  // Note: Main rollup implementation is in /lib/hierarchicalRollup.ts
+  // This is automatically called by DataProvider when TimeBlocks are completed
+
+  // ========== ACTIVITY RANKINGS ==========
+
+  async calculateActivityRankings(userId: string, days: number = 7): Promise<Array<{
+    activityName: string;
+    plannedHours: number;
+    actualHours: number;
+    discrepancy: number;
+    adherenceRate: number;
+    domain: string;
+    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
+  }>> {
+    try {
+      const endDate = new Date();
+      const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
+      
+      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+      const userTimeBlocks = allTimeBlocks.filter(block => 
+        block.userId === userId &&
+        new Date(block.startTime) >= startDate && 
+        new Date(block.startTime) <= endDate
+      );
+      
+      // Group by task/project name
+      const activityMap = new Map<string, {
+        plannedMinutes: number;
+        actualMinutes: number;
+        domain: string;
+        blocks: TimeBlock[];
+      }>();
+      
+      for (const block of userTimeBlocks) {
+        const activityName = block.title || block.projectId || 'Unnamed Activity';
+        const domain = block.type || 'General';
+        
+        const plannedMinutes = (new Date(block.endTime).getTime() - new Date(block.startTime).getTime()) / (1000 * 60);
+        
+        let actualMinutes = 0;
+        if (block.status === 'completed') {
+          // CLAUDE.md compliant calculation
+          if (block.actualStartTime && block.actualEndTime) {
+            actualMinutes = (new Date(block.actualEndTime).getTime() - new Date(block.actualStartTime).getTime()) / (1000 * 60);
+          } else {
+            // Fallback to planned duration for completed blocks (CLAUDE.md rule)
+            actualMinutes = (new Date(block.endTime).getTime() - new Date(block.startTime).getTime()) / (1000 * 60);
+          }
+        }
+        
+        if (!activityMap.has(activityName)) {
+          activityMap.set(activityName, {
+            plannedMinutes: 0,
+            actualMinutes: 0,
+            domain,
+            blocks: []
+          });
+        }
+        
+        const activity = activityMap.get(activityName)!;
+        activity.plannedMinutes += plannedMinutes;
+        activity.actualMinutes += actualMinutes;
+        activity.blocks.push(block);
+      }
+      
+      // Convert to rankings
+      const activities = Array.from(activityMap.entries()).map(([name, data]) => {
+        const plannedHours = data.plannedMinutes / 60;
+        const actualHours = data.actualMinutes / 60;
+        const discrepancy = actualHours - plannedHours;
+        const adherenceRate = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
+        
+        let rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
+        if (actualHours >= 2) {
+          rank = 'most_done';
+        } else if (actualHours < 0.5 && plannedHours > 1) {
+          rank = 'least_done';
+        } else if (discrepancy > 1) {
+          rank = 'overplanned';
+        } else if (discrepancy < -1) {
+          rank = 'underplanned';
+        } else {
+          rank = actualHours > plannedHours ? 'most_done' : 'least_done';
+        }
+        
+        return {
+          activityName: name,
+          plannedHours: Number(plannedHours.toFixed(1)),
+          actualHours: Number(actualHours.toFixed(1)),
+          discrepancy: Number(discrepancy.toFixed(1)),
+          adherenceRate: Math.round(adherenceRate),
+          domain: data.domain,
+          rank
+        };
+      });
+      
+      // Sort by actual hours descending
+      return activities.sort((a, b) => b.actualHours - a.actualHours);
+    } catch (error) {
+      console.error('Error calculating activity rankings:', error);
+      return [];
+    }
   }
 
   // ========== VISION BOARD BLOB STORAGE ==========
@@ -1225,7 +1537,7 @@ class LifeTrackerDB {
       }
     }
     
-    // 🔇 SHERLOCK EMERGENCY: Disabled console logs to stop infinite spam
+    // Console logs disabled
     
     try {
       const result = await this.adapter.getAll(storeName);
@@ -1351,21 +1663,34 @@ class LifeTrackerDB {
     const plannedMinutes = timeBlocks.reduce((total, block) => 
       total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60), 0
     );
+    // Follow CLAUDE.md rules - count ALL completed blocks  
     const actualMinutes = timeBlocks
-      .filter(block => block.actualStartTime && block.actualEndTime)
-      .reduce((total, block) => 
-        total + (block.actualEndTime!.getTime() - block.actualStartTime!.getTime()) / (1000 * 60), 0
-      );
+      .filter(block => block.status === 'completed')
+      .reduce((total, block) => {
+        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
+        if (block.actualStartTime && block.actualEndTime) {
+          return total + (block.actualEndTime.getTime() - block.actualStartTime.getTime()) / (1000 * 60);
+        } else {
+          // Fallback to planned duration for completed blocks (CLAUDE.md rule)
+          return total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60);
+        }
+      }, 0);
     const planVsActual = plannedMinutes > 0 ? (actualMinutes / plannedMinutes) * 100 : 0;
 
     const habits = await this.getActiveHabits(userId);
     const activeStreaks = habits.filter(habit => habit.streakCount > 0).length;
 
+    const allKeyResults = await this.getAll<KeyResult>('keyResults');
+    const userKeyResults = allKeyResults.filter(kr => kr.userId === userId && !kr.deleted);
+    const keyResultsProgress = userKeyResults.length > 0
+      ? userKeyResults.reduce((sum, kr) => sum + (kr.progress ?? 0), 0) / userKeyResults.length
+      : 0;
+
     return {
       focusMinutes: Math.round(focusMinutes),
       planVsActual: Math.round(planVsActual),
       activeStreaks,
-      keyResultsProgress: 0,
+      keyResultsProgress: Math.round(keyResultsProgress),
       mood: todaySessions.find(s => s.mood !== undefined)?.mood,
       energy: todaySessions.find(s => s.energy !== undefined)?.energy,
     };
@@ -1402,14 +1727,7 @@ class LifeTrackerDB {
         return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
       }, 0);
 
-      let actualMinutes = dayTimeBlocks.reduce((total, block) => {
-        if (block.actualStartTime && block.actualEndTime) {
-          const actualStart = new Date(block.actualStartTime);
-          const actualEnd = new Date(block.actualEndTime);
-          return total + (actualEnd.getTime() - actualStart.getTime()) / (1000 * 60);
-        }
-        return total;
-      }, 0);
+      // Use the unified calculation from above (no duplication needed)
       
       const allSessions = await this.getAll<Session>('sessions');
       const daySessions = allSessions.filter(session => 
@@ -1423,6 +1741,15 @@ class LifeTrackerDB {
       const sessionMinutes = daySessions.reduce((total, session) => {
         return total + (session.duration || 0) / 60;
       }, 0);
+      
+      // Calculate actual minutes from completed time blocks
+      let actualMinutes = dayTimeBlocks
+        .filter(block => block.status === 'completed')
+        .reduce((total, block) => {
+          const startTime = new Date(block.actualStartTime || block.startTime);
+          const endTime = new Date(block.actualEndTime || block.endTime);
+          return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
+        }, 0);
       
       if (sessionMinutes > actualMinutes) {
         actualMinutes = sessionMinutes;
@@ -1455,22 +1782,29 @@ class LifeTrackerDB {
     const allDomains = await this.getAll<Domain>('domains');
     const userDomains = allDomains.filter(d => d.userId === userId);
 
-    const allSessions = await this.getAll<Session>('sessions');
-    const periodSessions = allSessions.filter(session => 
-      session.userId === userId &&
-      new Date(session.startTime) >= startDate &&
-      new Date(session.startTime) <= endDate &&
-      session.status === 'completed'
+    // 🔧 FIX: Use TimeBlocks instead of Sessions (Sessions are rarely used)
+    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
+    const periodTimeBlocks = allTimeBlocks.filter(block =>
+      block.userId === userId &&
+      !block.deleted &&
+      block.status === 'completed' && // Only count completed blocks (actual time)
+      new Date(block.startTime) >= startDate &&
+      new Date(block.startTime) <= endDate
     );
 
     const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
 
     const domainHours = new Map<string, number>();
 
-    for (const session of periodSessions) {
-      const domain = userDomains.find(d => d.id === session.domainId);
+    for (const block of periodTimeBlocks) {
+      const domain = userDomains.find(d => d.id === block.domainId);
       const domainName = domain?.name || 'Uncategorized';
-      const hours = (session.duration || 0) / 3600;
+
+      // Calculate actual duration in hours
+      const startTime = new Date(block.actualStartTime || block.startTime);
+      const endTime = new Date(block.actualEndTime || block.endTime);
+      const durationMs = endTime.getTime() - startTime.getTime();
+      const hours = durationMs / (1000 * 60 * 60);
 
       domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
     }

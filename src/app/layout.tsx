@@ -29,6 +29,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Google Fonts for Advanced Typography */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Roboto:ital,wght@0,400;0,700;1,400&family=Open+Sans:ital,wght@0,400;0,700;1,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap"
+          rel="stylesheet"
+        />
         <link rel="icon" href="./favicon.ico" />
         <link rel="apple-touch-icon" href="./icon-192x192.png" />
         <link rel="manifest" href="./manifest.json" />

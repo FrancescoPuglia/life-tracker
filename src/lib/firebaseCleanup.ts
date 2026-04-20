@@ -1,11 +1,11 @@
 // Firebase Cleanup Utility for corrupted documents
-// 🔍 SHERLOCK HOLMES solution for Firestore corruption
+// 🔍 Data integrity check for Firestore corruption
 
 import { db } from './database';
 
 export async function cleanupCorruptedVisions(userId: string): Promise<number> {
   try {
-    console.log('🔍 SHERLOCK: Starting cleanup of corrupted visions...');
+    console.log('cleanup: Starting cleanup of corrupted visions...');
     
     const visionBoards = await db.getVisionBoards(userId);
     let cleaned = 0;
@@ -19,37 +19,37 @@ export async function cleanupCorruptedVisions(userId: string): Promise<number> {
           
           // Check for corruption signs
           if (!item.text) {
-            console.log(`🔍 SHERLOCK: Found item with empty text: ${item.id}`);
+            console.log(`cleanup: Found item with empty text: ${item.id}`);
             shouldDelete = true;
           } else if (item.text.length > 2000000) { // 2MB limit
-            console.log(`🔍 SHERLOCK: Found oversized item: ${item.id} (${(item.text.length / 1024 / 1024).toFixed(2)}MB)`);
+            console.log(`cleanup: Found oversized item: ${item.id} (${(item.text.length / 1024 / 1024).toFixed(2)}MB)`);
             shouldDelete = true;
           } else if (item.text.includes('INDEXEDDB_ID:') && item.text.length > 10000) {
             // IndexedDB references should be small
-            console.log(`🔍 SHERLOCK: Found bloated IndexedDB reference: ${item.id}`);
+            console.log(`cleanup: Found bloated IndexedDB reference: ${item.id}`);
             shouldDelete = true;
           }
           
           if (shouldDelete) {
             try {
               await db.deleteVisionItem(item.id);
-              console.log(`🔍 SHERLOCK: Deleted corrupted vision: ${item.id}`);
+              console.log(`cleanup: Deleted corrupted vision: ${item.id}`);
               cleaned++;
             } catch (error) {
-              console.error(`🔍 SHERLOCK: Failed to delete ${item.id}:`, error);
+              console.error(`cleanup: Failed to delete ${item.id}:`, error);
             }
           }
         }
       } catch (error) {
-        console.error(`🔍 SHERLOCK: Error processing board ${board.id}:`, error);
+        console.error(`cleanup: Error processing board ${board.id}:`, error);
       }
     }
     
-    console.log(`🔍 SHERLOCK: Cleanup completed. Removed ${cleaned} corrupted items.`);
+    console.log(`cleanup: Cleanup completed. Removed ${cleaned} corrupted items.`);
     return cleaned;
     
   } catch (error) {
-    console.error('🔍 SHERLOCK: Cleanup failed:', error);
+    console.error('cleanup: Cleanup failed:', error);
     return 0;
   }
 }
@@ -83,7 +83,7 @@ export async function validateDocument(text: string): Promise<boolean> {
     return true;
     
   } catch (error) {
-    console.error('🔍 SHERLOCK: Document validation failed:', error);
+    console.error('cleanup: Document validation failed:', error);
     return false;
   }
 }

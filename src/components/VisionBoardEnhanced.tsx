@@ -108,7 +108,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        console.log('🔍 SHERLOCK: ESC key pressed, closing immersive');
+        console.log('VisionBoard: ESC key pressed, closing immersive');
         if (immersiveVision) {
           closeImmersive();
         } else if (isModalOpen) {
@@ -127,7 +127,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
     if (!user) return;
     
     try {
-      console.log('🔍 SHERLOCK: Loading visions FROM LOCAL STORAGE ONLY...');
+      console.log('VisionBoard: Loading visions FROM LOCAL STORAGE ONLY...');
       
       // BYPASS FIRESTORE COMPLETELY - Use only localStorage for visions
       const storageKey = `vision_board_${user.uid}`;
@@ -137,20 +137,20 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
         try {
           const localVisions = JSON.parse(storedData);
           setVisions(localVisions);
-          console.log(`🔍 SHERLOCK: Loaded ${localVisions.length} visions from localStorage`);
+          console.log(`VisionBoard: Loaded ${localVisions.length} visions from localStorage`);
           return;
         } catch (error) {
-          console.error('🔍 SHERLOCK: localStorage parse error, clearing:', error);
+          console.error('VisionBoard: localStorage parse error, clearing:', error);
           localStorage.removeItem(storageKey);
         }
       }
       
       // If no local data, start with empty array
       setVisions([]);
-      console.log('🔍 SHERLOCK: No local visions found, starting fresh');
+      console.log('VisionBoard: No local visions found, starting fresh');
       
     } catch (error) {
-      console.error('🔍 SHERLOCK: Error loading visions (using fallback):', error);
+      console.error('VisionBoard: Error loading visions (using fallback):', error);
       setVisions([]); // Fallback to empty array
     }
   };
@@ -159,7 +159,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
     if (!user) return;
     
     try {
-      console.log('🔍 SHERLOCK: Skipping Firestore board settings, using defaults...');
+      console.log('VisionBoard: Skipping Firestore board settings, using defaults...');
       
       // BYPASS FIRESTORE COMPLETELY - Use default settings
       setBoardSettings({
@@ -170,9 +170,9 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
         domainId: 'default'
       });
       
-      console.log('🔍 SHERLOCK: Board settings loaded from defaults (no Firestore)');
+      console.log('VisionBoard: Board settings loaded from defaults (no Firestore)');
     } catch (error) {
-      console.error('🔍 SHERLOCK: Failed to set default board settings:', error);
+      console.error('VisionBoard: Failed to set default board settings:', error);
     }
   };
 
@@ -180,7 +180,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
     if (!user) return;
 
     try {
-      console.log('🔍 SHERLOCK: Saving vision TO LOCAL STORAGE ONLY...');
+      console.log('VisionBoard: Saving vision TO LOCAL STORAGE ONLY...');
 
       // Create vision with unique ID
       const newVision: Vision = {
@@ -198,7 +198,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
 
       // Handle media/audio processing for localStorage
       if (mediaFile && mediaPreview) {
-        console.log('🔍 SHERLOCK: Processing media for localStorage');
+        console.log('VisionBoard: Processing media for localStorage');
         if (mediaPreview.startsWith('INDEXEDDB:')) {
           // Keep IndexedDB reference as is
           newVision.media = mediaPreview;
@@ -209,7 +209,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
       }
 
       if (audioFile && audioPreview) {
-        console.log('🔍 SHERLOCK: Processing audio for localStorage');
+        console.log('VisionBoard: Processing audio for localStorage');
         newVision.audio = audioPreview;
       }
 
@@ -224,11 +224,11 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
       // Update local state
       setVisions(updatedVisions);
       
-      console.log('🔍 SHERLOCK: Vision saved successfully to localStorage!');
+      console.log('VisionBoard: Vision saved successfully to localStorage!');
       showToast();
       
     } catch (error: any) {
-      console.error('🔍 SHERLOCK: Failed to save vision to localStorage:', error);
+      console.error('VisionBoard: Failed to save vision to localStorage:', error);
       alert('❌ Errore nel salvare la visione. Riprova.');
       throw error;
     }
@@ -238,7 +238,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
     if (!user) return;
     
     try {
-      console.log('🔍 SHERLOCK: Deleting vision from localStorage...');
+      console.log('VisionBoard: Deleting vision from localStorage...');
       
       // Remove from local state
       const updatedVisions = visions.filter(v => v.id !== visionId);
@@ -248,7 +248,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
       const storageKey = `vision_board_${user.uid}`;
       localStorage.setItem(storageKey, JSON.stringify(updatedVisions));
       
-      console.log('🔍 SHERLOCK: Vision deleted successfully from localStorage!');
+      console.log('VisionBoard: Vision deleted successfully from localStorage!');
       
       // Show success toast
       const toast = document.getElementById('deleteToast');
@@ -257,7 +257,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
         setTimeout(() => toast.classList.remove('show'), 3000);
       }
     } catch (error) {
-      console.error('🔍 SHERLOCK: Failed to delete vision from localStorage:', error);
+      console.error('VisionBoard: Failed to delete vision from localStorage:', error);
       alert('❌ Errore nell\'eliminazione. Riprova.');
     }
   };
@@ -392,55 +392,55 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
     const file = e.target.files?.[0];
     if (!file) return;
     
-    console.log(`🔍 SHERLOCK: Starting file processing...`);
+    console.log(`VisionBoard: Starting file processing...`);
     setIsUploadingMedia(true);
     
     try {
       const sizeInMB = file.size / (1024 * 1024);
-      console.log(`🔍 SHERLOCK: Processing file: ${file.name}, Size: ${sizeInMB.toFixed(2)}MB`);
+      console.log(`VisionBoard: Processing file: ${file.name}, Size: ${sizeInMB.toFixed(2)}MB`);
       
       setMediaFile(file);
     
     if (file.type.startsWith('image/') && sizeInMB > 0.8) {
       // Compress image
-      console.log('🔍 SHERLOCK: Compressing image...');
+      console.log('VisionBoard: Compressing image...');
       const compressedImage = await compressImage(file, 0.6);
       setMediaPreview(compressedImage);
       
       const compressedSize = compressedImage.length / (1024 * 1024);
-      console.log(`🔍 SHERLOCK: Image compressed to ${compressedSize.toFixed(2)}MB`);
+      console.log(`VisionBoard: Image compressed to ${compressedSize.toFixed(2)}MB`);
       setIsUploadingMedia(false);
       
     } else if (file.type.startsWith('video/')) {
       // Smart video handling: IndexedDB for large files, base64 for small ones
-      console.log('🔍 SHERLOCK: Processing video intelligently...');
+      console.log('VisionBoard: Processing video intelligently...');
       const fileSizeInMB = file.size / (1024 * 1024);
       
       if (fileSizeInMB > 1) {
         // Large videos: Store in IndexedDB
-        console.log(`🔍 SHERLOCK: Large video (${fileSizeInMB.toFixed(2)}MB) - storing in IndexedDB...`);
+        console.log(`VisionBoard: Large video (${fileSizeInMB.toFixed(2)}MB) - storing in IndexedDB...`);
         try {
           const videoId = await videoStorage.storeVideo(file);
           setMediaPreview(`INDEXEDDB:${videoId}`); // Store IndexedDB reference
-          console.log(`🔍 SHERLOCK: Video stored in IndexedDB successfully! ID: ${videoId}`);
+          console.log(`VisionBoard: Video stored in IndexedDB successfully! ID: ${videoId}`);
           setIsUploadingMedia(false);
         } catch (error) {
-          console.error('🔍 SHERLOCK: IndexedDB storage failed:', error);
+          console.error('VisionBoard: IndexedDB storage failed:', error);
           alert('❌ Errore nel salvare il video. Prova con un file più piccolo.');
           setIsUploadingMedia(false);
         }
       } else {
         // Small videos: Use base64 as before
-        console.log(`🔍 SHERLOCK: Small video (${fileSizeInMB.toFixed(2)}MB) - using base64...`);
+        console.log(`VisionBoard: Small video (${fileSizeInMB.toFixed(2)}MB) - using base64...`);
         const reader = new FileReader();
         reader.onload = (e) => {
           const result = e.target?.result as string;
           setMediaPreview(result);
-          console.log(`🔍 SHERLOCK: Small video processing completed!`);
+          console.log(`VisionBoard: Small video processing completed!`);
           setIsUploadingMedia(false);
         };
         reader.onerror = () => {
-          console.error('🔍 SHERLOCK: Video processing failed!');
+          console.error('VisionBoard: Video processing failed!');
           setIsUploadingMedia(false);
           alert('❌ Errore nel processare il video. Prova con un file più piccolo.');
         };
@@ -448,23 +448,23 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
       }
     } else {
       // Small file, process normally
-      console.log('🔍 SHERLOCK: Processing small file normally...');
+      console.log('VisionBoard: Processing small file normally...');
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result as string;
         setMediaPreview(result);
-        console.log('🔍 SHERLOCK: File processing completed successfully!');
+        console.log('VisionBoard: File processing completed successfully!');
         setIsUploadingMedia(false);
       };
       reader.onerror = () => {
-        console.error('🔍 SHERLOCK: FileReader error!');
+        console.error('VisionBoard: FileReader error!');
         setIsUploadingMedia(false);
       };
       reader.readAsDataURL(file);
     }
     
     } catch (error) {
-      console.error('🔍 SHERLOCK: Error in handleMediaFileChange:', error);
+      console.error('VisionBoard: Error in handleMediaFileChange:', error);
       alert(`❌ Errore nel processare il file: ${error}`);
       setIsUploadingMedia(false);
     }
@@ -486,19 +486,19 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
     // If it's an IndexedDB video, load the URL first
     if (vision.media?.startsWith('INDEXEDDB:')) {
       const videoId = vision.media.replace('INDEXEDDB:', '');
-      console.log(`🔍 SHERLOCK: Loading IndexedDB video: ${videoId}`);
+      console.log(`VisionBoard: Loading IndexedDB video: ${videoId}`);
       try {
         const videoURL = await videoStorage.getVideoURL(videoId);
         if (videoURL) {
           setIndexedDBVideoURL(videoURL);
-          console.log('🔍 SHERLOCK: IndexedDB video URL loaded successfully');
+          console.log('VisionBoard: IndexedDB video URL loaded successfully');
         } else {
-          console.error('🔍 SHERLOCK: Failed to load IndexedDB video');
+          console.error('VisionBoard: Failed to load IndexedDB video');
           alert('❌ Errore nel caricare il video. Il file potrebbe essere stato eliminato.');
           return;
         }
       } catch (error) {
-        console.error('🔍 SHERLOCK: IndexedDB video loading failed:', error);
+        console.error('VisionBoard: IndexedDB video loading failed:', error);
         alert('❌ Errore nel caricare il video dal storage locale.');
         return;
       }
@@ -524,13 +524,13 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
   };
 
   const closeImmersive = () => {
-    console.log('🔍 SHERLOCK: closeImmersive called!');
+    console.log('VisionBoard: closeImmersive called!');
     
     // Clean up IndexedDB video URL
     if (indexedDBVideoURL) {
       URL.revokeObjectURL(indexedDBVideoURL);
       setIndexedDBVideoURL('');
-      console.log('🔍 SHERLOCK: IndexedDB video URL cleaned up');
+      console.log('VisionBoard: IndexedDB video URL cleaned up');
     }
     
     setImmersiveVision(null);
@@ -539,7 +539,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
       immersiveAudioRef.current.src = '';
     }
     document.body.style.overflow = '';
-    console.log('🔍 SHERLOCK: Immersive closed successfully!');
+    console.log('VisionBoard: Immersive closed successfully!');
   };
 
   const formatDate = (dateString: string) => {
@@ -905,7 +905,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
                     {isUploadingMedia ? (
                       <>
                         <div className="animate-spin text-3xl mb-3">⟳</div>
-                        <div className="text-yellow-400 mb-1">🔍 SHERLOCK: Processando file...</div>
+                        <div className="text-yellow-400 mb-1">VisionBoard: Processando file...</div>
                         <div className="text-gray-400 text-sm">Attendere prego...</div>
                       </>
                     ) : (
@@ -980,7 +980,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
             onClick={(e) => {
               // Close if clicking on the background (not on video/image)
               if (e.target === e.currentTarget) {
-                console.log('🔍 SHERLOCK: Background clicked, closing immersive');
+                console.log('VisionBoard: Background clicked, closing immersive');
                 closeImmersive();
               }
             }}
@@ -996,7 +996,7 @@ export default function VisionBoardEnhanced({ onBack, className = "" }: VisionBo
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('🔍 SHERLOCK: Close button clicked!');
+                console.log('VisionBoard: Close button clicked!');
                 closeImmersive();
               }}
               className="absolute top-8 right-8 w-12 h-12 bg-white/10 backdrop-blur-md rounded-full border-2 border-yellow-400 text-yellow-400 text-2xl hover:bg-yellow-400 hover:text-black transition-all transform hover:rotate-90 z-[9999] cursor-pointer"

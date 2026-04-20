@@ -1,30 +1,18 @@
 // src/lib/ai/openai-integration.ts
-// 🧠 INTEGRAZIONE CHATGPT COMPLETA - Vede tutto, analizza tutto, modifica tutto
-// MODALITÀ PSICOPATICO CERTOSINO 🔥
+// AI Chat Integration - supports OpenAI and Ollama via provider abstraction
 
 import OpenAI from 'openai';
-import { 
-  Goal, Task, TimeBlock, Habit, 
-  Session, Project, Domain 
+import {
+  Goal, Task, TimeBlock, Habit,
+  Session, Project, Domain
 } from '@/types';
+import { getAIConfig } from './provider';
 
 // ============================================================================
-// CONFIGURAZIONE
-// ============================================================================
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const MODEL = 'gpt-3.5-turbo'; // Modello più economico
-const MAX_TOKENS = 4000;
-
-// ============================================================================
-// TIPI PER IL CONTESTO
+// TYPES
 // ============================================================================
 
 export interface UserContext {
-  // Dati completi dell'utente
   goals: Goal[];
   projects: Project[];
   tasks: Task[];
@@ -33,8 +21,7 @@ export interface UserContext {
   habits: Habit[];
   habitLogs: { habitId: string; date: Date; completed: boolean }[];
   domains: Domain[];
-  
-  // KPIs calcolati
+
   kpis: {
     focusMinutesToday: number;
     focusMinutesWeek: number;
@@ -44,34 +31,12 @@ export interface UserContext {
     completedTasksWeek: number;
     overrunCount: number;
   };
-  
-  // Preferenze utente
+
   preferences: {
     workHoursStart: string;
     workHoursEnd: string;
     timezone: string;
   };
-}
-
-export interface AIResponse {
-  message: string;
-  suggestions?: Suggestion[];
-  analysis?: Analysis;
-  proposedChanges?: ProposedChange[];
-}
-
-export interface Suggestion {
-  type: 'task' | 'timeblock' | 'habit' | 'goal';
-  action: 'create' | 'update' | 'delete' | 'move';
-  data: any;
-  reason: string;
-}
-
-export interface Analysis {
-  strengths: string[];
-  weaknesses: string[];
-  patterns: string[];
-  recommendations: string[];
 }
 
 export interface ProposedChange {
@@ -84,7 +49,7 @@ export interface ProposedChange {
 }
 
 // ============================================================================
-// SYSTEM PROMPT - Il cervello di ChatGPT
+// SYSTEM PROMPT
 // ============================================================================
 
 function buildSystemPrompt(): string {
@@ -111,13 +76,6 @@ Hai accesso COMPLETO ai dati dell'utente:
 - Formato: [Analisi breve] + [Perché] + [Cosa fare ORA]
 - In italiano
 
-## QUANDO PROPONI MODIFICHE
-Genera un JSON strutturato con:
-- type: 'timeblock' | 'task' | 'habit' | 'goal'
-- action: 'create' | 'update' | 'delete'
-- data: i dati specifici
-- reason: perché suggerisci questo
-
 ## REGOLE ASSOLUTE
 - MAI inventare dati - usa solo ciò che vedi nel contesto
 - MAI modificare senza spiegare perché
@@ -126,59 +84,56 @@ Genera un JSON strutturato con:
 }
 
 // ============================================================================
-// COSTRUTTORE CONTESTO - Prepara tutti i dati per ChatGPT
+// CONTEXT BUILDER
 // ============================================================================
 
 export function buildContextMessage(context: UserContext): string {
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
-  
-  // Filtra dati di oggi
-  const todayTimeBlocks = context.timeBlocks.filter(tb => 
+
+  const todayTimeBlocks = context.timeBlocks.filter(tb =>
     new Date(tb.startTime).toISOString().split('T')[0] === todayStr
   );
   const todaySessions = context.sessions.filter(s =>
     new Date(s.startTime).toISOString().split('T')[0] === todayStr
   );
-  const todayTasks = context.tasks.filter(t => 
+  const todayTasks = context.tasks.filter(t =>
     t.status === 'pending' || t.status === 'in_progress'
   );
-  
-  // Calcola minuti effettivi oggi
+
   const actualMinutesToday = todaySessions.reduce((sum, s) => {
     const end = s.endTime ? new Date(s.endTime) : new Date();
     return sum + Math.round((end.getTime() - new Date(s.startTime).getTime()) / 60000);
   }, 0);
-  
-  // Calcola minuti pianificati oggi
+
   const plannedMinutesToday = todayTimeBlocks.reduce((sum, tb) => {
     return sum + Math.round((new Date(tb.endTime).getTime() - new Date(tb.startTime).getTime()) / 60000);
   }, 0);
 
-  return `## 📊 STATO ATTUALE - ${today.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}
+  return `## STATO ATTUALE - ${today.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}
 
-### ⏱️ OGGI
-- Pianificato: ${plannedMinutesToday} minuti (${Math.round(plannedMinutesToday/60)}h)
-- Effettivo: ${actualMinutesToday} minuti (${Math.round(actualMinutesToday/60)}h)  
+### OGGI
+- Pianificato: ${plannedMinutesToday} min (${Math.round(plannedMinutesToday/60)}h)
+- Effettivo: ${actualMinutesToday} min (${Math.round(actualMinutesToday/60)}h)
 - Plan vs Actual: ${plannedMinutesToday > 0 ? Math.round((actualMinutesToday/plannedMinutesToday)*100) : 0}%
 
-### 📅 TIME BLOCKS OGGI (${todayTimeBlocks.length})
+### TIME BLOCKS OGGI (${todayTimeBlocks.length})
 ${todayTimeBlocks.map(tb => {
   const start = new Date(tb.startTime).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
   const end = new Date(tb.endTime).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
   const session = todaySessions.find(s => s.timeBlockId === tb.id);
-  const status = session ? (session.endTime ? '✅' : '🔄') : '⏳';
-  return `- ${status} ${start}-${end}: ${tb.title} [${tb.type}]`;
+  const status = session ? (session.endTime ? 'DONE' : 'IN CORSO') : 'PIANIFICATO';
+  return `- [${status}] ${start}-${end}: ${tb.title} [${tb.type}]`;
 }).join('\n') || '- Nessun time block pianificato'}
 
-### 📋 TASK ATTIVI (${todayTasks.length})
+### TASK ATTIVI (${todayTasks.length})
 ${todayTasks.slice(0, 10).map(t => {
-  const deadline = t.dueDate ? ` ⏰${new Date(t.dueDate).toLocaleDateString('it-IT')}` : '';
+  const deadline = t.dueDate ? ` scade:${new Date(t.dueDate).toLocaleDateString('it-IT')}` : '';
   const goal = context.goals.find(g => g.id === t.goalId);
-  return `- [${t.priority}] ${t.title}${deadline}${goal ? ` → ${goal.title}` : ''}`;
+  return `- [${t.priority}] ${t.title}${deadline}${goal ? ` -> ${goal.title}` : ''}`;
 }).join('\n') || '- Nessun task attivo'}
 
-### 🎯 GOALS ATTIVI (${context.goals.filter(g => g.status === 'active').length})
+### GOALS ATTIVI (${context.goals.filter(g => g.status === 'active').length})
 ${context.goals.filter(g => g.status === 'active').map(g => {
   const tasks = context.tasks.filter(t => t.goalId === g.id);
   const completed = tasks.filter(t => t.status === 'completed').length;
@@ -186,16 +141,16 @@ ${context.goals.filter(g => g.status === 'active').map(g => {
   return `- ${g.title}: ${progress}% (${completed}/${tasks.length} task)`;
 }).join('\n') || '- Nessun goal attivo'}
 
-### 🔥 HABITS
+### HABITS
 ${context.habits.filter(h => h.isActive).map(h => {
-  const todayLog = context.habitLogs.find(l => 
-    l.habitId === h.id && 
+  const todayLog = context.habitLogs.find(l =>
+    l.habitId === h.id &&
     new Date(l.date).toISOString().split('T')[0] === todayStr
   );
-  return `- ${todayLog?.completed ? '✅' : '⬜'} ${h.name} (streak: ${h.streakCount} giorni)`;
+  return `- ${todayLog?.completed ? '[FATTO]' : '[  ]'} ${h.name} (streak: ${h.streakCount} giorni)`;
 }).join('\n') || '- Nessuna abitudine attiva'}
 
-### 📈 KPIs
+### KPIs
 - Focus oggi: ${context.kpis.focusMinutesToday} min
 - Focus settimana: ${context.kpis.focusMinutesWeek} min
 - Task completati oggi: ${context.kpis.completedTasksToday}
@@ -204,28 +159,10 @@ ${context.habits.filter(h => h.isActive).map(h => {
 }
 
 // ============================================================================
-// TOOL DEFINITIONS - Cosa può fare ChatGPT
+// TOOL DEFINITIONS (only used when provider supports tools)
 // ============================================================================
 
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'analyze_productivity',
-      description: 'Analizza la produttività dell\'utente identificando punti di forza, debolezze e pattern',
-      parameters: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            enum: ['today', 'week', 'month'],
-            description: 'Periodo da analizzare'
-          }
-        },
-        required: ['period']
-      }
-    }
-  },
   {
     type: 'function',
     function: {
@@ -234,40 +171,14 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       parameters: {
         type: 'object',
         properties: {
-          action: {
-            type: 'string',
-            enum: ['create', 'update', 'delete'],
-            description: 'Azione da eseguire'
-          },
-          timeBlockId: {
-            type: 'string',
-            description: 'ID del time block (per update/delete)'
-          },
-          title: {
-            type: 'string',
-            description: 'Titolo del time block'
-          },
-          startTime: {
-            type: 'string',
-            description: 'Ora di inizio ISO'
-          },
-          endTime: {
-            type: 'string',
-            description: 'Ora di fine ISO'
-          },
-          type: {
-            type: 'string',
-            enum: ['deep', 'shallow', 'meeting', 'break', 'personal'],
-            description: 'Tipo di blocco'
-          },
-          taskId: {
-            type: 'string',
-            description: 'ID del task collegato'
-          },
-          reason: {
-            type: 'string',
-            description: 'Motivazione della proposta'
-          }
+          action: { type: 'string', enum: ['create', 'update', 'delete'] },
+          timeBlockId: { type: 'string' },
+          title: { type: 'string' },
+          startTime: { type: 'string' },
+          endTime: { type: 'string' },
+          type: { type: 'string', enum: ['deep', 'shallow', 'meeting', 'break', 'personal'] },
+          taskId: { type: 'string' },
+          reason: { type: 'string' }
         },
         required: ['action', 'reason']
       }
@@ -277,105 +188,30 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'propose_task_update',
-      description: 'Proponi di modificare un task (priorità, deadline, stato)',
+      description: 'Proponi di modificare un task',
       parameters: {
         type: 'object',
         properties: {
-          taskId: {
-            type: 'string',
-            description: 'ID del task'
-          },
+          taskId: { type: 'string' },
           updates: {
             type: 'object',
             properties: {
               priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'] },
               status: { type: 'string', enum: ['pending', 'in-progress', 'completed', 'cancelled'] },
-              dueDate: { type: 'string', description: 'Nuova deadline ISO' },
+              dueDate: { type: 'string' },
               estimatedMinutes: { type: 'number' }
             }
           },
-          reason: {
-            type: 'string',
-            description: 'Motivazione'
-          }
+          reason: { type: 'string' }
         },
         required: ['taskId', 'updates', 'reason']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'propose_schedule_optimization',
-      description: 'Proponi un\'ottimizzazione completa della giornata',
-      parameters: {
-        type: 'object',
-        properties: {
-          date: {
-            type: 'string',
-            description: 'Data da ottimizzare (ISO)'
-          },
-          strategy: {
-            type: 'string',
-            enum: ['maximize_deep_work', 'balance', 'deadline_focus', 'energy_based'],
-            description: 'Strategia di ottimizzazione'
-          },
-          changes: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', enum: ['create', 'move', 'delete'] },
-                timeBlockId: { type: 'string' },
-                newStartTime: { type: 'string' },
-                newEndTime: { type: 'string' },
-                title: { type: 'string' },
-                blockType: { type: 'string' }
-              }
-            },
-            description: 'Lista di modifiche proposte'
-          },
-          reason: {
-            type: 'string',
-            description: 'Spiegazione dell\'ottimizzazione'
-          }
-        },
-        required: ['date', 'strategy', 'changes', 'reason']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'suggest_habit_improvement',
-      description: 'Suggerisci miglioramenti per le abitudini',
-      parameters: {
-        type: 'object',
-        properties: {
-          habitId: {
-            type: 'string',
-            description: 'ID dell\'abitudine'
-          },
-          suggestion: {
-            type: 'string',
-            description: 'Suggerimento specifico'
-          },
-          ifThenPlan: {
-            type: 'string',
-            description: 'Piano if-then: "SE [trigger] ALLORA [azione]"'
-          },
-          reason: {
-            type: 'string'
-          }
-        },
-        required: ['habitId', 'suggestion', 'reason']
       }
     }
   }
 ];
 
 // ============================================================================
-// CHIAMATA PRINCIPALE A OPENAI
+// MAIN CHAT FUNCTION
 // ============================================================================
 
 export async function chat(
@@ -387,9 +223,10 @@ export async function chat(
   toolCalls: any[];
   proposedChanges: ProposedChange[];
 }> {
+  const config = getAIConfig();
   const systemPrompt = buildSystemPrompt();
   const contextMessage = buildContextMessage(context);
-  
+
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     { role: 'system', content: contextMessage },
@@ -401,24 +238,29 @@ export async function chat(
   ];
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: MODEL,
+    const requestParams: any = {
+      model: config.chatModel,
       messages,
-      tools,
-      tool_choice: 'auto',
-      max_tokens: MAX_TOKENS,
+      max_tokens: config.maxTokens,
       temperature: 0.7,
-    });
+    };
+
+    // Only add tools for providers that support them
+    if (config.supportsTools) {
+      requestParams.tools = tools;
+      requestParams.tool_choice = 'auto';
+    }
+
+    const completion = await config.client.chat.completions.create(requestParams);
 
     const assistantMessage = completion.choices[0].message;
-    const toolCalls = assistantMessage.tool_calls || [];
+    const rawToolCalls = assistantMessage.tool_calls || [];
     const proposedChanges: ProposedChange[] = [];
 
-    // Processa tool calls
-    for (const toolCall of toolCalls) {
+    for (const toolCall of rawToolCalls) {
       if (toolCall.type !== 'function') continue;
       const args = JSON.parse(toolCall.function.arguments);
-      
+
       switch (toolCall.function.name) {
         case 'propose_timeblock':
           proposedChanges.push({
@@ -435,48 +277,13 @@ export async function chat(
             reason: args.reason
           });
           break;
-          
+
         case 'propose_task_update':
           proposedChanges.push({
             id: `change-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             type: 'task',
             action: 'update',
-            after: {
-              taskId: args.taskId,
-              ...args.updates
-            },
-            reason: args.reason
-          });
-          break;
-          
-        case 'propose_schedule_optimization':
-          for (const change of args.changes || []) {
-            proposedChanges.push({
-              id: `change-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: 'timeblock',
-              action: change.type,
-              after: {
-                timeBlockId: change.timeBlockId,
-                title: change.title,
-                startTime: change.newStartTime,
-                endTime: change.newEndTime,
-                type: change.blockType
-              },
-              reason: args.reason
-            });
-          }
-          break;
-          
-        case 'suggest_habit_improvement':
-          proposedChanges.push({
-            id: `change-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: 'habit',
-            action: 'update',
-            after: {
-              habitId: args.habitId,
-              suggestion: args.suggestion,
-              ifThenPlan: args.ifThenPlan
-            },
+            after: { taskId: args.taskId, ...args.updates },
             reason: args.reason
           });
           break;
@@ -485,91 +292,17 @@ export async function chat(
 
     return {
       response: assistantMessage.content || '',
-      toolCalls,
+      toolCalls: rawToolCalls,
       proposedChanges
     };
-    
-  } catch (error) {
-    console.error('🧠 OpenAI Error:', error);
+
+  } catch (error: any) {
+    // Provide helpful error messages based on provider
+    if (config.provider === 'ollama' && error?.code === 'ECONNREFUSED') {
+      throw new Error(
+        'Ollama non raggiungibile. Assicurati che sia avviato: ollama serve'
+      );
+    }
     throw error;
-  }
-}
-
-// ============================================================================
-// STREAMING VERSION
-// ============================================================================
-
-export async function* chatStream(
-  userMessage: string,
-  context: UserContext,
-  conversationHistory: { role: 'user' | 'assistant'; content: string }[] = []
-): AsyncGenerator<{ type: 'content' | 'tool' | 'done'; data: any }> {
-  const systemPrompt = buildSystemPrompt();
-  const contextMessage = buildContextMessage(context);
-  
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: 'system', content: systemPrompt },
-    { role: 'system', content: contextMessage },
-    ...conversationHistory.map(msg => ({
-      role: msg.role as 'user' | 'assistant',
-      content: msg.content
-    })),
-    { role: 'user', content: userMessage }
-  ];
-
-  const stream = await openai.chat.completions.create({
-    model: MODEL,
-    messages,
-    tools,
-    tool_choice: 'auto',
-    max_tokens: MAX_TOKENS,
-    temperature: 0.7,
-    stream: true,
-  });
-
-  let toolCalls: any[] = [];
-  let currentToolCall: any = null;
-
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta;
-    
-    // Contenuto testuale
-    if (delta?.content) {
-      yield { type: 'content', data: delta.content };
-    }
-    
-    // Tool calls
-    if (delta?.tool_calls) {
-      for (const tc of delta.tool_calls) {
-        if (tc.index !== undefined) {
-          if (!toolCalls[tc.index]) {
-            toolCalls[tc.index] = {
-              id: tc.id || '',
-              function: { name: '', arguments: '' }
-            };
-          }
-          if (tc.id) toolCalls[tc.index].id = tc.id;
-          if (tc.function?.name) toolCalls[tc.index].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
-        }
-      }
-    }
-    
-    // Fine stream
-    if (chunk.choices[0]?.finish_reason) {
-      // Processa tool calls finali
-      for (const tc of toolCalls) {
-        if (tc.function.name && tc.function.arguments) {
-          yield { 
-            type: 'tool', 
-            data: {
-              name: tc.function.name,
-              arguments: JSON.parse(tc.function.arguments)
-            }
-          };
-        }
-      }
-      yield { type: 'done', data: null };
-    }
   }
 }

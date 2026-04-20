@@ -1,5 +1,5 @@
 // 🔄 RE-PLANNING ENGINE - Real-Time Dynamic Adaptation
-// MODALITÀ PSICOPATICO ESTREMO 🔥🔥🔥🔥
+
 
 import {
   RePlanningEngine, RePlanningTrigger, RePlanningOptions, RePlanningResult,
