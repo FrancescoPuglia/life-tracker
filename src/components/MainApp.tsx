@@ -22,6 +22,7 @@ import BlockCountdown from '@/components/BlockCountdown';
 import ContextualMotivation from '@/components/ContextualMotivation';
 import { audioManager } from '@/lib/audioManager';
 import { calculateStreak, StreakData } from '@/lib/streakCalculator';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 // Lazy-loaded heavy components (loaded on demand by tab)
 // This reduces initial bundle size by ~400KB
@@ -39,12 +40,13 @@ const NotesPage = lazy(() => import('@/components/NotesPage'));
 const EventsCalendar = lazy(() => import('@/components/EventsCalendar'));
 const HeroWall = lazy(() => import('@/components/HeroWall'));
 const WeeklyExecution = lazy(() => import('@/components/WeeklyExecution'));
+const VoiceSettings = lazy(() => import('@/components/VoiceSettings'));
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'voice';
 
 interface MainAppProps {
   buildId: string;
@@ -89,9 +91,7 @@ export default function MainApp({ buildId }: MainAppProps) {
     maxStreak: 0,
     totalFocusMinutes: 0,
     goalsCompleted: 0,
-    goalsCreated: 0,
     totalSessions: 0,
-    timeBlocksCreated: 0,
     daysTracked: 0,
     earlySessionsCount: 0,
     eveningSessionsCount: 0,
@@ -203,9 +203,7 @@ export default function MainApp({ buildId }: MainAppProps) {
       maxStreak: Math.max(prev.maxStreak, streakData.bestStreak),
       totalFocusMinutes: Math.round(totalFocusMinutes),
       goalsCompleted: data.goals.filter(g => g.status === 'completed').length,
-      goalsCreated: data.goals.length,
       totalSessions: completedBlocks.length,
-      timeBlocksCreated: data.timeBlocks.filter(b => !b.deleted).length,
       daysTracked: activeDays.size,
       earlySessionsCount: earlyBlocks.length,
       eveningSessionsCount: eveningBlocks.length,
@@ -305,6 +303,7 @@ export default function MainApp({ buildId }: MainAppProps) {
   // ========== OTHER HANDLERS ==========
   const handleBadgeUnlocked = () => {
     audioManager.play('achievementUnlock');
+    getVoiceService()?.speakSystem('Badge sbloccato!');
   };
 
   // ========== RENDER ==========
@@ -506,6 +505,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                       { id: 'weekly', label: 'Weekly Execution', icon: '📈', description: 'Piano vs realta', color: 'from-emerald-400 to-emerald-600' },
                       { id: 'events', label: 'Calendario', icon: '📆', description: 'Eventi strategici', color: 'from-rose-400 to-rose-600' },
                       { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones', color: 'from-amber-400 to-amber-600' },
+                      { id: 'voice', label: 'Voice System', icon: '🎙️', description: 'Lingua e voci', color: 'from-sky-400 to-blue-600' },
                     ].map(({ id, label, icon, description, color }) => (
                       <button
                         key={id}
@@ -564,6 +564,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'weekly' && '📈 Weekly Execution'}
                   {activeTab === 'events' && '📆 Calendario Strategico'}
                   {activeTab === 'badges' && '🏆 Achievements'}
+                  {activeTab === 'voice' && '🎙️ Voice System'}
                   <div className="achievement-badge ml-auto">ACTIVE</div>
                 </h2>
               </div>
@@ -743,6 +744,10 @@ export default function MainApp({ buildId }: MainAppProps) {
                   <VisionBoardEnhanced
                     onBack={() => setActiveTab('planner')}
                   />
+                )}
+
+                {activeTab === 'voice' && (
+                  <VoiceSettings />
                 )}
               </div>
             </div>

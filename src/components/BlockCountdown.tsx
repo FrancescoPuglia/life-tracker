@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Volume2, VolumeX } from 'lucide-react';
 import { useDataContext } from '@/providers/DataProvider';
 import { audioManager } from '@/lib/audioManager';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 interface BlockCountdownSettings {
   enabled: boolean;
-  voiceEnabled: boolean;
   soundEnabled: boolean;
   leadTimeSeconds: number;
 }
@@ -17,9 +17,13 @@ const SETTINGS_KEY = 'life_tracker_countdown_settings';
 function loadSettings(): BlockCountdownSettings {
   try {
     const stored = localStorage.getItem(SETTINGS_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Migrate: voiceEnabled is now handled by the centralized voice service
+      return { enabled: parsed.enabled ?? true, soundEnabled: parsed.soundEnabled ?? true, leadTimeSeconds: parsed.leadTimeSeconds ?? 60 };
+    }
   } catch { /* ignore */ }
-  return { enabled: true, voiceEnabled: true, soundEnabled: true, leadTimeSeconds: 60 };
+  return { enabled: true, soundEnabled: true, leadTimeSeconds: 60 };
 }
 
 function saveSettings(s: BlockCountdownSettings) {
@@ -46,21 +50,6 @@ export default function BlockCountdown() {
     });
   }, []);
 
-  // Speak using SpeechSynthesis
-  const speak = useCallback((text: string) => {
-    if (!settings.voiceEnabled) return;
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'it-IT';
-      utterance.rate = 0.95;
-      utterance.pitch = 1.0;
-      utterance.volume = 0.9;
-      window.speechSynthesis.speak(utterance);
-    } catch { /* voice not available */ }
-  }, [settings.voiceEnabled]);
-
   // Check for upcoming blocks
   useEffect(() => {
     if (data.status !== 'ready' || !settings.enabled) return;
@@ -83,15 +72,29 @@ export default function BlockCountdown() {
           const goal = block.goalId ? data.goals.find(g => g.id === block.goalId) : null;
           let reason = '';
           if (goal) {
-            reason = `Questo blocco muove "${goal.title}" in avanti.`;
+            const vs = getVoiceService();
+            const lang = vs?.getLanguage() || 'it-IT';
+            if (lang === 'en-US') {
+              reason = `This block moves "${goal.title}" forward.`;
+            } else if (lang === 'es-ES') {
+              reason = `Este bloque avanza "${goal.title}".`;
+            } else {
+              reason = `Questo blocco muove "${goal.title}" in avanti.`;
+            }
             if (goal.targetDate) {
               const daysLeft = Math.ceil((new Date(goal.targetDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
               if (daysLeft > 0 && daysLeft <= 30) {
-                reason += ` ${daysLeft} giorni alla scadenza.`;
+                if (lang === 'en-US') reason += ` ${daysLeft} days to deadline.`;
+                else if (lang === 'es-ES') reason += ` ${daysLeft} dias para la fecha limite.`;
+                else reason += ` ${daysLeft} giorni alla scadenza.`;
               }
             }
           } else {
-            reason = 'Ogni blocco completato conta.';
+            const vs = getVoiceService();
+            const lang = vs?.getLanguage() || 'it-IT';
+            if (lang === 'en-US') reason = 'Every completed block counts.';
+            else if (lang === 'es-ES') reason = 'Cada bloque completado cuenta.';
+            else reason = 'Ogni blocco completato conta.';
           }
 
           setActiveBlock({
@@ -131,9 +134,10 @@ export default function BlockCountdown() {
       if (settings.soundEnabled) {
         audioManager.taskCompleted();
       }
+      // Use centralized voice service for block start announcement
       if (activeBlock) {
-        const voiceText = `Via. ${activeBlock.title}.${activeBlock.goalTitle ? ` Per ${activeBlock.goalTitle}.` : ''} ${activeBlock.reason}`;
-        speak(voiceText);
+        const vs = getVoiceService();
+        vs?.speakBlockStart(activeBlock.title, activeBlock.goalTitle, activeBlock.reason);
       }
       // Auto-dismiss after 4 seconds
       setTimeout(() => {
@@ -145,15 +149,13 @@ export default function BlockCountdown() {
     return () => {
       if (intervalRef.current) clearTimeout(intervalRef.current);
     };
-  }, [phase, countdown, settings.soundEnabled, activeBlock, speak]);
+  }, [phase, countdown, settings.soundEnabled, activeBlock]);
 
   const dismiss = () => {
     setPhase('done');
     setActiveBlock(null);
     if (intervalRef.current) clearTimeout(intervalRef.current);
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
+    getVoiceService()?.stopSpeech();
   };
 
   // Render nothing if no active countdown
@@ -205,7 +207,7 @@ export default function BlockCountdown() {
           </p>
         </div>
 
-        {/* Sound/Voice indicators */}
+        {/* Sound indicator */}
         <div className="flex items-center justify-center gap-4 text-gray-600">
           <button
             onClick={() => updateSettings({ soundEnabled: !settings.soundEnabled })}
@@ -240,14 +242,6 @@ export function BlockCountdownToggle() {
         }`}
       >
         3-2-1 {settings.enabled ? 'ON' : 'OFF'}
-      </button>
-      <button
-        onClick={() => toggle('voiceEnabled')}
-        className={`px-2 py-1 rounded text-xs transition-colors ${
-          settings.voiceEnabled ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'bg-gray-800 text-gray-500 border border-gray-700'
-        }`}
-      >
-        Voce {settings.voiceEnabled ? 'ON' : 'OFF'}
       </button>
     </div>
   );

@@ -6,6 +6,7 @@ import { Habit, HabitLog } from '@/types';
 import { formatDateSafe, formatDateStringSafe } from '@/utils/dateUtils';
 import { CheckCircle, Circle, Flame, Calendar, Plus, Edit, Trash2 } from 'lucide-react';
 import { audioManager } from '@/lib/audioManager';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 type HabitsTrackerProps = {
   habits: Habit[];
@@ -178,6 +179,7 @@ export default function HabitsTracker({
           bestStreak: Math.max(habit.bestStreak, newStreak),
         });
         audioManager.habitCompleted(newStreak);
+        getVoiceService()?.speakConfirmation('habitLogged');
       } else {
         onUpdateHabit(habit.id, {
           streakCount: Math.max(0, habit.streakCount - 1),

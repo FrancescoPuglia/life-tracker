@@ -39,16 +39,6 @@ const ACHIEVEMENT_BADGES: Badge[] = [
     category: 'milestone',
     requirement: { type: 'total_sessions', value: 1, description: '1 sessione completata' }
   },
-  {
-    id: 'time-planner',
-    name: 'Time Master',
-    description: 'Crea il tuo primo time block',
-    icon: 'Target',
-    rarity: 'common',
-    category: 'milestone',
-    requirement: { type: 'time_blocks_created', value: 1, description: '1 time block creato' }
-  },
-
   // STREAK BADGES (Progressive)
   {
     id: 'first-streak',
@@ -108,15 +98,6 @@ const ACHIEVEMENT_BADGES: Badge[] = [
   },
 
   // GOAL BADGES
-  {
-    id: 'goal-setter',
-    name: 'Goal Setter',
-    description: 'Crea il tuo primo obiettivo',
-    icon: 'Star',
-    rarity: 'common',
-    category: 'goal',
-    requirement: { type: 'goals_created', value: 1, description: '1 goal creato' }
-  },
   {
     id: 'goal-achiever',
     name: 'Goal Achiever',
@@ -186,9 +167,7 @@ interface BadgeSystemProps {
     maxStreak: number;
     totalFocusMinutes: number;
     goalsCompleted: number;
-    goalsCreated?: number;
     totalSessions?: number;
-    timeBlocksCreated?: number;
     daysTracked: number;
     earlySessionsCount: number;
     eveningSessionsCount: number;
@@ -226,12 +205,8 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
         return userStats.weeklyFocusMinutes >= badge.requirement.value;
       case 'goals_completed':
         return userStats.goalsCompleted >= badge.requirement.value;
-      case 'goals_created':
-        return (userStats.goalsCreated || 0) >= badge.requirement.value;
       case 'total_sessions':
         return (userStats.totalSessions || 0) >= badge.requirement.value;
-      case 'time_blocks_created':
-        return (userStats.timeBlocksCreated || 0) >= badge.requirement.value;
       case 'early_sessions':
         return userStats.earlySessionsCount >= badge.requirement.value;
       case 'evening_sessions':
@@ -258,14 +233,8 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
       case 'goals_completed':
         current = userStats.goalsCompleted;
         break;
-      case 'goals_created':
-        current = userStats.goalsCreated || 0;
-        break;
       case 'total_sessions':
         current = userStats.totalSessions || 0;
-        break;
-      case 'time_blocks_created':
-        current = userStats.timeBlocksCreated || 0;
         break;
       case 'early_sessions':
         current = userStats.earlySessionsCount;

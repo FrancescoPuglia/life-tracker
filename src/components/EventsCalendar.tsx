@@ -259,9 +259,13 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                 <button key={i} onClick={() => setSelectedDate(key === selectedDate ? null : key)}
                   className={`relative min-h-[64px] p-1.5 rounded-xl text-left transition-all
                     ${isCurrentMonth ? 'bg-gray-800/40' : 'bg-gray-900/30'}
-                    ${isSelected ? 'ring-2 ring-cyan-500 bg-cyan-900/20 z-10' : 'hover:bg-gray-800/60'}
-                    ${isToday ? 'ring-2 ring-cyan-400/50' : ''}
-                    ${hasHighPriority ? 'ring-1 ring-red-500/40' : ''}
+                    ${isSelected
+                      ? 'ring-2 ring-cyan-500 bg-cyan-900/20 z-10'
+                      : isToday
+                        ? 'ring-2 ring-cyan-400/50 hover:ring-cyan-400/70'
+                        : hasHighPriority
+                          ? 'ring-1 ring-red-500/40 hover:bg-gray-800/60'
+                          : 'hover:bg-gray-800/60'}
                   `}>
                   <div className="flex items-start justify-between">
                     <span className={`text-sm font-semibold inline-flex items-center justify-center
@@ -437,6 +441,14 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                     <p className="text-[10px] text-gray-600 px-2">+{thisMonthEvents.length - 8} altri</p>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Default hint when no day is selected and events exist */}
+            {!selectedDate && upcomingEvents.length > 0 && !nextKeyEvent && (
+              <div className="text-center py-6">
+                <CalendarIcon className="w-8 h-8 text-gray-600 mx-auto mb-2" />
+                <p className="text-xs text-gray-500">Seleziona un giorno per i dettagli</p>
               </div>
             )}
 

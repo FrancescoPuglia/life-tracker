@@ -8,10 +8,7 @@ export interface Hero {
   quotes: string[];
   category: 'bodybuilding' | 'martial_arts' | 'boxing' | 'fighting' | 'chess' | 'philosophy' | 'leadership';
   emoji: string;
-  // Hero images: Use Unsplash/Wikipedia public domain images
-  // These are stable URLs for well-known public figures
-  imageUrl: string;
-  imageFallbackColor: string; // Gradient fallback if image fails
+  imageFallbackColor: string; // Gradient background for the hero card
 }
 
 export const HEROES: Hero[] = [
@@ -21,7 +18,7 @@ export const HEROES: Hero[] = [
     title: 'The Terminator',
     category: 'bodybuilding',
     emoji: '\u{1F4AA}',
-    imageUrl: '/heroes/arnold.jpg',
+
     imageFallbackColor: 'from-red-800 to-orange-900',
     quotes: [
       'La forza non viene dal vincere. Le tue lotte sviluppano le tue forze.',
@@ -37,7 +34,7 @@ export const HEROES: Hero[] = [
     title: 'The Dragon',
     category: 'martial_arts',
     emoji: '\u{1F409}',
-    imageUrl: '/heroes/bruce_lee.jpg',
+
     imageFallbackColor: 'from-yellow-800 to-amber-900',
     quotes: [
       'Non temere il fallimento. Non e\' il fallimento, ma il mirare basso, che e\' il crimine.',
@@ -53,7 +50,7 @@ export const HEROES: Hero[] = [
     title: 'The Greatest',
     category: 'boxing',
     emoji: '\u{1F94A}',
-    imageUrl: '/heroes/ali.jpg',
+
     imageFallbackColor: 'from-blue-800 to-indigo-900',
     quotes: [
       'Non contare i giorni, fai che i giorni contino.',
@@ -69,7 +66,7 @@ export const HEROES: Hero[] = [
     title: 'The Notorious',
     category: 'fighting',
     emoji: '\u{1F525}',
-    imageUrl: '/heroes/mcgregor.jpg',
+
     imageFallbackColor: 'from-orange-800 to-red-900',
     quotes: [
       'Non esiste talento, esiste ossessione. Sono ossessionato.',
@@ -85,7 +82,7 @@ export const HEROES: Hero[] = [
     title: 'The Beast of Baku',
     category: 'chess',
     emoji: '\u{265F}\u{FE0F}',
-    imageUrl: '/heroes/kasparov.jpg',
+
     imageFallbackColor: 'from-purple-800 to-violet-900',
     quotes: [
       'Se non sei disposto a rischiare, non meriti di vincere.',
@@ -101,7 +98,7 @@ export const HEROES: Hero[] = [
     title: 'Il Genio degli Scacchi',
     category: 'chess',
     emoji: '\u{265A}',
-    imageUrl: '/heroes/fischer.jpg',
+
     imageFallbackColor: 'from-slate-800 to-gray-900',
     quotes: [
       'Gli scacchi sono la vita.',
@@ -117,7 +114,7 @@ export const HEROES: Hero[] = [
     title: 'Imperatore Filosofo',
     category: 'philosophy',
     emoji: '\u{1F3DB}\u{FE0F}',
-    imageUrl: '/heroes/aurelius.jpg',
+
     imageFallbackColor: 'from-teal-800 to-cyan-900',
     quotes: [
       'La felicita\' della tua vita dipende dalla qualita\' dei tuoi pensieri.',
@@ -133,7 +130,7 @@ export const HEROES: Hero[] = [
     title: 'Il Samurai Senza Pari',
     category: 'martial_arts',
     emoji: '\u{2694}\u{FE0F}',
-    imageUrl: '/heroes/musashi.jpg',
+
     imageFallbackColor: 'from-stone-800 to-zinc-900',
     quotes: [
       'Non c\'e\' nulla al di fuori di te che possa renderti migliore, piu\' forte, piu\' ricco o piu\' veloce.',

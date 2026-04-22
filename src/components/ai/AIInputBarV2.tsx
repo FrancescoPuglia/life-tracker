@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Goal, Task, TimeBlock, Habit, Session, Project, Domain } from '@/types';
 import { UserContext, ProposedChange } from '@/lib/ai/openai-integration';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 // ============================================================================
 // TYPES
@@ -42,7 +43,7 @@ interface Message {
 }
 
 type AIMode = 'ask' | 'plan' | 'analyze' | 'coach';
-type AIStatus = 'checking' | 'connected' | 'unavailable' | 'offline';
+type AIStatus = 'checking' | 'connected' | 'unavailable' | 'offline' | 'model_missing';
 
 // ============================================================================
 // QUICK PROMPTS
@@ -114,9 +115,13 @@ export default function AIInputBarV2({
     const checkAI = async () => {
       try {
         const res = await fetch('/api/ai/chat', { method: 'GET' });
-        if (res.ok) {
-          const data = await res.json();
-          setAiStatus(data.status === 'available' ? 'connected' : 'unavailable');
+        const data = await res.json();
+        if (data.status === 'available') {
+          setAiStatus('connected');
+        } else if (data.status === 'offline') {
+          setAiStatus('offline');
+        } else if (data.status === 'model_missing') {
+          setAiStatus('model_missing');
         } else {
           setAiStatus('unavailable');
         }
@@ -142,7 +147,8 @@ export default function AIInputBarV2({
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = true;
-      recognition.lang = 'it-IT';
+      // Use centralized voice language setting
+      recognition.lang = getVoiceService()?.getLanguage() || 'it-IT';
 
       recognition.onresult = (event: any) => {
         let transcript = '';
@@ -290,6 +296,11 @@ export default function AIInputBarV2({
           : m
       ));
 
+      // Optionally speak AI response
+      if (data.response) {
+        getVoiceService()?.speakAIResponse(data.response);
+      }
+
       if (data.proposedChanges && data.proposedChanges.length > 0) {
         setPendingChanges(data.proposedChanges);
       }
@@ -298,9 +309,14 @@ export default function AIInputBarV2({
 
       // Show the real error - no fake fallback
       let displayError = errorMessage;
-      if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed')) {
+      if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed') || errorMessage.includes('non raggiungibile')) {
         displayError = 'AI non raggiungibile. Verifica che Ollama sia avviato: ollama serve';
         setAiStatus('offline');
+      } else if (errorMessage.includes('non trovato') || errorMessage.includes('model') || errorMessage.includes('MODEL_MISSING')) {
+        displayError = errorMessage;
+        setAiStatus('model_missing');
+      } else if (errorMessage.includes('Timeout')) {
+        displayError = errorMessage;
       } else if (errorMessage.includes('API key')) {
         displayError = 'API key non configurata. Verifica .env.local';
         setAiStatus('unavailable');
@@ -415,10 +431,11 @@ export default function AIInputBarV2({
   const currentMode = MODE_CONFIG[mode];
 
   const statusConfig = {
-    checking: { color: 'text-gray-500', label: 'Verifica...', icon: <Loader2 className="w-3 h-3 animate-spin" /> },
-    connected: { color: 'text-green-400', label: 'AI connesso', icon: <Wifi className="w-3 h-3" /> },
-    unavailable: { color: 'text-yellow-400', label: 'AI non configurato', icon: <WifiOff className="w-3 h-3" /> },
-    offline: { color: 'text-red-400', label: 'AI offline', icon: <WifiOff className="w-3 h-3" /> },
+    checking: { color: 'text-gray-500', label: 'Verifica...', icon: <Loader2 className="w-3 h-3 animate-spin" />, hint: '' },
+    connected: { color: 'text-green-400', label: 'AI connesso', icon: <Wifi className="w-3 h-3" />, hint: '' },
+    model_missing: { color: 'text-orange-400', label: 'Modello mancante', icon: <AlertCircle className="w-3 h-3" />, hint: 'ollama pull llama3.2' },
+    unavailable: { color: 'text-yellow-400', label: 'AI non configurato', icon: <WifiOff className="w-3 h-3" />, hint: '' },
+    offline: { color: 'text-red-400', label: 'AI offline', icon: <WifiOff className="w-3 h-3" />, hint: 'ollama serve' },
   };
   const status = statusConfig[aiStatus];
 
@@ -428,8 +445,8 @@ export default function AIInputBarV2({
       <div className={`flex items-center gap-1.5 px-4 py-1.5 text-xs border-b border-gray-800 ${status.color}`}>
         {status.icon}
         <span>{status.label}</span>
-        {aiStatus === 'offline' && (
-          <span className="text-gray-600 ml-1">- Avvia Ollama: ollama serve</span>
+        {status.hint && (
+          <span className="text-gray-600 ml-1">- {status.hint}</span>
         )}
       </div>
 

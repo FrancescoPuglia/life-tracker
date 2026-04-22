@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Quote } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Quote, Volume2 } from 'lucide-react';
 import { HEROES, getHeroOfTheDay, getQuoteOfTheDay } from '@/lib/heroData';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 interface HeroWallProps {
   className?: string;
@@ -14,8 +15,6 @@ export default function HeroWall({ className = '', compact = false }: HeroWallPr
   const [activeHeroIndex, setActiveHeroIndex] = useState(
     HEROES.findIndex(h => h.id === todayHero.id)
   );
-  const [imgError, setImgError] = useState<Set<string>>(new Set());
-
   const activeHero = HEROES[activeHeroIndex];
   const activeQuote = useMemo(
     () => getQuoteOfTheDay(activeHero),
@@ -29,7 +28,10 @@ export default function HeroWall({ className = '', compact = false }: HeroWallPr
     setActiveHeroIndex((i) => (i + 1) % HEROES.length);
   };
 
-  const showImage = !imgError.has(activeHero.id);
+  const speakQuote = () => {
+    const vs = getVoiceService();
+    vs?.speakHeroQuote(activeQuote, activeHero.name);
+  };
 
   if (compact) {
     return (
@@ -42,6 +44,9 @@ export default function HeroWall({ className = '', compact = false }: HeroWallPr
               <p className="text-xs text-white/60">{activeHero.title}</p>
             </div>
             <div className="flex gap-1">
+              <button onClick={speakQuote} className="p-1 hover:bg-white/10 rounded transition-colors" title="Ascolta">
+                <Volume2 className="w-4 h-4 text-white/60" />
+              </button>
               <button onClick={goToPrev} className="p-1 hover:bg-white/10 rounded transition-colors">
                 <ChevronLeft className="w-4 h-4 text-white/60" />
               </button>
@@ -51,7 +56,7 @@ export default function HeroWall({ className = '', compact = false }: HeroWallPr
             </div>
           </div>
           <div className="mt-3 bg-black/30 rounded-lg p-3">
-            <p className="text-xs italic text-white/80 leading-relaxed">"{activeQuote}"</p>
+            <p className="text-xs italic text-white/80 leading-relaxed">&quot;{activeQuote}&quot;</p>
           </div>
         </div>
       </div>
@@ -62,18 +67,7 @@ export default function HeroWall({ className = '', compact = false }: HeroWallPr
     <div className={`bg-gray-900 rounded-2xl border border-gray-700/50 overflow-hidden ${className}`}>
       {/* Main Hero Card - Large and Impactful */}
       <div className={`relative bg-gradient-to-br ${activeHero.imageFallbackColor} min-h-[320px]`}>
-        {/* Background image */}
-        {showImage && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={activeHero.imageUrl}
-            alt={activeHero.name}
-            className="absolute inset-0 w-full h-full object-cover opacity-30"
-            onError={() => setImgError(prev => new Set(prev).add(activeHero.id))}
-          />
-        )}
-
-        {/* Gradient overlay */}
+          {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent" />
 
         {/* Content */}
@@ -87,9 +81,18 @@ export default function HeroWall({ className = '', compact = false }: HeroWallPr
 
           {/* Quote - prominent */}
           <div className="bg-black/40 backdrop-blur-sm rounded-xl p-5 border border-white/10">
-            <Quote className="w-5 h-5 text-white/30 mb-2" />
-            <p className="text-lg italic text-white/90 leading-relaxed font-medium">
-              "{activeQuote}"
+            <div className="flex items-start justify-between gap-3">
+              <Quote className="w-5 h-5 text-white/30 flex-shrink-0 mt-0.5" />
+              <button
+                onClick={speakQuote}
+                className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
+                title="Ascolta la citazione"
+              >
+                <Volume2 className="w-4 h-4 text-white/40 hover:text-white/80" />
+              </button>
+            </div>
+            <p className="text-lg italic text-white/90 leading-relaxed font-medium mt-2">
+              &quot;{activeQuote}&quot;
             </p>
           </div>
 

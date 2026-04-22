@@ -251,7 +251,19 @@ export async function chat(
       requestParams.tool_choice = 'auto';
     }
 
-    const completion = await config.client.chat.completions.create(requestParams);
+    // Timeout: 30s for Ollama (local, can be slow), 60s for OpenAI
+    const timeoutMs = config.provider === 'ollama' ? 30000 : 60000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    let completion;
+    try {
+      completion = await config.client.chat.completions.create(requestParams, {
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const assistantMessage = completion.choices[0].message;
     const rawToolCalls = assistantMessage.tool_calls || [];
@@ -298,10 +310,20 @@ export async function chat(
 
   } catch (error: any) {
     // Provide helpful error messages based on provider
+    if (error?.name === 'AbortError') {
+      throw new Error(
+        `Timeout: AI non ha risposto entro ${config.provider === 'ollama' ? 30 : 60} secondi`
+      );
+    }
     if (config.provider === 'ollama' && error?.code === 'ECONNREFUSED') {
       throw new Error(
         'Ollama non raggiungibile. Assicurati che sia avviato: ollama serve'
       );
+    }
+    if (error?.status === 404 || (error?.message && error.message.includes('model') && error.message.includes('not found'))) {
+      const err = new Error(`Modello "${config.chatModel}" non trovato in Ollama. Scaricalo con: ollama pull ${config.chatModel}`);
+      (err as any).status = 404;
+      throw err;
     }
     throw error;
   }

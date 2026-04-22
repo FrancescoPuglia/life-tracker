@@ -30,6 +30,8 @@ interface GoalBreakdown {
   goalTitle: string;
   planned: number;
   completed: number;
+  measured: number; // blocks with actual start/end times
+  estimated: number; // blocks using planned times as fallback
   blocks: number;
   completedBlocks: number;
 }
@@ -53,6 +55,8 @@ export default function WeeklyExecution() {
     let totalCompleted = 0;
     let completedCount = 0;
     let skippedCount = 0;
+    let measuredCount = 0; // blocks with real actualStartTime/actualEndTime
+    let estimatedCount = 0; // completed blocks using planned time as proxy
     const goalMap = new Map<string, GoalBreakdown>();
 
     for (const block of weekBlocks) {
@@ -62,11 +66,20 @@ export default function WeeklyExecution() {
       totalPlanned += plannedMin;
 
       let actualMin = 0;
+      let isMeasured = false;
       if (block.status === 'completed') {
         completedCount++;
-        const aStart = block.actualStartTime ? new Date(block.actualStartTime) : startTime;
-        const aEnd = block.actualEndTime ? new Date(block.actualEndTime) : endTime;
-        actualMin = (aEnd.getTime() - aStart.getTime()) / (1000 * 60);
+        isMeasured = !!(block.actualStartTime && block.actualEndTime);
+        if (isMeasured) {
+          measuredCount++;
+          const aStart = new Date(block.actualStartTime!);
+          const aEnd = new Date(block.actualEndTime!);
+          actualMin = (aEnd.getTime() - aStart.getTime()) / (1000 * 60);
+        } else {
+          estimatedCount++;
+          // Fallback: use planned duration for completed blocks without actual times
+          actualMin = plannedMin;
+        }
         totalCompleted += actualMin;
       } else if (block.status === 'cancelled') {
         skippedCount++;
@@ -81,6 +94,8 @@ export default function WeeklyExecution() {
           goalTitle: goal?.title || 'Senza Goal',
           planned: 0,
           completed: 0,
+          measured: 0,
+          estimated: 0,
           blocks: 0,
           completedBlocks: 0,
         });
@@ -91,6 +106,7 @@ export default function WeeklyExecution() {
       if (block.status === 'completed') {
         entry.completed += actualMin;
         entry.completedBlocks += 1;
+        if (isMeasured) entry.measured++; else entry.estimated++;
       }
     }
 
@@ -103,14 +119,18 @@ export default function WeeklyExecution() {
       const pMin = (new Date(b.endTime).getTime() - new Date(b.startTime).getTime()) / (1000 * 60);
       todayPlanned += pMin;
       if (b.status === 'completed') {
-        const aStart = b.actualStartTime ? new Date(b.actualStartTime) : new Date(b.startTime);
-        const aEnd = b.actualEndTime ? new Date(b.actualEndTime) : new Date(b.endTime);
-        todayCompleted += (aEnd.getTime() - aStart.getTime()) / (1000 * 60);
+        if (b.actualStartTime && b.actualEndTime) {
+          todayCompleted += (new Date(b.actualEndTime).getTime() - new Date(b.actualStartTime).getTime()) / (1000 * 60);
+        } else {
+          todayCompleted += pMin; // fallback to planned
+        }
       }
     }
 
     const execRate = totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0;
     const todayRate = todayPlanned > 0 ? Math.round((todayCompleted / todayPlanned) * 100) : 0;
+    // Confidence: what fraction of completed blocks have real measured times
+    const confidenceRate = completedCount > 0 ? Math.round((measuredCount / completedCount) * 100) : 0;
 
     const goalBreakdown = Array.from(goalMap.values())
       .filter(g => g.planned > 0)
@@ -125,6 +145,9 @@ export default function WeeklyExecution() {
       totalBlocks: weekBlocks.length,
       completedCount,
       skippedCount,
+      measuredCount,
+      estimatedCount,
+      confidenceRate,
       todayPlanned,
       todayCompleted,
       todayRate,
@@ -182,6 +205,19 @@ export default function WeeklyExecution() {
             />
           </div>
         </div>
+
+        {/* Confidence indicator */}
+        {weekData.completedCount > 0 && weekData.confidenceRate < 100 && (
+          <div className="flex items-center gap-2 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+            <span className="text-gray-500">
+              {weekData.measuredCount}/{weekData.completedCount} blocchi con tempo reale misurato
+              {weekData.estimatedCount > 0 && (
+                <span className="text-yellow-500/70"> - {weekData.estimatedCount} usano il tempo pianificato</span>
+              )}
+            </span>
+          </div>
+        )}
 
         {/* Stats grid */}
         <div className="grid grid-cols-3 gap-3">

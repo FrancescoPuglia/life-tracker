@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { X, Target, Clock, Flame, TrendingUp, AlertTriangle } from 'lucide-react';
+import { X, Target, Clock, Flame, TrendingUp, AlertTriangle, Volume2 } from 'lucide-react';
 import { useDataContext } from '@/providers/DataProvider';
 import { getDeadlineInfo, type DeadlineInfo } from './DeadlineBadge';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 // ============================================================================
 // MOTIVATIONAL QUOTES (rotated daily)
@@ -195,9 +196,16 @@ export default function DailyMotivation() {
           <p className="text-center text-sm text-gray-300">{contextualMessage}</p>
 
           {/* Quote */}
-          <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/20">
-            <p className="text-sm italic text-gray-300 text-center">"{todayQuote.text}"</p>
+          <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/20 relative">
+            <p className="text-sm italic text-gray-300 text-center">&quot;{todayQuote.text}&quot;</p>
             <p className="text-xs text-gray-500 text-center mt-2">- {todayQuote.author}</p>
+            <button
+              onClick={() => getVoiceService()?.speakHeroQuote(todayQuote.text, todayQuote.author)}
+              className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-white/10 transition-colors text-gray-500 hover:text-gray-300"
+              title="Ascolta"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+            </button>
           </div>
 
           {/* CTA */}

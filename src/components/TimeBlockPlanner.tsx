@@ -6,6 +6,7 @@ import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TimeBlock, Task, Project, Goal } from '@/types';
 import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from '@/utils/dateUtils';
 import { audioManager } from '@/lib/audioManager';
+import { getVoiceService } from '@/lib/voice/voiceService';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -660,6 +661,7 @@ export default function TimeBlockPlanner({
                       });
                       if (newStatus === 'completed') {
                         audioManager.taskCompleted();
+                        getVoiceService()?.speakConfirmation('blockCompleted');
                       }
                     }}
                     className={`text-lg transition-all duration-200 hover:scale-125 relative ${
@@ -944,6 +946,7 @@ export default function TimeBlockPlanner({
                                         });
                                         if (newStatus === 'completed') {
                                           audioManager.taskCompleted();
+                                          getVoiceService()?.speakConfirmation('blockCompleted');
                                         }
                                       }}
                                       className={`text-xs hover:scale-125 transition-transform relative ${
