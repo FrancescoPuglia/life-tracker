@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Required for static export (GitHub Pages). These routes only work in local dev.
-export const dynamic = 'force-static';
+// Must run dynamically to read env vars and proxy TTS requests at runtime.
+export const dynamic = 'force-dynamic';
 
 // ============================================================================
 // OPENAI TTS
