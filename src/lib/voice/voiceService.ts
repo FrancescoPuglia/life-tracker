@@ -13,7 +13,20 @@ import {
   COUNTDOWN_TEXTS,
   SYSTEM_TEXTS,
   PREVIEW_TEXTS,
+  OPENAI_ROLE_DEFAULTS,
+  ELEVENLABS_ROLE_DEFAULTS,
+  type ProviderStatusType,
 } from './voiceConfig';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface ProvidersStatus {
+  openai: { status: ProviderStatusType; error?: string };
+  elevenlabs: { status: ProviderStatusType; error?: string };
+  browser: { status: ProviderStatusType };
+}
 
 // ============================================================================
 // VOICE SERVICE SINGLETON
@@ -26,6 +39,13 @@ class VoiceService {
   private voicesLoaded = false;
   private speaking = false;
   private queue: Array<{ text: string; role: VoiceRole; priority: number }> = [];
+  private currentAudio: HTMLAudioElement | null = null;
+  private providersStatus: ProvidersStatus = {
+    openai: { status: 'unknown' },
+    elevenlabs: { status: 'unknown' },
+    browser: { status: 'available' },
+  };
+  private statusFetched = false;
 
   private constructor() {
     this.settings = this.loadSettings();
@@ -72,6 +92,54 @@ class VoiceService {
   }
 
   // ============================================================================
+  // PROVIDER STATUS
+  // ============================================================================
+
+  /**
+   * Fetch provider availability from backend API.
+   * Results are cached — call refreshProviderStatus() to force re-check.
+   */
+  async fetchProviderStatus(): Promise<ProvidersStatus> {
+    if (this.statusFetched) return this.providersStatus;
+
+    try {
+      this.providersStatus.openai = { status: 'checking' };
+      this.providersStatus.elevenlabs = { status: 'checking' };
+
+      const res = await fetch('/api/voice/status');
+      if (!res.ok) throw new Error(`Status API returned ${res.status}`);
+
+      const data = await res.json();
+
+      this.providersStatus = {
+        openai: data.openai || { status: 'unknown' },
+        elevenlabs: data.elevenlabs || { status: 'unknown' },
+        browser: { status: this.isBrowserAvailable() ? 'available' : 'error' },
+      };
+      this.statusFetched = true;
+    } catch {
+      // API not reachable (e.g. static export on GitHub Pages)
+      this.providersStatus = {
+        openai: { status: 'error', error: 'API not reachable (local dev only)' },
+        elevenlabs: { status: 'error', error: 'API not reachable (local dev only)' },
+        browser: { status: this.isBrowserAvailable() ? 'available' : 'error' },
+      };
+      this.statusFetched = true;
+    }
+
+    return this.providersStatus;
+  }
+
+  async refreshProviderStatus(): Promise<ProvidersStatus> {
+    this.statusFetched = false;
+    return this.fetchProviderStatus();
+  }
+
+  getProvidersStatus(): ProvidersStatus {
+    return { ...this.providersStatus };
+  }
+
+  // ============================================================================
   // BROWSER VOICE DISCOVERY
   // ============================================================================
 
@@ -98,11 +166,10 @@ class VoiceService {
 
   /**
    * Get browser voices filtered by current language.
-   * Returns voices whose lang starts with the language BCP47 prefix.
    */
   getVoicesForLanguage(lang?: VoiceLanguage): SpeechSynthesisVoice[] {
     const targetLang = lang || this.settings.language;
-    const prefix = targetLang.split('-')[0]; // 'it', 'en', 'es'
+    const prefix = targetLang.split('-')[0];
 
     if (!this.voicesLoaded) {
       this.initVoices();
@@ -136,8 +203,10 @@ class VoiceService {
     if (this.settings.provider === 'browser') {
       return this.isBrowserAvailable();
     }
-    // For external providers, we'd check API key availability
-    return false;
+    // For premium providers, check cached status
+    const providerKey = this.settings.provider as 'openai' | 'elevenlabs';
+    const status = this.providersStatus[providerKey]?.status;
+    return status === 'available';
   }
 
   // ============================================================================
@@ -159,11 +228,13 @@ class VoiceService {
     // Check role-specific toggles
     if (!this.isRoleEnabled(role) && !options?.force) return;
 
-    // Currently only browser provider implemented
+    // Route to the correct provider
     if (this.settings.provider === 'browser') {
       this.speakBrowser(text, role, options);
+    } else {
+      // Premium provider — async, with browser fallback on failure
+      this.speakPremium(text, role, options);
     }
-    // Future: openai, elevenlabs providers would be called here
   }
 
   private isRoleEnabled(role: VoiceRole): boolean {
@@ -176,6 +247,10 @@ class VoiceService {
     }
   }
 
+  // ============================================================================
+  // BROWSER SPEECH
+  // ============================================================================
+
   private speakBrowser(text: string, role: VoiceRole, options?: {
     force?: boolean;
     rateOverride?: number;
@@ -185,13 +260,11 @@ class VoiceService {
     if (!window.speechSynthesis) return;
 
     try {
-      // Cancel any ongoing speech for non-queue scenarios
       window.speechSynthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = this.settings.language;
 
-      // Apply role-specific rate & pitch
       const roleConfig = VOICE_ROLES[role];
       utterance.rate = options?.rateOverride ?? (this.settings.speed * roleConfig.defaultRate);
       utterance.pitch = options?.pitchOverride ?? roleConfig.defaultPitch;
@@ -201,14 +274,10 @@ class VoiceService {
       const voiceName = this.settings.browserVoices[role];
       if (voiceName) {
         const voice = this.cachedVoices.find(v => v.name === voiceName);
-        if (voice) {
-          utterance.voice = voice;
-        }
+        if (voice) utterance.voice = voice;
       } else {
-        // Auto-select best voice for language
         const langVoices = this.getVoicesForLanguage();
         if (langVoices.length > 0) {
-          // Prefer non-compact, local voices
           const preferred = langVoices.find(v => !v.name.includes('Compact') && v.localService)
             || langVoices.find(v => !v.name.includes('Compact'))
             || langVoices[0];
@@ -221,9 +290,7 @@ class VoiceService {
         this.speaking = false;
         options?.onEnd?.();
       };
-      utterance.onerror = () => {
-        this.speaking = false;
-      };
+      utterance.onerror = () => { this.speaking = false; };
 
       window.speechSynthesis.speak(utterance);
     } catch {
@@ -232,33 +299,169 @@ class VoiceService {
   }
 
   // ============================================================================
+  // PREMIUM TTS (OpenAI / ElevenLabs)
+  // ============================================================================
+
+  /**
+   * Speak via premium provider. Calls backend API, receives audio, plays it.
+   * Falls back to browser on failure with console warning.
+   */
+  private async speakPremium(text: string, role: VoiceRole, options?: {
+    force?: boolean;
+    rateOverride?: number;
+    pitchOverride?: number;
+    onEnd?: () => void;
+  }): Promise<void> {
+    const provider = this.settings.provider;
+    const voice = this.getVoiceIdForRole(role, provider);
+    const model = provider === 'openai' ? this.settings.openaiModel : 'eleven_multilingual_v2';
+
+    try {
+      this.speaking = true;
+
+      // Stop any currently playing premium audio
+      this.stopPremiumAudio();
+
+      const res = await fetch('/api/voice/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, provider, voice, model }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(errData.error || `TTS failed: ${res.status}`);
+      }
+
+      // Get audio blob and play it
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      await this.playAudioBlob(audioUrl, options?.onEnd);
+    } catch (err) {
+      console.warn(`[VoiceService] Premium TTS failed (${provider}), falling back to browser:`, err);
+      this.speaking = false;
+
+      // Explicit fallback to browser
+      if (this.isBrowserAvailable()) {
+        this.speakBrowser(text, role, options);
+      } else {
+        options?.onEnd?.();
+      }
+    }
+  }
+
+  /**
+   * Get the voice ID for a given role and provider.
+   */
+  private getVoiceIdForRole(role: VoiceRole, provider: VoiceProvider): string {
+    if (provider === 'openai') {
+      return this.settings.openaiVoices[role] || OPENAI_ROLE_DEFAULTS[role];
+    }
+    if (provider === 'elevenlabs') {
+      return this.settings.elevenlabsVoices[role] || ELEVENLABS_ROLE_DEFAULTS[role];
+    }
+    return '';
+  }
+
+  /**
+   * Play an audio blob URL via HTMLAudioElement.
+   */
+  private playAudioBlob(url: string, onEnd?: () => void): Promise<void> {
+    return new Promise((resolve) => {
+      const audio = new Audio(url);
+      this.currentAudio = audio;
+
+      audio.onended = () => {
+        this.speaking = false;
+        this.currentAudio = null;
+        URL.revokeObjectURL(url);
+        onEnd?.();
+        resolve();
+      };
+
+      audio.onerror = () => {
+        this.speaking = false;
+        this.currentAudio = null;
+        URL.revokeObjectURL(url);
+        onEnd?.();
+        resolve();
+      };
+
+      audio.play().catch(() => {
+        this.speaking = false;
+        this.currentAudio = null;
+        URL.revokeObjectURL(url);
+        onEnd?.();
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Stop premium audio playback if active.
+   */
+  private stopPremiumAudio(): void {
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.src = '';
+      this.currentAudio = null;
+    }
+  }
+
+  /**
+   * Preview a premium voice via backend API.
+   */
+  async previewPremiumVoice(provider: VoiceProvider, voiceId: string, role: VoiceRole = 'system'): Promise<void> {
+    const text = PREVIEW_TEXTS[this.settings.language][role];
+    const model = provider === 'openai' ? this.settings.openaiModel : 'eleven_multilingual_v2';
+
+    try {
+      this.stopPremiumAudio();
+      this.stopSpeech();
+
+      const res = await fetch('/api/voice/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, provider, voice: voiceId, model }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(errData.error || `Preview failed: ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      await this.playAudioBlob(url);
+    } catch (err) {
+      console.warn('[VoiceService] Premium preview failed:', err);
+      throw err; // Let UI handle the error
+    }
+  }
+
+  // ============================================================================
   // ROLE-SPECIFIC CONVENIENCE METHODS
   // ============================================================================
 
-  /** Coach voice — motivational, direct, sharp */
   speakCoach(text: string, onEnd?: () => void): void {
     this.speakText(text, 'coach', { onEnd });
   }
 
-  /** Ritual voice — countdown, block start, operational commands */
   speakRitual(text: string, onEnd?: () => void): void {
     this.speakText(text, 'ritual', { onEnd });
   }
 
-  /** System voice — neutral, brief confirmations */
   speakSystem(text: string, onEnd?: () => void): void {
     this.speakText(text, 'system', { onEnd });
   }
 
-  /** Hero voice — dramatic quotes, premium motivation */
   speakHero(text: string, onEnd?: () => void): void {
     this.speakText(text, 'hero', { onEnd });
   }
 
-  /** Speak AI response (only if enabled) */
   speakAIResponse(text: string, onEnd?: () => void): void {
     if (!this.settings.enableAIResponses) return;
-    // Trim long AI responses
     const trimmed = text.length > 200 ? text.slice(0, 200) + '...' : text;
     this.speakText(trimmed, 'coach', { onEnd });
   }
@@ -267,60 +470,48 @@ class VoiceService {
   // STRUCTURED SPEECH METHODS
   // ============================================================================
 
-  /** Countdown sequence: 3-2-1-GO */
   speakCountdown(onComplete?: () => void): void {
     if (!this.settings.enableCountdown || !this.settings.enabled) {
       onComplete?.();
       return;
     }
-
     const texts = COUNTDOWN_TEXTS[this.settings.language];
-    // We speak "GO" — the numbers are handled visually + sound effects.
-    // Only the final GO + focus is spoken for sharpness.
     this.speakRitual(`${texts.go} ${texts.focus}`, onComplete);
   }
 
-  /** Speak block start info */
   speakBlockStart(blockTitle: string, goalTitle?: string, reason?: string): void {
     if (!this.settings.enableCountdown || !this.settings.enabled) return;
 
     const lang = this.settings.language;
     const parts: string[] = [];
 
-    // GO
     parts.push(COUNTDOWN_TEXTS[lang].go);
-
-    // Block title
     parts.push(blockTitle + '.');
 
-    // Goal connection
     if (goalTitle) {
       if (lang === 'it-IT') parts.push(`Per ${goalTitle}.`);
       else if (lang === 'en-US') parts.push(`For ${goalTitle}.`);
       else if (lang === 'es-ES') parts.push(`Para ${goalTitle}.`);
     }
 
-    // Reason
     if (reason) parts.push(reason);
 
     this.speakRitual(parts.join(' '));
   }
 
-  /** Speak system confirmation */
   speakConfirmation(type: 'blockCompleted' | 'taskCompleted' | 'habitLogged' | 'goalProgress'): void {
     if (!this.settings.enableSystemConfirmations || !this.settings.enabled) return;
     const text = SYSTEM_TEXTS[this.settings.language][type];
     this.speakSystem(text);
   }
 
-  /** Speak hero quote */
   speakHeroQuote(quote: string, heroName?: string): void {
     if (!this.settings.enableHeroQuotes || !this.settings.enabled) return;
     const text = heroName ? `${heroName}. ${quote}` : quote;
     this.speakHero(text);
   }
 
-  /** Preview a specific voice for settings UI */
+  /** Preview a specific browser voice for settings UI */
   previewVoice(voiceName: string, role: VoiceRole = 'system'): void {
     const text = PREVIEW_TEXTS[this.settings.language][role];
 
@@ -336,9 +527,7 @@ class VoiceService {
     utterance.volume = 0.9;
 
     const voice = this.cachedVoices.find(v => v.name === voiceName);
-    if (voice) {
-      utterance.voice = voice;
-    }
+    if (voice) utterance.voice = voice;
 
     window.speechSynthesis.speak(utterance);
   }
@@ -354,14 +543,18 @@ class VoiceService {
   // ============================================================================
 
   stopSpeech(): void {
+    // Stop browser speech
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    // Stop premium audio
+    this.stopPremiumAudio();
     this.speaking = false;
     this.queue = [];
   }
 
   isSpeaking(): boolean {
+    if (this.currentAudio && !this.currentAudio.paused) return true;
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       return window.speechSynthesis.speaking;
     }
