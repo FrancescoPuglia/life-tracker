@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 
-// In CI (static export for GitHub Pages), this route won't work — that's expected.
-// Locally, it MUST run dynamically to read env vars at runtime.
-export const dynamic = 'force-dynamic';
+// force-static for CI static export (GitHub Pages).
+// The POST handler forces dynamic routing at runtime (same pattern as /api/ai/chat).
+export const dynamic = 'force-static';
 
 export type ProviderStatus = 'available' | 'missing_key' | 'error';
 
@@ -13,10 +13,21 @@ export interface VoiceProviderStatus {
 }
 
 // ============================================================================
-// GET — Check provider availability
+// GET — Static info (prerendered at build time)
 // ============================================================================
 
 export async function GET() {
+  return NextResponse.json({
+    service: 'voice-status',
+    description: 'POST to check TTS provider availability',
+  });
+}
+
+// ============================================================================
+// POST — Live provider status check (runs dynamically at runtime)
+// ============================================================================
+
+export async function POST() {
   const result: VoiceProviderStatus = {
     openai: { status: 'missing_key' },
     elevenlabs: { status: 'missing_key' },
@@ -26,7 +37,6 @@ export async function GET() {
   // Check OpenAI
   if (process.env.OPENAI_API_KEY) {
     try {
-      // Light validation: check key format (starts with sk-)
       const key = process.env.OPENAI_API_KEY;
       if (key.startsWith('sk-') && key.length > 20) {
         result.openai = { status: 'available' };

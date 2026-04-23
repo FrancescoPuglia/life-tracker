@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Must run dynamically to read env vars and proxy TTS requests at runtime.
-export const dynamic = 'force-dynamic';
+// force-static for CI static export (GitHub Pages).
+// The POST handler forces dynamic routing at runtime (same pattern as /api/ai/chat).
+export const dynamic = 'force-static';
 
 // ============================================================================
 // OPENAI TTS

@@ -106,7 +106,7 @@ class VoiceService {
       this.providersStatus.openai = { status: 'checking' };
       this.providersStatus.elevenlabs = { status: 'checking' };
 
-      const res = await fetch('/api/voice/status');
+      const res = await fetch('/api/voice/status', { method: 'POST' });
       if (!res.ok) throw new Error(`Status API returned ${res.status}`);
 
       const data = await res.json();
