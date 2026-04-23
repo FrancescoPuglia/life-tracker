@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node -e \"require('fs').closeSync(require('fs').openSync('out/.nojekyll','a'))\"",
+    "build": "next build && node -e \"try{require('fs').closeSync(require('fs').openSync('out/.nojekyll','a'))}catch{}\"",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest",

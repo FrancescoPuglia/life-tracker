@@ -33,7 +33,7 @@ jobs:
       - name: Build with Next.js
         run: npm run build
         env:
-          CI: true
+          GITHUB_PAGES: 'true'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Add .nojekyll file

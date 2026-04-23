@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
-// force-static for CI static export (GitHub Pages).
-// The POST handler forces dynamic routing at runtime (same pattern as /api/ai/chat).
+// force-static: required for GitHub Pages static export to not crash on this route.
+// On Vercel, POST handler overrides this → route runs dynamically at runtime.
 export const dynamic = 'force-static';
 
 export type ProviderStatus = 'available' | 'missing_key' | 'error';
