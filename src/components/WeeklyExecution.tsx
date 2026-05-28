@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { Target, Clock, TrendingUp, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { useDataContext } from '@/providers/DataProvider';
+import WpiWeeklyExecutionSummary from '@/components/WeeklyPlanning/WpiWeeklyExecutionSummary';
 
 function getWeekBounds(date: Date): { start: Date; end: Date } {
   const d = new Date(date);
@@ -319,6 +320,10 @@ export default function WeeklyExecution() {
             <p className="text-xs text-gray-600 mt-1">Vai al Time Planner per pianificare.</p>
           </div>
         )}
+
+        {/* Optional: Weekly Planning Intelligence cross-link. The component
+            renders nothing if no WPI-tagged TimeBlocks exist for the week. */}
+        <WpiWeeklyExecutionSummary />
       </div>
     </div>
   );
