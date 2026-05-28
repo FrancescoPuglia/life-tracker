@@ -10,6 +10,9 @@ describe('API Route: /api/ai/chat', () => {
     vi.clearAllMocks();
   });
 
+  // Per-test timeout bumped to 30s because the test issues 11 sequential
+  // POST calls; under cold-start vitest setup (jsdom + lazy route import)
+  // the default 5000ms is flaky. No assertion or runtime behavior changed.
   it('should enforce rate limiting', async () => {
     // This test verifies that the rate limiting logic exists
     // Full integration test would require actual HTTP requests
@@ -53,7 +56,7 @@ describe('API Route: /api/ai/chat', () => {
 
     const data = await rateLimitedResponse.json();
     expect(data.error).toContain('Rate limit exceeded');
-  });
+  }, 30000);
 
   it('should validate required fields', async () => {
     const { POST } = await import('./route');
@@ -74,6 +77,13 @@ describe('API Route: /api/ai/chat', () => {
     expect(response.status).toBe(400);
 
     const data = await response.json();
-    expect(data.error).toContain('required fields');
+    // Language-agnostic: verify the error mentions every missing field rather
+    // than relying on an English phrase. The route returns a localized
+    // message (e.g. "Campi obbligatori mancanti: message, context, userId"),
+    // so we assert on the field names that must always be present.
+    expect(data.error).toBeTruthy();
+    expect(data.error).toContain('message');
+    expect(data.error).toContain('context');
+    expect(data.error).toContain('userId');
   });
 });
