@@ -6,6 +6,7 @@ A comprehensive personal life management application with goal tracking, time bl
 
 - **OKR Management**: Goals → Projects → Tasks with hierarchical progress tracking
 - **Time Block Planner**: Google Calendar-style scheduling with weekly repeats
+- **Weekly Planning Intelligence** (v1.2): natural-language weekly intentions → draft week → safe commit → plan-vs-actual review. Deterministic, local-first, no AI in MVP. See [`docs/WEEKLY_PLANNING_INTELLIGENCE.md`](docs/WEEKLY_PLANNING_INTELLIGENCE.md).
 - **Hierarchical Rollup**: Automatic progress calculation from completed time blocks
 - **Cascade Delete** (v1.1): Delete goals → auto-deletes projects → tasks (with audit trail)
 - **Habits Tracker**: Daily habits with streak counting
@@ -16,6 +17,21 @@ A comprehensive personal life management application with goal tracking, time bl
 - **Dual-Mode Persistence**:
   - Logged users: Firebase Firestore (cloud sync)
   - Guest users: IndexedDB (local storage)
+
+### 🧭 Weekly Planning Intelligence (v1.2)
+
+Turn natural-language weekly intentions into a reviewable, draft-first week of real TimeBlocks — with plan-vs-actual calibration the following week.
+
+- **Write your week**: *"Ogni giorno sveglia alle 7. Lunedì Catalana 2 ore. Palestra 4 volte a settimana. Leggere ogni sera 30 minuti."*
+- **Deterministic engine**: regex + tables, no LLM, no API key. Same input → same draft.
+- **Goal/Project/Task mapping**: each intent maps to your OKR with a confidence score + "needs review" gate.
+- **Realism score 0–100** with explainable penalties (overload, context switches, recovery, goal coverage).
+- **Draft-first persistence**: `localStorage` only. Nothing reaches the calendar until you click Approve.
+- **Idempotent commit**: every TimeBlock carries a `WPI_KEY` in its notes — re-approve is a no-op, no duplicates.
+- **Plan-vs-actual review**: completion rate, planned/completed hours, day breakdown, realism calibration verdict.
+- **Stack**: TypeScript (zero `any`), React 18, Tailwind, Vitest. 126 tests across engine + UI.
+
+Full architecture, safety model, data flow and roadmap: [`docs/WEEKLY_PLANNING_INTELLIGENCE.md`](docs/WEEKLY_PLANNING_INTELLIGENCE.md).
 
 ## 📋 Prerequisites
 
