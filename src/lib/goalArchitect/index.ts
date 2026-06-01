@@ -132,6 +132,8 @@ export {
 } from './parserFixtures';
 export type { GoalArchitectParserInputTexts } from './parserFixtures';
 
+export { hasGaiKeyMarker, stripGaiKeyMarker } from './displayHelpers';
+
 // ---------------------------------------------------------------------------
 // Draft persistence & safe commit (Prompt 4)
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import {
   FolderOpen, ListTodo, AlertCircle, Check, FileText, Map, Sparkles
 } from 'lucide-react';
 import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
+import { stripGaiKeyMarker } from '@/lib/goalArchitect';
 import { RichNoteEditor } from './RichNoteEditor';
 import { GoalRoadmapView } from './GoalRoadmapView';
 import VisionBoardEnhanced from './VisionBoardEnhanced';
@@ -774,7 +775,7 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes,
             <h3 className="text-lg font-semibold text-gray-900 truncate">{goal.title}</h3>
           )}
           {goal.description && (
-            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{goal.description}</p>
+            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{stripGaiKeyMarker(goal.description)}</p>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -911,7 +912,7 @@ function KeyResultCard({ keyResult, onEdit, onDelete }: KeyResultCardProps) {
         <div className="flex-1 min-w-0">
           <h4 className="font-medium text-gray-900 truncate">{keyResult.title}</h4>
           {keyResult.description && (
-            <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{keyResult.description}</p>
+            <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{stripGaiKeyMarker(keyResult.description)}</p>
           )}
         </div>
         <div className="flex items-center gap-2 ml-2">
@@ -1019,7 +1020,7 @@ function ProjectCard({ project, isSelected, onSelect, onUpdate, onDelete }: Proj
       </div>
 
       {project.description && (
-        <p className="text-sm text-gray-500 mb-3 line-clamp-2">{project.description}</p>
+        <p className="text-sm text-gray-500 mb-3 line-clamp-2">{stripGaiKeyMarker(project.description)}</p>
       )}
 
       <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
@@ -1111,7 +1112,7 @@ function TaskCard({ task, onToggleComplete, onUpdate, onDelete }: TaskCardProps)
           </div>
 
           {task.description && (
-            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{task.description}</p>
+            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{stripGaiKeyMarker(task.description)}</p>
           )}
 
           <div className="flex items-center flex-wrap gap-2 mt-2">

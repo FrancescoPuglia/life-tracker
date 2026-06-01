@@ -387,6 +387,10 @@ td {
 
 @media (min-width: 1024px) {
   .grid-responsive {
-    grid-template-columns: 280px 1fr 320px;
+    /* UX overhaul: the previous "280px 1fr 320px" template left a
+       320px-wide empty column on the right because only two children are
+       rendered. The two-column template lets the main workspace use the
+       full available width on large screens. */
+    grid-template-columns: 280px 1fr;
   }
 }
