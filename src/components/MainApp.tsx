@@ -9,17 +9,19 @@ import { useDataContext } from '@/providers/DataProvider';
 
 // Always-loaded components (small, needed immediately)
 import NowBar from '@/components/NowBar';
-import KPIDashboard from '@/components/KPIDashboard';
+// KPIDashboard, DailyLoginStreakSystem, StreakCounter and ContextualMotivation
+// used to render as permanent cards inside the left sidebar. They were moved
+// out of the navigation in the UX overhaul; if you need to bring them back,
+// they live under @/components/.
 import AuthModal from '@/components/AuthModal';
 import SyncStatusIndicator from '@/components/SyncStatus';
 import DailyMotivation from '@/components/DailyMotivation';
-import DailyLoginStreakSystem from '@/components/DailyLoginStreakSystem';
-import StreakCounter from '@/components/StreakCounter';
+// (DailyLoginStreakSystem + StreakCounter removed from sidebar — see note above.)
 import GamingEffects from '@/components/GamingEffects';
 import DopamineRewardSystem from '@/components/DopamineRewardSystem';
 import StrategicDopamineSystem from '@/components/StrategicDopamineSystem';
 import BlockCountdown from '@/components/BlockCountdown';
-import ContextualMotivation from '@/components/ContextualMotivation';
+// (ContextualMotivation removed from sidebar.)
 import { audioManager } from '@/lib/audioManager';
 import { calculateStreak, StreakData } from '@/lib/streakCalculator';
 import { getVoiceService } from '@/lib/voice/voiceService';
@@ -44,11 +46,16 @@ const VoiceSettings = lazy(() => import('@/components/VoiceSettings'));
 const WeeklyPlanningTab = lazy(() => import('@/components/WeeklyPlanning/WeeklyPlanningTab'));
 const GoalArchitectTab = lazy(() => import('@/components/GoalArchitect/GoalArchitectTab'));
 
+// Shell components (UX overhaul)
+import SidebarNavigation, { type SidebarNavId } from '@/components/shell/SidebarNavigation';
+import AskAIDrawer from '@/components/shell/AskAIDrawer';
+import TodayCommandCenter from '@/components/shell/TodayCommandCenter';
+
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice';
+type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice';
 
 interface MainAppProps {
   buildId: string;
@@ -65,7 +72,8 @@ export default function MainApp({ buildId }: MainAppProps) {
   // Local UI state only
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<ActiveTab>('planner');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('today');
+  const [aiDrawerOpen, setAiDrawerOpen] = useState<boolean>(false);
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('90d'); // Changed to 90 days to capture all data
   const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
@@ -350,12 +358,24 @@ export default function MainApp({ buildId }: MainAppProps) {
               <div className="text-2xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
                 ⚡ LifeTracker
               </div>
-              <div className="achievement-badge">
-                v{buildId}
-              </div>
+              <span
+                className="hidden md:inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-mono text-gray-500"
+                title={`Build ${buildId}`}
+              >
+                v{buildId.slice(0, 7)}
+              </span>
             </div>
-            
+
             <div className="flex items-center space-x-4">
+              <button
+                type="button"
+                onClick={() => setAiDrawerOpen(true)}
+                data-testid="ask-ai-button"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:from-blue-100 hover:to-indigo-100 transition"
+              >
+                <span aria-hidden="true">🧠</span>
+                <span>Ask AI</span>
+              </button>
               <SyncStatusIndicator />
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg">
@@ -408,153 +428,23 @@ export default function MainApp({ buildId }: MainAppProps) {
       {/* Main Content */}
       <div className="pt-16 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
         <div className="container mx-auto">
-          <div className="grid-responsive gap-6">
-            {/* Left Sidebar */}
-            <div className="sidebar-container space-y-6">
-              {/* Daily Login Streak System */}
-              <DailyLoginStreakSystem
-                showCompact={true}
-                className="w-full"
-                onStreakUpdate={(streak) => {
-                  // Strategic dopamine: Only trigger when streak increases
-                  if (typeof window !== 'undefined' && (window as any).strategicDopamine) {
-                    // Daily login reward is handled automatically by StrategicDopamineSystem
-                  }
-
-                  // Additional streak milestones (3, 7, 30 days)
-                  if (typeof window !== 'undefined' && (window as any).dopamineSystem && streak.currentStreak > 1) {
-                    (window as any).dopamineSystem.triggerStreakReward(streak.currentStreak);
-                  }
+          <div className="grid-responsive gap-6 px-4 sm:px-6 lg:px-8">
+            {/* Left Sidebar — grouped navigation */}
+            <div className="sidebar-container">
+              <SidebarNavigation
+                activeTab={activeTab as SidebarNavId}
+                onSelect={(id) => {
+                  setActiveTab(id as ActiveTab);
+                  audioManager.buttonFeedback();
                 }}
               />
-
-              {/* Activity Streak Counter - Real momentum tracking */}
-              <StreakCounter streak={streakData} compact={true} />
-
-              {/* AI Assistant */}
-              <div className="sidebar-card card-elevated card-body hover-lift transition-smooth">
-                <div className="mb-4">
-                  <h3 className="heading-3 flex items-center gap-3">
-                    🧠 AI Assistant
-                    <span className="badge badge-primary text-xs">AI</span>
-                  </h3>
-                  <p className="text-small">Create tasks and blocks with natural language</p>
-                </div>
-                <AIInputBarV2
-                  userId={data.userId}
-                  goals={data.goals}
-                  projects={data.projects}
-                  tasks={data.tasks}
-                  timeBlocks={data.timeBlocks}
-                  sessions={[]} // TODO: Implementare sessions nel DataProvider
-                  habits={data.habits}
-                  habitLogs={data.habitLogs}
-                  domains={[]} // TODO: Implementare domains nel DataProvider
-                  onCreateTimeBlock={handleCreateTimeBlock}
-                  onUpdateTimeBlock={data.updateTimeBlock}
-                  onDeleteTimeBlock={data.deleteTimeBlock}
-                  onUpdateTask={data.updateTask}
-                  className="w-full"
-                />
-              </div>
-
-              {/* Contextual Motivation - Real data alerts */}
-              <ContextualMotivation />
-
-              {/* KPI Dashboard */}
-              <div className="sidebar-card kpi-card card-elevated hover-lift transition-smooth">
-                <div className="card-header">
-                  <h3 className="heading-3">Today&apos;s Progress</h3>
-                </div>
-                <div className="card-body" style={{minHeight: '140px', contain: 'layout'}}>
-                  <KPIDashboard
-                    kpis={data.kpis}
-                    onRefresh={data.refreshKPIs}
-                  />
-                </div>
-              </div>
-
-              {/* Weekly Execution */}
-              <Suspense fallback={null}>
-                <WeeklyExecution />
-              </Suspense>
-
-              {/* Hero Wall - Daily Motivation */}
-              <Suspense fallback={null}>
-                <HeroWall compact={true} />
-              </Suspense>
-
-              {/* Module Navigation */}
-              <div className="gaming-card">
-                <div className="p-4 border-b border-gray-200/50">
-                  <h3 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2">
-                    🎮 Modules
-                  </h3>
-                </div>
-                <div className="p-4">
-                  <div className="grid grid-cols-1 gap-3">
-                    {[
-                      { id: 'planner', label: 'Time Planner', icon: '📅', description: 'Plan your day', color: 'from-blue-400 to-blue-600' },
-                      { id: 'smart_scheduler', label: 'Auto Scheduler', icon: '⚡', description: 'AI scheduling', color: 'from-yellow-400 to-orange-600' },
-                      { id: 'adaptation', label: 'Auto-Replan', icon: '🔄', description: 'Real-time adaptation', color: 'from-green-400 to-green-600' },
-                      { id: 'micro_coach', label: 'AI Coach', icon: '🧠', description: 'Performance insights', color: 'from-purple-400 to-purple-600' },
-                      { id: 'habits', label: 'Habits', icon: '🔥', description: 'Track habits', color: 'from-red-400 to-red-600' },
-                      { id: 'okr', label: 'Goals & Projects', icon: '🎯', description: 'Manage objectives', color: 'from-indigo-400 to-indigo-600' },
-                      { id: 'notes', label: 'Second Brain', icon: '🧠', description: 'Smart notes', color: 'from-violet-400 to-violet-600' },
-                      { id: 'vision-board', label: 'Vision Board', icon: '✧', description: 'Manifest dreams', color: 'from-pink-400 to-purple-600' },
-                      { id: 'analytics', label: 'Analytics', icon: '📊', description: 'Performance data', color: 'from-cyan-400 to-cyan-600' },
-                      { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights', color: 'from-teal-400 to-teal-600' },
-                      { id: 'weekly', label: 'Weekly Execution', icon: '📈', description: 'Piano vs realta', color: 'from-emerald-400 to-emerald-600' },
-                      { id: 'weekly_intel', label: 'Weekly Intelligence', icon: '🧭', description: 'Generate a draft week from your goals and intentions', color: 'from-blue-500 to-indigo-600' },
-                      { id: 'goal_architect', label: 'Goal Architect', icon: '🏗️', description: 'Draft Goal → Projects → Tasks from natural language', color: 'from-purple-500 to-blue-600' },
-                      { id: 'events', label: 'Calendario', icon: '📆', description: 'Eventi strategici', color: 'from-rose-400 to-rose-600' },
-                      { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones', color: 'from-amber-400 to-amber-600' },
-                      { id: 'voice', label: 'Voice System', icon: '🎙️', description: 'Lingua e voci', color: 'from-sky-400 to-blue-600' },
-                    ].map(({ id, label, icon, description, color }) => (
-                      <button
-                        key={id}
-                        onClick={() => {
-                          setActiveTab(id as ActiveTab);
-                          audioManager.buttonFeedback();
-                          // NO dopamine for simple navigation - only for achievements!
-                        }}
-                        className={`
-                          group relative p-4 rounded-xl transition-all duration-300 text-left
-                          ${activeTab === id 
-                            ? `bg-gradient-to-r ${color} text-white shadow-lg transform scale-105` 
-                            : 'bg-white/50 hover:bg-white/80 text-gray-700 hover:shadow-md hover:scale-102'
-                          }
-                          border-2 ${activeTab === id ? 'border-white/30' : 'border-gray-200/50 hover:border-gray-300/50'}
-                          backdrop-blur-sm
-                        `}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`text-2xl ${activeTab === id ? '' : 'group-hover:scale-110'} transition-transform duration-200`}>
-                            {icon}
-                          </div>
-                          <div className="flex-1">
-                            <div className={`font-semibold ${activeTab === id ? 'text-white' : 'text-gray-800'}`}>
-                              {label}
-                            </div>
-                            <div className={`text-sm ${activeTab === id ? 'text-white/90' : 'text-gray-500'}`}>
-                              {description}
-                            </div>
-                          </div>
-                          {activeTab === id && (
-                            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* Main Content Area */}
             <div className="gaming-card">
               <div className="p-6 border-b border-gradient-to-r from-blue-200/30 to-purple-200/30">
                 <h2 className="text-3xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent flex items-center gap-3">
+                  {activeTab === 'today' && '☀️ Today'}
                   {activeTab === 'planner' && '📅 Time Planner'}
                   {activeTab === 'smart_scheduler' && '⚡ Auto Scheduler'}
                   {activeTab === 'adaptation' && '🔄 Auto Replan'}
@@ -584,6 +474,17 @@ export default function MainApp({ buildId }: MainAppProps) {
                 <div className="absolute top-0 right-0 w-2 h-2 particle" style={{ top: '50%', right: '5%', animationDelay: '5s' }}></div>
                 
                 {/* Content */}
+                {activeTab === 'today' && (
+                  <TodayCommandCenter
+                    timeBlocks={data.timeBlocks}
+                    tasks={data.tasks}
+                    goals={data.goals}
+                    projects={data.projects}
+                    streakData={streakData}
+                    onOpenTab={(id) => setActiveTab(id as ActiveTab)}
+                  />
+                )}
+
                 {activeTab === 'planner' && (
                   <>
                     {timeBlockError && (
@@ -603,6 +504,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                       onDateChange={setSelectedDate}
                       currentUserId={data.userId}
                       isReady={data.status === 'ready'}
+                      onNavigate={(id) => setActiveTab(id as ActiveTab)}
                     />
                   </>
                 )}
@@ -755,7 +657,10 @@ export default function MainApp({ buildId }: MainAppProps) {
                 )}
 
                 {activeTab === 'events' && (
-                  <EventsCalendar goals={data.goals} />
+                  <EventsCalendar
+                    goals={data.goals}
+                    onNavigate={(id) => setActiveTab(id as ActiveTab)}
+                  />
                 )}
 
                 {activeTab === 'vision-board' && (
@@ -773,8 +678,30 @@ export default function MainApp({ buildId }: MainAppProps) {
         </div>
       </div>
 
+      {/* Ask AI drawer — opens on Top Bar "Ask AI" click. */}
+      <AskAIDrawer open={aiDrawerOpen} onClose={() => setAiDrawerOpen(false)}>
+        <Suspense fallback={<div className="text-sm text-gray-500">Loading AI…</div>}>
+          <AIInputBarV2
+            userId={data.userId}
+            goals={data.goals}
+            projects={data.projects}
+            tasks={data.tasks}
+            timeBlocks={data.timeBlocks}
+            sessions={[]}
+            habits={data.habits}
+            habitLogs={data.habitLogs}
+            domains={[]}
+            onCreateTimeBlock={handleCreateTimeBlock}
+            onUpdateTimeBlock={data.updateTimeBlock}
+            onDeleteTimeBlock={data.deleteTimeBlock}
+            onUpdateTask={data.updateTask}
+            className="w-full"
+          />
+        </Suspense>
+      </AskAIDrawer>
+
       {/* Dopamine Reward System */}
-      <DopamineRewardSystem 
+      <DopamineRewardSystem
         onRewardTriggered={(reward) => {
           // Play sound effects based on reward rarity
           if (reward.rarity === 'legendary') {

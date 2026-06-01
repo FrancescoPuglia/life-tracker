@@ -79,9 +79,15 @@ function daysUntil(date: Date): number {
 interface EventsCalendarProps {
   goals?: Goal[];
   className?: string;
+  /**
+   * Optional tab-switch handler. When provided, the calendar exposes a
+   * "Generate Weekly Plan" CTA that switches the host MainApp to the
+   * `weekly_intel` tab. Tests render without it; production wires it up.
+   */
+  onNavigate?: (tabId: string) => void;
 }
 
-export default function EventsCalendar({ goals = [], className = '' }: EventsCalendarProps) {
+export default function EventsCalendar({ goals = [], className = '', onNavigate }: EventsCalendarProps) {
   const [events, setEvents] = useState<ImportantEvent[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -197,23 +203,40 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
   const selectedDayEvents = selectedDate ? (eventsByDate.get(selectedDate) || []) : [];
 
   return (
-    <div className={`bg-gray-900 rounded-2xl border border-gray-700/50 overflow-hidden ${className}`}>
+    <div
+      data-testid="events-calendar"
+      className={`bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden ${className}`}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between p-5 border-b border-gray-700/50 bg-gradient-to-r from-gray-900 to-gray-800">
+      <div className="flex items-center justify-between gap-3 flex-wrap p-5 border-b border-gray-100 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2.5">
-            <CalendarIcon className="w-6 h-6 text-cyan-400" />
-            Calendario Strategico
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2.5">
+            <CalendarIcon className="w-6 h-6 text-blue-600" />
+            Strategic Calendar
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            {events.filter(e => !e.completed).length} eventi attivi
-            {upcomingEvents.length > 0 && ` - Prossimo tra ${daysUntil(new Date(upcomingEvents[0].date))} giorni`}
+            {events.filter(e => !e.completed).length} active event{events.filter(e => !e.completed).length === 1 ? '' : 's'}
+            {upcomingEvents.length > 0 && ` · next in ${daysUntil(new Date(upcomingEvents[0].date))} days`}
           </p>
         </div>
-        <button onClick={() => { setEditingEvent(null); setShowCreateModal(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold rounded-xl transition-colors shadow-lg shadow-cyan-600/20">
-          <Plus className="w-4 h-4" /> Nuovo Evento
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('weekly_intel')}
+              data-testid="calendar-generate-weekly-plan"
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-indigo-200 bg-white text-indigo-700 text-sm font-medium rounded-xl hover:bg-indigo-50 transition-colors"
+            >
+              🧭 Generate Weekly Plan
+            </button>
+          )}
+          <button
+            onClick={() => { setEditingEvent(null); setShowCreateModal(true); }}
+            data-testid="calendar-add-event"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> Add Event
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col xl:flex-row">
@@ -221,21 +244,32 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
         <div className="flex-1 p-5">
           {/* Month Navigation */}
           <div className="flex items-center justify-between mb-5">
-            <button onClick={goToPrevMonth} className="p-2 hover:bg-gray-800 rounded-xl transition-colors">
-              <ChevronLeft className="w-5 h-5 text-gray-400" />
+            <button
+              onClick={goToPrevMonth}
+              aria-label="Previous month"
+              className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+            >
+              <ChevronLeft className="w-5 h-5 text-gray-500" />
             </button>
             <div className="flex items-center gap-3">
-              <h3 className="text-2xl font-bold text-white tracking-tight">
+              <h3 className="text-2xl font-bold text-gray-900 tracking-tight">
                 {MONTHS[currentDate.getMonth()]}
               </h3>
               <span className="text-lg text-gray-500 font-medium">{currentDate.getFullYear()}</span>
-              <button onClick={goToToday}
-                className="text-xs text-cyan-400 hover:text-cyan-300 px-3 py-1 rounded-lg border border-cyan-500/30 hover:bg-cyan-500/10 transition-colors font-medium">
-                Oggi
+              <button
+                onClick={goToToday}
+                data-testid="calendar-today"
+                className="text-xs text-blue-700 hover:text-blue-900 px-3 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors font-medium"
+              >
+                Today
               </button>
             </div>
-            <button onClick={goToNextMonth} className="p-2 hover:bg-gray-800 rounded-xl transition-colors">
-              <ChevronRight className="w-5 h-5 text-gray-400" />
+            <button
+              onClick={goToNextMonth}
+              aria-label="Next month"
+              className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+            >
+              <ChevronRight className="w-5 h-5 text-gray-500" />
             </button>
           </div>
 
@@ -247,7 +281,7 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
           </div>
 
           {/* Days Grid */}
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1" data-testid="calendar-days-grid">
             {calendarDays.map(({ date, isCurrentMonth }, i) => {
               const key = toDateKey(date);
               const dayEvents = eventsByDate.get(key) || [];
@@ -257,20 +291,21 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
 
               return (
                 <button key={i} onClick={() => setSelectedDate(key === selectedDate ? null : key)}
-                  className={`relative min-h-[64px] p-1.5 rounded-xl text-left transition-all
-                    ${isCurrentMonth ? 'bg-gray-800/40' : 'bg-gray-900/30'}
+                  data-testid={isToday ? 'calendar-today-cell' : undefined}
+                  className={`relative min-h-[64px] p-1.5 rounded-xl text-left transition-all border
+                    ${isCurrentMonth ? 'bg-white border-gray-100' : 'bg-gray-50/60 border-transparent'}
                     ${isSelected
-                      ? 'ring-2 ring-cyan-500 bg-cyan-900/20 z-10'
+                      ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-200 z-10'
                       : isToday
-                        ? 'ring-2 ring-cyan-400/50 hover:ring-cyan-400/70'
+                        ? 'ring-2 ring-blue-400/70 hover:ring-blue-500'
                         : hasHighPriority
-                          ? 'ring-1 ring-red-500/40 hover:bg-gray-800/60'
-                          : 'hover:bg-gray-800/60'}
+                          ? 'ring-1 ring-rose-300 hover:bg-rose-50/40'
+                          : 'hover:bg-gray-50'}
                   `}>
                   <div className="flex items-start justify-between">
                     <span className={`text-sm font-semibold inline-flex items-center justify-center
-                      ${isToday ? 'bg-cyan-500 text-white w-7 h-7 rounded-full text-xs' : ''}
-                      ${isCurrentMonth ? 'text-gray-200' : 'text-gray-600'}
+                      ${isToday ? 'bg-blue-600 text-white w-7 h-7 rounded-full text-xs' : ''}
+                      ${isCurrentMonth ? 'text-gray-800' : 'text-gray-400'}
                     `}>
                       {date.getDate()}
                     </span>
@@ -286,8 +321,8 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                         const cat = CATEGORY_CONFIG[e.category] || CATEGORY_CONFIG.other;
                         return (
                           <div key={j} className={`text-[9px] px-1 py-0.5 rounded truncate font-medium ${
-                            e.completed ? 'text-gray-600 line-through' :
-                            e.priority === 'high' ? 'bg-red-500/20 text-red-300' :
+                            e.completed ? 'text-gray-400 line-through' :
+                            e.priority === 'high' ? 'bg-rose-100 text-rose-700' :
                             `${cat.bg} ${cat.color}`
                           }`}>
                             {e.title}
@@ -303,27 +338,62 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
               );
             })}
           </div>
+
+          {/* Premium empty-state overlay — only when there are zero events at all. */}
+          {events.length === 0 && (
+            <div
+              data-testid="calendar-empty-state"
+              className="mt-5 rounded-xl border border-dashed border-blue-200 bg-gradient-to-br from-blue-50/40 via-white to-indigo-50/40 px-6 py-8 text-center"
+            >
+              <CalendarIcon className="w-10 h-10 text-blue-500/70 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-gray-900">
+                No strategic events planned
+              </h3>
+              <p className="mt-1 text-sm text-gray-600 max-w-md mx-auto">
+                Add an event or generate weekly blocks to populate the
+                calendar with deadlines, exams, tournaments and milestones.
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+                <button
+                  onClick={() => { setEditingEvent(null); setShowCreateModal(true); }}
+                  data-testid="calendar-empty-add-event"
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition"
+                >
+                  <Plus className="w-4 h-4" /> Add Event
+                </button>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate('weekly_intel')}
+                    data-testid="calendar-empty-generate-weekly"
+                    className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    🧭 Generate Weekly Plan
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Panel */}
-        <div className="xl:w-80 border-t xl:border-t-0 xl:border-l border-gray-700/50 bg-gray-900/50">
+        <div className="xl:w-80 border-t xl:border-t-0 xl:border-l border-gray-100 bg-gray-50/40">
           <div className="p-5 space-y-6">
             {/* Next Key Event */}
             {nextKeyEvent && (
-              <div className="bg-gradient-to-br from-cyan-900/30 to-blue-900/20 rounded-xl p-4 border border-cyan-500/20">
-                <div className="text-[10px] font-semibold text-cyan-400 uppercase tracking-widest mb-2">Prossimo Evento</div>
-                <h4 className="text-base font-bold text-white mb-1">{nextKeyEvent.title}</h4>
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+                <div className="text-[10px] font-semibold text-blue-700 uppercase tracking-widest mb-2">Next event</div>
+                <h4 className="text-base font-bold text-gray-900 mb-1">{nextKeyEvent.title}</h4>
                 <div className="flex items-center gap-2 text-sm">
-                  <Clock className="w-3.5 h-3.5 text-cyan-400" />
-                  <span className={`font-bold ${daysUntil(new Date(nextKeyEvent.date)) <= 3 ? 'text-red-400' : 'text-cyan-300'}`}>
-                    {daysUntil(new Date(nextKeyEvent.date)) === 0 ? 'OGGI' :
-                     daysUntil(new Date(nextKeyEvent.date)) === 1 ? 'DOMANI' :
-                     `${daysUntil(new Date(nextKeyEvent.date))} giorni`}
+                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                  <span className={`font-bold ${daysUntil(new Date(nextKeyEvent.date)) <= 3 ? 'text-rose-600' : 'text-blue-700'}`}>
+                    {daysUntil(new Date(nextKeyEvent.date)) === 0 ? 'TODAY' :
+                     daysUntil(new Date(nextKeyEvent.date)) === 1 ? 'TOMORROW' :
+                     `${daysUntil(new Date(nextKeyEvent.date))} days`}
                   </span>
                 </div>
                 {nextKeyEvent.priority === 'high' && (
-                  <div className="flex items-center gap-1 mt-2 text-xs text-red-400 font-medium">
-                    <AlertTriangle className="w-3 h-3" /> Priorita alta
+                  <div className="flex items-center gap-1 mt-2 text-xs text-rose-700 font-medium">
+                    <AlertTriangle className="w-3 h-3" /> High priority
                   </div>
                 )}
               </div>
@@ -332,14 +402,14 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
             {/* Selected Day Detail */}
             {selectedDate && (
               <div>
-                <h3 className="text-sm font-bold text-gray-200 mb-3">
-                  {new Date(selectedDate + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}
+                <h3 className="text-sm font-bold text-gray-900 mb-3">
+                  {new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </h3>
                 {selectedDayEvents.length === 0 ? (
                   <div className="text-center py-4">
-                    <p className="text-xs text-gray-500">Nessun evento</p>
+                    <p className="text-xs text-gray-500">No events on this day</p>
                     <button onClick={() => { setEditingEvent(null); setShowCreateModal(true); }}
-                      className="mt-2 text-xs text-cyan-400 hover:text-cyan-300">+ Aggiungi evento</button>
+                      className="mt-2 text-xs text-blue-700 hover:text-blue-900 font-medium">+ Add event</button>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -347,14 +417,14 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                       const cat = CATEGORY_CONFIG[event.category] || CATEGORY_CONFIG.other;
                       const priority = PRIORITY_CONFIG[event.priority || 'medium'];
                       return (
-                        <div key={event.id} className={`p-3 rounded-xl border transition-all ${cat.bg} ${event.completed ? 'opacity-40' : ''}`}>
+                        <div key={event.id} className={`p-3 rounded-xl border transition-all ${cat.bg} ${event.completed ? 'opacity-50' : ''}`}>
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-start gap-2 min-w-0 flex-1">
                               <button onClick={() => toggleComplete(event.id)} className={`flex-shrink-0 mt-0.5 ${cat.color}`}>
                                 {cat.icon}
                               </button>
                               <div className="min-w-0">
-                                <span className={`text-sm font-semibold block truncate ${event.completed ? 'line-through text-gray-500' : 'text-white'}`}>
+                                <span className={`text-sm font-semibold block truncate ${event.completed ? 'line-through text-gray-500' : 'text-gray-900'}`}>
                                   {event.title}
                                 </span>
                                 <div className="flex items-center gap-2 mt-1">
@@ -364,21 +434,21 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                               </div>
                             </div>
                             <div className="flex gap-1 flex-shrink-0">
-                              <button onClick={() => setEditingEvent(event)} className="text-gray-500 hover:text-gray-300 p-1">
+                              <button onClick={() => setEditingEvent(event)} className="text-gray-400 hover:text-gray-700 p-1" aria-label="Edit event">
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
-                              <button onClick={() => deleteEvent(event.id)} className="text-gray-500 hover:text-red-400 p-1">
+                              <button onClick={() => deleteEvent(event.id)} className="text-gray-400 hover:text-rose-600 p-1" aria-label="Delete event">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </div>
                           {event.description && (
-                            <p className="text-xs text-gray-400 mt-2 ml-5">{event.description}</p>
+                            <p className="text-xs text-gray-600 mt-2 ml-5">{event.description}</p>
                           )}
                           {event.goalId && (
                             <div className="flex items-center gap-1 mt-1.5 ml-5">
-                              <Link className="w-2.5 h-2.5 text-cyan-400" />
-                              <span className="text-[10px] text-cyan-400 truncate">
+                              <Link className="w-2.5 h-2.5 text-blue-600" />
+                              <span className="text-[10px] text-blue-700 truncate">
                                 {goals.find(g => g.id === event.goalId)?.title || 'Goal'}
                               </span>
                             </div>
@@ -394,7 +464,7 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
             {/* This Week */}
             {thisWeekEvents.length > 0 && (
               <div>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Questa settimana</h3>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">This week</h3>
                 <div className="space-y-2">
                   {thisWeekEvents.map(event => {
                     const cat = CATEGORY_CONFIG[event.category] || CATEGORY_CONFIG.other;
@@ -404,10 +474,10 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                         onClick={() => { setSelectedDate(toDateKey(new Date(event.date))); }}>
                         <span className={`flex-shrink-0 ${cat.color}`}>{cat.icon}</span>
                         <div className="min-w-0 flex-1">
-                          <p className={`text-xs font-medium truncate ${event.priority === 'high' ? 'text-red-300' : 'text-white'}`}>{event.title}</p>
+                          <p className={`text-xs font-medium truncate ${event.priority === 'high' ? 'text-rose-700' : 'text-gray-800'}`}>{event.title}</p>
                         </div>
-                        <span className={`text-xs font-bold flex-shrink-0 ${days <= 1 ? 'text-red-400' : days <= 3 ? 'text-yellow-400' : 'text-gray-400'}`}>
-                          {days === 0 ? 'Oggi' : days === 1 ? 'Domani' : `${days}g`}
+                        <span className={`text-xs font-bold flex-shrink-0 ${days <= 1 ? 'text-rose-600' : days <= 3 ? 'text-amber-600' : 'text-gray-500'}`}>
+                          {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d`}
                         </span>
                       </div>
                     );
@@ -419,7 +489,7 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
             {/* This Month */}
             {thisMonthEvents.length > 0 && (
               <div>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">
                   {MONTHS[currentDate.getMonth()]}
                 </h3>
                 <div className="space-y-1.5">
@@ -427,18 +497,18 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
                     const cat = CATEGORY_CONFIG[event.category] || CATEGORY_CONFIG.other;
                     const days = daysUntil(new Date(event.date));
                     return (
-                      <div key={event.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-800/50 rounded-lg px-2 py-1.5 transition-colors"
+                      <div key={event.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-100 rounded-lg px-2 py-1.5 transition-colors"
                         onClick={() => { setSelectedDate(toDateKey(new Date(event.date))); }}>
                         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cat.dot}`} />
-                        <span className="text-gray-300 truncate flex-1">{event.title}</span>
-                        <span className={`font-semibold flex-shrink-0 ${days < 0 ? 'text-red-500' : days <= 3 ? 'text-red-400' : days <= 7 ? 'text-yellow-400' : 'text-gray-500'}`}>
-                          {days < 0 ? `${Math.abs(days)}g fa` : days === 0 ? 'Oggi' : `${days}g`}
+                        <span className="text-gray-700 truncate flex-1">{event.title}</span>
+                        <span className={`font-semibold flex-shrink-0 ${days < 0 ? 'text-rose-700' : days <= 3 ? 'text-rose-600' : days <= 7 ? 'text-amber-600' : 'text-gray-500'}`}>
+                          {days < 0 ? `${Math.abs(days)}d ago` : days === 0 ? 'Today' : `${days}d`}
                         </span>
                       </div>
                     );
                   })}
                   {thisMonthEvents.length > 8 && (
-                    <p className="text-[10px] text-gray-600 px-2">+{thisMonthEvents.length - 8} altri</p>
+                    <p className="text-[10px] text-gray-400 px-2">+{thisMonthEvents.length - 8} more</p>
                   )}
                 </div>
               </div>
@@ -447,17 +517,19 @@ export default function EventsCalendar({ goals = [], className = '' }: EventsCal
             {/* Default hint when no day is selected and events exist */}
             {!selectedDate && upcomingEvents.length > 0 && !nextKeyEvent && (
               <div className="text-center py-6">
-                <CalendarIcon className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-                <p className="text-xs text-gray-500">Seleziona un giorno per i dettagli</p>
+                <CalendarIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                <p className="text-xs text-gray-500">Select a day to see details</p>
               </div>
             )}
 
-            {/* Empty state */}
-            {upcomingEvents.length === 0 && !selectedDate && (
+            {/* Side-rail empty hint (only when no upcoming events but the calendar
+                may still have past/completed events that don't trigger the main
+                empty state). */}
+            {upcomingEvents.length === 0 && !selectedDate && events.length > 0 && (
               <div className="text-center py-8">
-                <CalendarIcon className="w-10 h-10 text-gray-700 mx-auto mb-3" />
-                <p className="text-sm text-gray-500 font-medium">Nessun evento pianificato</p>
-                <p className="text-xs text-gray-600 mt-1">Aggiungi scadenze, tornei, esami e appuntamenti</p>
+                <CalendarIcon className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm text-gray-700 font-medium">No upcoming events</p>
+                <p className="text-xs text-gray-500 mt-1">Past events are still tracked below.</p>
               </div>
             )}
           </div>

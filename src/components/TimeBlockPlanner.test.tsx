@@ -1,0 +1,123 @@
+// src/components/TimeBlockPlanner.test.tsx
+// Smoke tests for the redesigned Time Planner.
+// Focus: empty state, header CTAs, summary strip, optional onNavigate wiring.
+// We do NOT exercise the heavy mouse-drag block creation path here — that has
+// its own runtime guards and is not affected by this overhaul.
+
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import TimeBlockPlanner from './TimeBlockPlanner';
+import type { TimeBlock } from '@/types';
+
+const FIXED_DATE = new Date('2026-05-25T10:00:00.000Z');
+
+function renderPlanner(opts: {
+  timeBlocks?: TimeBlock[];
+  isReady?: boolean;
+  onNavigate?: (id: string) => void;
+} = {}) {
+  return render(
+    <TimeBlockPlanner
+      timeBlocks={opts.timeBlocks ?? []}
+      tasks={[]}
+      projects={[]}
+      goals={[]}
+      onCreateTimeBlock={() => {}}
+      onUpdateTimeBlock={() => {}}
+      onDeleteTimeBlock={() => {}}
+      selectedDate={FIXED_DATE}
+      onDateChange={() => {}}
+      currentUserId="test-user"
+      isReady={opts.isReady ?? true}
+      onNavigate={opts.onNavigate}
+    />,
+  );
+}
+
+describe('TimeBlockPlanner — shell', () => {
+  it('renders the planner with the title and day-summary strip', () => {
+    renderPlanner();
+    expect(screen.getByTestId('time-block-planner')).toBeInTheDocument();
+    expect(screen.getByText(/Time Planner/i)).toBeInTheDocument();
+    expect(screen.getByTestId('planner-day-summary')).toBeInTheDocument();
+  });
+
+  it('shows the Today button and Add Block in the header', () => {
+    renderPlanner();
+    expect(screen.getByTestId('planner-today-button')).toBeInTheDocument();
+    expect(screen.getByTestId('planner-add-block')).toBeInTheDocument();
+  });
+
+  it('exposes Day / Week / Month switcher buttons', () => {
+    renderPlanner();
+    expect(screen.getByRole('button', { name: /^day$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^week$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^month$/i })).toBeInTheDocument();
+  });
+});
+
+describe('TimeBlockPlanner — empty state', () => {
+  it('renders the premium empty state when there are no blocks', () => {
+    renderPlanner();
+    const empty = screen.getByTestId('planner-empty-state');
+    expect(empty).toBeInTheDocument();
+    expect(empty.textContent).toMatch(/No blocks for/i);
+    expect(empty.textContent).toMatch(/Generate your week from Weekly Intelligence/i);
+  });
+
+  it('exposes Add Block inside the empty state', () => {
+    renderPlanner();
+    expect(screen.getByTestId('planner-empty-add-block')).toBeInTheDocument();
+  });
+
+  it('shows "Generate Weekly Plan" only when onNavigate is provided', () => {
+    const { rerender } = renderPlanner();
+    expect(screen.queryByTestId('planner-empty-generate-weekly')).toBeNull();
+    expect(screen.queryByTestId('planner-generate-weekly-plan')).toBeNull();
+
+    rerender(
+      <TimeBlockPlanner
+        timeBlocks={[]}
+        tasks={[]}
+        projects={[]}
+        goals={[]}
+        onCreateTimeBlock={() => {}}
+        onUpdateTimeBlock={() => {}}
+        onDeleteTimeBlock={() => {}}
+        selectedDate={FIXED_DATE}
+        onDateChange={() => {}}
+        currentUserId="test-user"
+        isReady={true}
+        onNavigate={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('planner-empty-generate-weekly')).toBeInTheDocument();
+    expect(screen.getByTestId('planner-generate-weekly-plan')).toBeInTheDocument();
+  });
+
+  it('fires onNavigate("weekly_intel") when the header CTA is clicked', () => {
+    const onNavigate = vi.fn();
+    renderPlanner({ onNavigate });
+    fireEvent.click(screen.getByTestId('planner-generate-weekly-plan'));
+    expect(onNavigate).toHaveBeenCalledWith('weekly_intel');
+  });
+
+  it('fires onNavigate("weekly_intel") when the empty-state CTA is clicked', () => {
+    const onNavigate = vi.fn();
+    renderPlanner({ onNavigate });
+    fireEvent.click(screen.getByTestId('planner-empty-generate-weekly'));
+    expect(onNavigate).toHaveBeenCalledWith('weekly_intel');
+  });
+});
+
+describe('TimeBlockPlanner — day summary', () => {
+  it('shows 0 min / 0 min / 0% when there are no blocks', () => {
+    renderPlanner();
+    const summary = screen.getByTestId('planner-day-summary');
+    expect(summary.textContent).toMatch(/Planned/i);
+    expect(summary.textContent).toMatch(/Completed/i);
+    expect(summary.textContent).toMatch(/Completion/i);
+    expect(summary.textContent).toMatch(/0\s*min/);
+    expect(summary.textContent).toMatch(/0%/);
+  });
+});

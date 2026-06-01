@@ -28,9 +28,15 @@ interface TimeBlockPlannerProps {
   onDateChange: (date: Date) => void;
   currentUserId?: string; // 🔥 CRITICAL FIX
   isReady?: boolean; // Disable buttons until Firebase is ready
+  /**
+   * Optional tab-switch handler. When provided, the planner exposes a
+   * "Generate Weekly Plan" secondary CTA that switches the host MainApp
+   * to the `weekly_intel` tab.
+   */
+  onNavigate?: (tabId: string) => void;
 }
 
-export default function TimeBlockPlanner({ 
+export default function TimeBlockPlanner({
   timeBlocks,
   tasks,
   projects,
@@ -41,7 +47,8 @@ export default function TimeBlockPlanner({
   selectedDate,
   onDateChange,
   currentUserId, // 🔥 CRITICAL FIX
-  isReady = false
+  isReady = false,
+  onNavigate
 }: TimeBlockPlannerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [isDragging, setIsDragging] = useState(false);
@@ -458,8 +465,48 @@ export default function TimeBlockPlanner({
     }
   };
 
+  // ============================================================================
+  // DAY SUMMARY — planned / completed minutes for the day view header strip.
+  // Pure derivation from filteredBlocks; no extra fetches, no extra state.
+  // ============================================================================
+  const daySummary = useMemo(() => {
+    let plannedMin = 0;
+    let completedMin = 0;
+    for (const block of filteredBlocks) {
+      const start = toDateSafe(block.startTime, selectedDate).getTime();
+      const end = toDateSafe(block.endTime, selectedDate).getTime();
+      const planned = Math.max(0, (end - start) / (1000 * 60));
+      plannedMin += planned;
+      if (block.status === 'completed') {
+        const actualStart = block.actualStartTime
+          ? toDateSafe(block.actualStartTime, selectedDate).getTime()
+          : start;
+        const actualEnd = block.actualEndTime
+          ? toDateSafe(block.actualEndTime, selectedDate).getTime()
+          : end;
+        completedMin += Math.max(0, (actualEnd - actualStart) / (1000 * 60));
+      }
+    }
+    const pct = plannedMin > 0 ? Math.round((completedMin / plannedMin) * 100) : 0;
+    return {
+      plannedMin: Math.round(plannedMin),
+      completedMin: Math.round(completedMin),
+      pct,
+    };
+  }, [filteredBlocks, selectedDate]);
+
+  const minutesLabel = (m: number): string => {
+    if (m < 60) return `${m} min`;
+    const h = m / 60;
+    return Number.isInteger(h) ? `${h} h` : `${h.toFixed(1)} h`;
+  };
+
   return (
-    <div className="glass-card border border-gray-200 shadow-xl" style={{minHeight: '600px', contain: 'layout style'}}>
+    <div
+      data-testid="time-block-planner"
+      className="glass-card border border-gray-200 shadow-xl"
+      style={{minHeight: '600px', contain: 'layout style'}}
+    >
       {/* Header */}
       <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50">
         <div>
@@ -488,13 +535,23 @@ export default function TimeBlockPlanner({
           <p className="text-sm text-gray-600 font-medium">{getViewTitle()}</p>
         </div>
         
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('weekly_intel')}
+              data-testid="planner-generate-weekly-plan"
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-indigo-200 bg-white text-indigo-700 text-sm font-medium rounded-lg hover:bg-indigo-50 transition-colors"
+            >
+              🧭 Generate Weekly Plan
+            </button>
+          )}
           <button
             onClick={() => handleQuickCreateBlock(new Date().getHours())}
             disabled={!isReady}
-            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-              isReady 
-                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+            data-testid="planner-add-block"
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
+              isReady
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
                 : 'bg-gray-400 text-gray-200 cursor-not-allowed'
             }`}
           >
@@ -505,11 +562,13 @@ export default function TimeBlockPlanner({
             onClick={() => navigateDate('prev')}
             className="p-2 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
             title={`Previous ${viewMode}`}
+            aria-label={`Previous ${viewMode}`}
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDateChange(new Date())}
+            data-testid="planner-today-button"
             className="px-3 py-1.5 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium"
           >
             Today
@@ -518,11 +577,32 @@ export default function TimeBlockPlanner({
             onClick={() => navigateDate('next')}
             className="p-2 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
             title={`Next ${viewMode}`}
+            aria-label={`Next ${viewMode}`}
           >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
+
+      {/* Day summary strip — only shown in day view (the planned/completed
+          numbers map to the same selectedDate the user is looking at). */}
+      {viewMode === 'day' && (
+        <div
+          data-testid="planner-day-summary"
+          className="px-6 py-3 border-b border-gray-100 bg-white flex items-center gap-4 flex-wrap text-xs"
+        >
+          <SummaryChip label="Planned" value={minutesLabel(daySummary.plannedMin)} tone="neutral" />
+          <SummaryChip label="Completed" value={minutesLabel(daySummary.completedMin)} tone="emerald" />
+          <SummaryChip label="Completion" value={`${daySummary.pct}%`} tone={daySummary.pct >= 80 ? 'emerald' : daySummary.pct >= 50 ? 'blue' : 'neutral'} highlight />
+          <div className="flex-1 min-w-[120px] h-1.5 rounded-full bg-gray-100 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
+              style={{ width: `${Math.min(100, Math.max(0, daySummary.pct))}%` }}
+              data-testid="planner-day-summary-bar"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Time Grid - Conditional View Rendering */}
       <div className="relative">
@@ -565,28 +645,44 @@ export default function TimeBlockPlanner({
             </div>
           ))}
 
-          {/* Time Blocks */}
+          {/* Time Blocks — premium empty state */}
           {filteredBlocks.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-              <div className="card card-body text-center max-w-md pointer-events-auto">
-                <div className="text-4xl mb-4">📅</div>
-                <h3 className="heading-3 mb-3">
+            <div
+              data-testid="planner-empty-state"
+              className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
+            >
+              <div className="rounded-2xl border border-dashed border-blue-200 bg-gradient-to-br from-blue-50/40 via-white to-indigo-50/40 px-8 py-7 text-center max-w-md pointer-events-auto shadow-sm">
+                <div className="text-5xl mb-3">📅</div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">
                   No blocks for {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}
                 </h3>
-                <p className="text-body mb-4">
-                  Click "Add Block" or drag on the timeline to create your first time block.
+                <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+                  Generate your week from Weekly Intelligence or add your
+                  first block. You can also click any hour on the timeline.
                 </p>
-                <button
-                  onClick={() => handleQuickCreateBlock(new Date().getHours())}
-                  disabled={!isReady}
-                  className={`px-6 py-3 ${
-                    isReady 
-                      ? 'btn btn-primary' 
-                      : 'bg-gray-400 text-gray-200 cursor-not-allowed px-6 py-3 rounded-lg'
-                  }`}
-                >
-                  Add Block
-                </button>
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => handleQuickCreateBlock(new Date().getHours())}
+                    disabled={!isReady}
+                    data-testid="planner-empty-add-block"
+                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                      isReady
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm hover:from-blue-700 hover:to-indigo-700'
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    + Add Block
+                  </button>
+                  {onNavigate && (
+                    <button
+                      onClick={() => onNavigate('weekly_intel')}
+                      data-testid="planner-empty-generate-weekly"
+                      className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+                    >
+                      🧭 Generate Weekly Plan
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1518,5 +1614,34 @@ export default function TimeBlockPlanner({
         document.body
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// SUMMARY CHIP — small inline metric used in the day-summary strip.
+// ============================================================================
+
+interface SummaryChipProps {
+  label: string;
+  value: string;
+  tone: 'neutral' | 'blue' | 'emerald';
+  highlight?: boolean;
+}
+
+function SummaryChip({ label, value, tone, highlight = false }: SummaryChipProps) {
+  const cls =
+    tone === 'emerald'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : tone === 'blue'
+        ? 'border-blue-200 bg-blue-50 text-blue-700'
+        : 'border-gray-200 bg-gray-50 text-gray-700';
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium ${cls}`}
+      data-testid={`planner-summary-${label.toLowerCase()}`}
+    >
+      <span className="opacity-70 text-[10px] uppercase tracking-wider">{label}</span>
+      <span className={highlight ? 'font-bold tabular-nums' : 'tabular-nums'}>{value}</span>
+    </span>
   );
 }
