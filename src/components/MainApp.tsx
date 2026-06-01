@@ -42,12 +42,13 @@ const HeroWall = lazy(() => import('@/components/HeroWall'));
 const WeeklyExecution = lazy(() => import('@/components/WeeklyExecution'));
 const VoiceSettings = lazy(() => import('@/components/VoiceSettings'));
 const WeeklyPlanningTab = lazy(() => import('@/components/WeeklyPlanning/WeeklyPlanningTab'));
+const GoalArchitectTab = lazy(() => import('@/components/GoalArchitect/GoalArchitectTab'));
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'voice';
+type ActiveTab = 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice';
 
 interface MainAppProps {
   buildId: string;
@@ -505,6 +506,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                       { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', description: 'Goal insights', color: 'from-teal-400 to-teal-600' },
                       { id: 'weekly', label: 'Weekly Execution', icon: '📈', description: 'Piano vs realta', color: 'from-emerald-400 to-emerald-600' },
                       { id: 'weekly_intel', label: 'Weekly Intelligence', icon: '🧭', description: 'Generate a draft week from your goals and intentions', color: 'from-blue-500 to-indigo-600' },
+                      { id: 'goal_architect', label: 'Goal Architect', icon: '🏗️', description: 'Draft Goal → Projects → Tasks from natural language', color: 'from-purple-500 to-blue-600' },
                       { id: 'events', label: 'Calendario', icon: '📆', description: 'Eventi strategici', color: 'from-rose-400 to-rose-600' },
                       { id: 'badges', label: 'Achievements', icon: '🏆', description: 'Milestones', color: 'from-amber-400 to-amber-600' },
                       { id: 'voice', label: 'Voice System', icon: '🎙️', description: 'Lingua e voci', color: 'from-sky-400 to-blue-600' },
@@ -565,6 +567,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
                   {activeTab === 'weekly' && '📈 Weekly Execution'}
                   {activeTab === 'weekly_intel' && '🧭 Weekly Intelligence'}
+                  {activeTab === 'goal_architect' && '🏗️ Goal Architect'}
                   {activeTab === 'events' && '📆 Calendario Strategico'}
                   {activeTab === 'badges' && '🏆 Achievements'}
                   {activeTab === 'voice' && '🎙️ Voice System'}
@@ -742,6 +745,12 @@ export default function MainApp({ buildId }: MainAppProps) {
                 {activeTab === 'weekly_intel' && (
                   <Suspense fallback={null}>
                     <WeeklyPlanningTab />
+                  </Suspense>
+                )}
+
+                {activeTab === 'goal_architect' && (
+                  <Suspense fallback={null}>
+                    <GoalArchitectTab />
                   </Suspense>
                 )}
 
