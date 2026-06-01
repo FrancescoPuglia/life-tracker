@@ -13,6 +13,7 @@ import type {
   ProjectLike,
   TaskLike,
 } from './types';
+import { resolveExplicitMapping } from './explicitMapper';
 
 // ============================================================================
 // DOMAIN KEYWORDS
@@ -147,6 +148,13 @@ export function mapIntentToGoal(
   projects: ReadonlyArray<ProjectLike>,
   tasks: ReadonlyArray<TaskLike>,
 ): GoalMappingCandidate {
+  // Explicit "Goal X Project Y Task Z" syntax is resolved deterministically
+  // and ALWAYS takes precedence over keyword/category fallback. A miss here
+  // returns a precise unresolved_* status rather than a wrong fuzzy match.
+  if (intent.isExplicit) {
+    return resolveExplicitMapping(intent, goals, projects, tasks);
+  }
+
   // Maintenance shortcut — wake-up routines, self-care etc. legitimately
   // have no goal. We mark them explicitly so the UI can render them as OK.
   if (intent.activityType === 'routine' || intent.activityType === 'maintenance') {

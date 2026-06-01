@@ -5,6 +5,12 @@
 export * from './types';
 export { parseWeeklyIntent } from './parser';
 export { mapIntentToGoal, mapIntentsToGoals } from './goalMapper';
+export {
+  extractExplicitEntities,
+  resolveExplicitMapping,
+  normalizeName,
+} from './explicitMapper';
+export type { ExplicitEntityNames } from './explicitMapper';
 export { expandRoutineIntents } from './routineEngine';
 export { detectConflicts } from './conflicts';
 export type { ConflictDetectionResult } from './conflicts';

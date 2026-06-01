@@ -315,6 +315,22 @@ function classifyBlock(
     };
   }
 
+  // Explicit syntax that resolved its Goal but not the deeper level must not
+  // commit to a partial/wrong entity — surface it like a needs_review block.
+  if (
+    status === 'unresolved_goal' ||
+    status === 'unresolved_project' ||
+    status === 'unresolved_task'
+  ) {
+    return {
+      kind: 'skip',
+      skipReason: 'needs_review',
+      message: `"${block.label}" ha un mapping esplicito incompleto: correggere Goal/Project/Task prima del commit.`,
+      blocking: true,
+      blockedReasonType: 'needs_review',
+    };
+  }
+
   // 4. Mapped but with no entity link → defensive guard (shouldn't happen but
   //    DataProvider.createTimeBlock would throw, so we surface clearly).
   const m = block.mapping;

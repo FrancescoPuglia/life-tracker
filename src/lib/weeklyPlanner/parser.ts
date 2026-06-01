@@ -12,7 +12,8 @@ import type {
   WeekDay,
   WeeklyIntentRaw,
 } from './types';
-import { createStableId, normalizeTime } from './timeUtils';
+import { createStableId, normalizeTime, timeToMinutes } from './timeUtils';
+import { extractExplicitEntities } from './explicitMapper';
 
 // ============================================================================
 // DICTIONARIES
@@ -160,6 +161,9 @@ interface RecurrenceExtraction {
 }
 
 function parseSegment(segment: string, index: number): ParsedIntent | null {
+  const explicit = parseExplicitSegment(segment, index);
+  if (explicit) return explicit;
+
   const lower = segment.toLowerCase();
 
   const { type: activityType, keyword: matchedKeyword } =
@@ -210,6 +214,80 @@ function parseSegment(segment: string, index: number): ParsedIntent | null {
     energyLevel,
     confidence,
   };
+}
+
+// ============================================================================
+// EXPLICIT SYNTAX ("Goal X Project Y Task Z")
+// ============================================================================
+
+/**
+ * Builds a ParsedIntent from a line using explicit Goal/Project/Task markers.
+ * The block is pinned to its exact day + time range and carries the requested
+ * entity names so the mapper can resolve them deterministically (bypassing the
+ * keyword/category fallback). Returns null for non-explicit lines.
+ */
+function parseExplicitSegment(
+  segment: string,
+  index: number,
+): ParsedIntent | null {
+  const entities = extractExplicitEntities(segment);
+  if (!entities) return null;
+
+  const lower = segment.toLowerCase();
+  const preferredDays = extractDays(lower);
+  const range = extractTimeRange(segment);
+  const preferredTime = range?.start ?? extractTime(lower);
+  const durationMinutes = range?.durationMinutes ?? extractDuration(lower);
+
+  // activityType is best-effort here (drives energy/scheduling defaults only);
+  // the explicit resolver — not this classification — decides the mapping.
+  const { type: activityType } = classifyActivity(lower);
+
+  const label =
+    entities.taskName ?? entities.projectName ?? entities.goalName;
+  const recurrence: Recurrence = preferredDays.length > 0 ? 'weekly' : 'once';
+  const flexibility: Flexibility = preferredTime ? 'fixed' : 'flexible';
+
+  return {
+    id: createStableId('intent', segment, index),
+    label,
+    sourceText: segment.trim(),
+    activityType,
+    preferredDays,
+    preferredTime,
+    durationMinutes,
+    recurrence,
+    priority: inferPriority(activityType),
+    flexibility,
+    energyLevel: inferEnergyLevel(activityType),
+    confidence: 0.95,
+    isExplicit: true,
+    explicitGoalName: entities.goalName,
+    explicitProjectName: entities.projectName,
+    explicitTaskName: entities.taskName,
+  };
+}
+
+/**
+ * Parses an "HH:MM-HH:MM" range (also accepts `.` separators and en/em-dash).
+ * Returns the start time and the inferred duration. Ranges that don't move
+ * forward (zero/negative span) yield no duration so a downstream default wins.
+ */
+function extractTimeRange(
+  text: string,
+): { start: string; durationMinutes?: number } | undefined {
+  const m = text.match(
+    /(\d{1,2})[:.](\d{2})\s*[-–—]\s*(\d{1,2})[:.](\d{2})/,
+  );
+  if (!m) return undefined;
+  const start = normalizeTime(`${m[1]}:${m[2]}`);
+  const end = normalizeTime(`${m[3]}:${m[4]}`);
+  try {
+    const span = timeToMinutes(end) - timeToMinutes(start);
+    return { start, durationMinutes: span > 0 ? span : undefined };
+  } catch {
+    return { start };
+  }
 }
 
 // ============================================================================

@@ -34,7 +34,13 @@ export type MappingStatus =
   | 'mapped'
   | 'unmapped'
   | 'needs_review'
-  | 'maintenance';
+  | 'maintenance'
+  // Explicit "Goal X Project Y Task Z" syntax that resolved its Goal but not
+  // the deeper level. These never fall back to a wrong entity — they surface
+  // the precise level that failed so the user can fix the line.
+  | 'unresolved_goal'
+  | 'unresolved_project'
+  | 'unresolved_task';
 
 export type ConflictType =
   | 'overlap'
@@ -86,6 +92,14 @@ export interface ParsedIntent {
   energyLevel: EnergyLevel;
   confidence: number;
   notes?: string;
+  // ---- Explicit mapping syntax ("Goal X Project Y Task Z") ----------------
+  // Set only when the line used the explicit Goal/Project/Task markers. When
+  // true, the mapper resolves these names deterministically and skips the
+  // keyword/category fallback entirely.
+  isExplicit?: boolean;
+  explicitGoalName?: string;
+  explicitProjectName?: string;
+  explicitTaskName?: string;
 }
 
 // ============================================================================
@@ -121,6 +135,27 @@ export interface TaskLike {
 // MAPPING
 // ============================================================================
 
+/**
+ * Diagnostic detail attached to a mapping that came from explicit
+ * Goal/Project/Task syntax. Drives the GoalMappingReview UI so the user can
+ * see exactly which level matched and which candidates were close.
+ */
+export interface ExplicitMappingInfo {
+  requestedGoal?: string;
+  requestedProject?: string;
+  requestedTask?: string;
+  goalMatched: boolean;
+  projectMatched: boolean;
+  taskMatched: boolean;
+  matchedGoalTitle?: string;
+  matchedProjectTitle?: string;
+  matchedTaskTitle?: string;
+  /** Close candidates for the level that failed to resolve (titles). */
+  goalCandidates?: string[];
+  projectCandidates?: string[];
+  taskCandidates?: string[];
+}
+
 export interface GoalMappingCandidate {
   intentId: string;
   status: MappingStatus;
@@ -130,6 +165,8 @@ export interface GoalMappingCandidate {
   confidence: number;
   reason: string;
   matchedKeywords: string[];
+  /** Present only when this mapping came from explicit syntax. */
+  explicit?: ExplicitMappingInfo;
 }
 
 // ============================================================================

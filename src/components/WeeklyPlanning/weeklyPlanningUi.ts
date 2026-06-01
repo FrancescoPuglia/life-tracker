@@ -117,6 +117,18 @@ const MAPPING_STYLES: Record<MappingStatus, MappingStyle> = {
     badge: 'bg-slate-100 text-slate-600 border-slate-200',
     label: 'Maintenance',
   },
+  unresolved_goal: {
+    badge: 'bg-rose-100 text-rose-700 border-rose-200',
+    label: 'Goal non trovato',
+  },
+  unresolved_project: {
+    badge: 'bg-amber-100 text-amber-700 border-amber-200',
+    label: 'Project non trovato',
+  },
+  unresolved_task: {
+    badge: 'bg-amber-100 text-amber-700 border-amber-200',
+    label: 'Task non trovato',
+  },
 };
 
 export function mappingStyle(status: MappingStatus): MappingStyle {

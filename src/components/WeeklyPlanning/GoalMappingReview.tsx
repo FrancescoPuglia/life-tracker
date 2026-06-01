@@ -193,7 +193,79 @@ function MappingSummary({
         </dl>
       )}
 
+      {mapping.explicit && <ExplicitDetail mapping={mapping} />}
+
       <p className="text-[11px] text-gray-400 italic">{mapping.reason}</p>
+    </div>
+  );
+}
+
+function ExplicitDetail({ mapping }: { mapping: GoalMappingCandidate }) {
+  const ex = mapping.explicit;
+  if (!ex) return null;
+  const headline =
+    mapping.status === 'mapped'
+      ? 'Matched by explicit Goal/Project/Task'
+      : 'Explicit mapping — incompleto';
+
+  return (
+    <div
+      className="rounded-lg border border-dashed border-gray-200 bg-gray-50/70 px-3 py-2 text-left space-y-1"
+      data-testid="explicit-mapping-detail"
+    >
+      <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500">
+        🔗 {headline}
+      </p>
+      <ExplicitLevel
+        label="Goal"
+        requested={ex.requestedGoal}
+        matched={ex.goalMatched}
+        candidates={ex.goalCandidates}
+      />
+      <ExplicitLevel
+        label="Project"
+        requested={ex.requestedProject}
+        matched={ex.projectMatched}
+        candidates={ex.projectCandidates}
+      />
+      <ExplicitLevel
+        label="Task"
+        requested={ex.requestedTask}
+        matched={ex.taskMatched}
+        candidates={ex.taskCandidates}
+      />
+    </div>
+  );
+}
+
+function ExplicitLevel({
+  label,
+  requested,
+  matched,
+  candidates,
+}: {
+  label: string;
+  requested?: string;
+  matched: boolean;
+  candidates?: string[];
+}) {
+  if (!requested) return null;
+  return (
+    <div className="text-[11px] leading-snug">
+      <div className="flex items-baseline gap-1.5">
+        <span className={matched ? 'text-emerald-600' : 'text-rose-600'}>
+          {matched ? '✓' : '✗'}
+        </span>
+        <span className="text-[10px] uppercase tracking-wider text-gray-400">
+          {label}
+        </span>
+        <span className="text-gray-700 font-medium">{requested}</span>
+      </div>
+      {!matched && candidates && candidates.length > 0 && (
+        <p className="ml-4 text-[10px] text-gray-400">
+          Forse: {candidates.slice(0, 3).join(' · ')}
+        </p>
+      )}
     </div>
   );
 }
