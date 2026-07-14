@@ -23,6 +23,7 @@ export type SidebarNavId =
   | 'weekly_intel'
   | 'weekly'
   | 'micro_coach'
+  | 'performance'
   | 'analytics'
   | 'goal_analytics'
   | 'notes'
@@ -70,6 +71,7 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
     id: 'intelligence',
     label: 'Intelligence',
     items: [
+      { id: 'performance', label: 'Performance', icon: '⏱️', subtitle: 'Plan vs Actual OS' },
       { id: 'micro_coach', label: 'AI Coach', icon: '🧠', subtitle: 'Performance insights' },
       { id: 'analytics', label: 'Analytics', icon: '📊', subtitle: 'Trend dashboards' },
       { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', subtitle: 'Goal-centric metrics' },

@@ -30,6 +30,7 @@ import { getVoiceService } from '@/lib/voice/voiceService';
 // This reduces initial bundle size by ~400KB
 const TimeBlockPlanner = lazy(() => import('@/components/TimeBlockPlanner'));
 const AnalyticsDashboard = lazy(() => import('@/components/AnalyticsDashboard'));
+const PerformanceDashboard = lazy(() => import('@/components/performance/PerformanceDashboard'));
 const GoalAnalyticsDashboard = lazy(() => import('@/components/GoalAnalyticsDashboard'));
 const HabitsTracker = lazy(() => import('@/components/HabitsTracker'));
 const OKRManager = lazy(() => import('@/components/OKRManager'));
@@ -55,7 +56,7 @@ import TodayCommandCenter from '@/components/shell/TodayCommandCenter';
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice';
+type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'performance' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice';
 
 interface MainAppProps {
   buildId: string;
@@ -453,6 +454,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'okr' && '🎯 Goals & Projects'}
                   {activeTab === 'notes' && '🧠 Second Brain'}
                   {activeTab === 'vision-board' && '✧ Vision Board'}
+                  {activeTab === 'performance' && '⏱️ Performance Review'}
                   {activeTab === 'analytics' && '📊 Analytics Dashboard'}
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
                   {activeTab === 'weekly' && '📈 Weekly Execution'}
@@ -611,6 +613,12 @@ export default function MainApp({ buildId }: MainAppProps) {
                   <div className="w-full h-full">
                     <NotesPage />
                   </div>
+                )}
+
+                {activeTab === 'performance' && (
+                  <Suspense fallback={null}>
+                    <PerformanceDashboard onNavigate={(id) => setActiveTab(id as ActiveTab)} />
+                  </Suspense>
                 )}
 
                 {activeTab === 'analytics' && (
