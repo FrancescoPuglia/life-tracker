@@ -40,6 +40,9 @@
 //   OR at least one advance-planned block in the period links to it.
 //   It is "fulfilled" when completedAt < period.end and — if it had a due
 //   date inside the period — completedAt <= end-of-day(dueDate).
+//   Completion timestamp: completedAt when present; legacy rows with status
+//   'completed' but no completedAt (older UIs never wrote it) fall back to
+//   updatedAt as the best available approximation.
 //
 // ON-TIME RATE
 //   Among tasks *completed in the period that have a dueDate*:
@@ -101,14 +104,42 @@ export interface PerformancePeriod {
   comparisonEnd: Date;
 }
 
-export type EntityStatus = 'ahead' | 'on-track' | 'behind' | 'no-plan' | 'inactive' | 'no-data';
+/**
+ * Execution status of a goal/project row.
+ *
+ * FORMULA (documented + tested in metrics.test.ts):
+ *   reference = period still in progress ? planned minutes matured up to
+ *               `now` (plan-to-date) : full-period planned minutes.
+ *   ratio     = actual / reference.
+ *   'ahead'    ratio ≥ STATUS_AHEAD_RATIO (1.15)   — also when executing with
+ *                                                    no matured plan yet.
+ *   'behind'   ratio < STATUS_BEHIND_RATIO (0.85)  — behind AS OF TODAY, not
+ *                                                    vs the full-period plan.
+ *   'on-track' anything in between.
+ *   'not-due'  plan exists but none of it has matured yet (all in the future).
+ *   'no-plan'  execution without any planned time in the period.
+ *   'inactive' no plan & no execution, open tasks, idle > 14 days (projects).
+ *   'no-data'  no plan, no execution, nothing to judge.
+ */
+export type EntityStatus =
+  | 'ahead'
+  | 'on-track'
+  | 'behind'
+  | 'not-due'
+  | 'no-plan'
+  | 'inactive'
+  | 'no-data';
 
 export interface PerformanceSummary {
   plannedMinutes: number;
+  /** Planned minutes matured up to `now` (= plannedMinutes once the period is over). */
+  plannedElapsedMinutes: number;
   actualMinutes: number;
   varianceMinutes: number;
   /** actual / planned — null when plannedMinutes is 0. */
   executionRatio: number | null;
+  /** actual / plannedElapsed (plan matured so far) — null when 0. */
+  executionRatioToDate: number | null;
   /** Actual minutes from advance-planned blocks. */
   plannedExecutedMinutes: number;
   /** Actual minutes from retro-logged blocks + orphan sessions. */
@@ -202,6 +233,8 @@ export interface GoalPerformance {
   goalName: string;
   goalStatus: string | null;
   plannedMinutes: number;
+  /** Planned minutes matured up to `now` — the reference for `status`. */
+  plannedElapsedMinutes: number;
   actualMinutes: number;
   varianceMinutes: number;
   executionRatio: number | null;
@@ -227,6 +260,8 @@ export interface ProjectPerformance {
   goalName: string;
   projectStatus: string | null;
   plannedMinutes: number;
+  /** Planned minutes matured up to `now` — the reference for `status`. */
+  plannedElapsedMinutes: number;
   actualMinutes: number;
   varianceMinutes: number;
   executionRatio: number | null;

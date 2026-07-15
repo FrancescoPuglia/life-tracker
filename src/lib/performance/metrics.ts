@@ -189,6 +189,8 @@ interface DayAgg {
 
 interface EntityAgg {
   planned: number;
+  /** Planned minutes matured up to `now` (status reference for partial periods). */
+  plannedElapsed: number;
   actual: number;
   unplanned: number;
   plannedTasks: number;
@@ -200,6 +202,7 @@ interface EntityAgg {
 function emptyEntityAgg(): EntityAgg {
   return {
     planned: 0,
+    plannedElapsed: 0,
     actual: 0,
     unplanned: 0,
     plannedTasks: 0,
@@ -211,6 +214,8 @@ function emptyEntityAgg(): EntityAgg {
 
 interface WindowAgg {
   planned: number;
+  /** Planned minutes matured up to `now` (≤ planned). */
+  plannedElapsed: number;
   actual: number;
   plannedExecuted: number;
   unplanned: number;
@@ -312,6 +317,11 @@ function aggregateWindow(
 ): WindowAgg {
   const window: Interval = { start: windowStart.getTime(), end: windowEnd.getTime() };
   const windowClosed = window.end <= now.getTime();
+  /** Portion of the window already in the past — the matured plan lives here. */
+  const elapsedWindow: Interval = {
+    start: window.start,
+    end: Math.min(now.getTime(), window.end),
+  };
   const quality = emptyQuality();
   const days = new Map<string, DayAgg>();
   const goalAgg = new Map<string | null, EntityAgg>();
@@ -320,6 +330,7 @@ function aggregateWindow(
   const carryOver: CarryOverTask[] = [];
 
   let planned = 0;
+  let plannedElapsed = 0;
   let actual = 0;
   let plannedExecuted = 0;
   let unplanned = 0;
@@ -425,6 +436,10 @@ function aggregateWindow(
       planned += plannedOverlap;
       gAgg.planned += plannedOverlap;
       if (pAgg) pAgg.planned += plannedOverlap;
+      const elapsedOverlap = overlapMinutes(plannedInterval, elapsedWindow);
+      plannedElapsed += elapsedOverlap;
+      gAgg.plannedElapsed += elapsedOverlap;
+      if (pAgg) pAgg.plannedElapsed += elapsedOverlap;
       eachOverlapDay(plannedInterval, window, (dayStart, minutes) => {
         getDayAgg(days, dayStart).planned += minutes;
       });
@@ -596,7 +611,16 @@ function aggregateWindow(
     const scheduled = scheduledTaskIds.has(task.id);
     const isPlannedTask = dueInWindow || scheduled;
 
-    const completedAt = isValidDate(task.completedAt) ? task.completedAt : null;
+    // Some historical records carry status 'completed' without a completedAt
+    // (older UI paths never wrote it — fixed in DataProvider.updateTask on
+    // 2026-07-15). Fall back to updatedAt so real completions are not
+    // reported as never-done; the trade-off (an edit after completion shifts
+    // the date) only applies to those legacy rows.
+    const completedAt = isValidDate(task.completedAt)
+      ? task.completedAt
+      : task.status === 'completed' && isValidDate(task.updatedAt)
+        ? task.updatedAt
+        : null;
     const completedInWindow =
       completedAt !== null &&
       completedAt.getTime() >= window.start &&
@@ -682,6 +706,7 @@ function aggregateWindow(
 
   return {
     planned,
+    plannedElapsed,
     actual,
     plannedExecuted,
     unplanned,
@@ -722,9 +747,11 @@ function buildSummary(agg: WindowAgg, windowStart: Date, windowEnd: Date, now: D
 
   return {
     plannedMinutes: Math.round(agg.planned),
+    plannedElapsedMinutes: Math.round(agg.plannedElapsed),
     actualMinutes: Math.round(agg.actual),
     varianceMinutes: Math.round(agg.actual - agg.planned),
     executionRatio: safeRatio(agg.actual, agg.planned),
+    executionRatioToDate: safeRatio(agg.actual, agg.plannedElapsed),
     plannedExecutedMinutes: Math.round(agg.plannedExecuted),
     unplannedMinutes: Math.round(agg.unplanned),
     plannedTasks: agg.plannedTasks,
@@ -845,8 +872,17 @@ function buildHeatmap(
   });
 }
 
+/**
+ * Status vs the plan the entity can be held to TODAY (see EntityStatus docs).
+ *
+ * During a still-running period the reference is `plannedElapsed` (the plan
+ * matured up to now), never the full-period plan: a goal whose blocks sit in
+ * the future is 'not-due', not 'behind'. For a closed period
+ * plannedElapsed === planned, so the reference is the full plan.
+ */
 function entityStatus(
   planned: number,
+  plannedElapsed: number,
   actual: number,
   options?: { openTasks?: number; lastActivityAt?: Date | null; now?: Date }
 ): EntityStatus {
@@ -861,7 +897,11 @@ function entityStatus(
     return 'no-data';
   }
   if (planned <= 0) return 'no-plan';
-  const ratio = actual / planned;
+  if (plannedElapsed <= 0) {
+    // Plan exists but none of it has matured yet.
+    return actual > 0 ? 'ahead' : 'not-due';
+  }
+  const ratio = actual / plannedElapsed;
   if (ratio >= STATUS_AHEAD_RATIO) return 'ahead';
   if (ratio < STATUS_BEHIND_RATIO) return 'behind';
   return 'on-track';
@@ -945,12 +985,14 @@ export function computePerformanceOverview(
       const prevAgg = prev.goalAgg.get(goalId) ?? emptyEntityAgg();
       const goal = goalId ? lookup.goalById.get(goalId) : undefined;
       const planned = Math.round(agg.planned);
+      const plannedElapsed = Math.round(agg.plannedElapsed);
       const actual = Math.round(agg.actual);
       return {
         goalId,
         goalName: goalId === null ? UNASSIGNED_LABEL : goal?.title || 'Untitled goal',
         goalStatus: goal?.status ?? null,
         plannedMinutes: planned,
+        plannedElapsedMinutes: plannedElapsed,
         actualMinutes: actual,
         varianceMinutes: actual - planned,
         executionRatio: safeRatio(actual, planned),
@@ -961,7 +1003,7 @@ export function computePerformanceOverview(
         activeProjects: agg.activeProjectIds.size,
         previousActualMinutes: Math.round(prevAgg.actual),
         trendMinutes: actual - Math.round(prevAgg.actual),
-        status: entityStatus(planned, actual),
+        status: entityStatus(planned, plannedElapsed, actual),
       };
     })
     .filter((row) => {
@@ -1014,6 +1056,7 @@ export function computePerformanceOverview(
       const agg = main.projectAgg.get(projectId) ?? emptyEntityAgg();
       const prevAgg = prev.projectAgg.get(projectId) ?? emptyEntityAgg();
       const planned = Math.round(agg.planned);
+      const plannedElapsed = Math.round(agg.plannedElapsed);
       const actual = Math.round(agg.actual);
       const openTasks = openTasksByProject.get(projectId) || 0;
       const last = lastActivity.get(projectId) ?? null;
@@ -1024,6 +1067,7 @@ export function computePerformanceOverview(
         goalName: goalId ? lookup.goalById.get(goalId)?.title || 'Untitled goal' : UNASSIGNED_LABEL,
         projectStatus: project?.status ?? null,
         plannedMinutes: planned,
+        plannedElapsedMinutes: plannedElapsed,
         actualMinutes: actual,
         varianceMinutes: actual - planned,
         executionRatio: safeRatio(actual, planned),
@@ -1033,7 +1077,11 @@ export function computePerformanceOverview(
         lastActivityAt: last,
         previousActualMinutes: Math.round(prevAgg.actual),
         trendMinutes: actual - Math.round(prevAgg.actual),
-        status: entityStatus(planned, actual, { openTasks, lastActivityAt: last, now }),
+        status: entityStatus(planned, plannedElapsed, actual, {
+          openTasks,
+          lastActivityAt: last,
+          now,
+        }),
       };
     })
     .sort((a, b) => b.actualMinutes - a.actualMinutes || b.plannedMinutes - a.plannedMinutes);

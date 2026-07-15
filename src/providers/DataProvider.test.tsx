@@ -1,4 +1,61 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor, act } from '@testing-library/react';
+import type { Task } from '@/types';
+
+// ---- Mounted-provider harness (db fully mocked) -----------------------------
+
+const { dbMock, taskStore } = vi.hoisted(() => {
+  const taskStore: { tasks: Task[] } = { tasks: [] };
+  const dbMock = {
+    init: vi.fn(async () => undefined),
+    switchToFirebase: vi.fn(async () => undefined),
+    getAll: vi.fn(async (store: string) => (store === 'tasks' ? taskStore.tasks : [])),
+    getByIndex: vi.fn(async () => []),
+    update: vi.fn(async (_store: string, data: unknown) => data),
+    create: vi.fn(async (_store: string, data: unknown) => data),
+    delete: vi.fn(async () => undefined),
+    calculateTodayKPIs: vi.fn(async () => ({})),
+    getAdapterType: vi.fn(() => 'memory'),
+  };
+  return { dbMock, taskStore };
+});
+
+vi.mock('@/lib/database', () => ({ db: dbMock }));
+
+import { DataProvider, useDataContext } from './DataProvider';
+
+let capturedUpdateTask: ((id: string, updates: Partial<Task>) => Promise<void>) | null = null;
+
+function Probe() {
+  const ctx = useDataContext();
+  capturedUpdateTask = ctx.updateTask;
+  return <div data-testid="probe-status">{ctx.status}</div>;
+}
+
+function makeStoredTask(over: Partial<Task> = {}): Task {
+  return {
+    id: 't1',
+    userId: 'user-a',
+    domainId: 'd1',
+    title: 'Task',
+    projectId: 'p1',
+    status: 'pending',
+    priority: 'medium',
+    createdAt: new Date(2026, 6, 1),
+    updatedAt: new Date(2026, 6, 1),
+    ...over,
+  } as Task;
+}
+
+async function mountWithTask(task: Task) {
+  taskStore.tasks = [task];
+  render(
+    <DataProvider userId="user-a">
+      <Probe />
+    </DataProvider>
+  );
+  await waitFor(() => expect(screen.getByTestId('probe-status').textContent).toBe('ready'));
+}
 
 // This is a basic test structure - full tests would require more mocking
 describe('DataProvider', () => {
@@ -44,6 +101,55 @@ describe('DataProvider', () => {
           throw new Error('TimeBlock must be linked');
         }
       }).not.toThrow();
+    });
+  });
+
+  // Regression (2026-07 "0/19 planned tasks done"): completing a task from
+  // the OKR manager only flipped `status`, never wrote `completedAt`, so no
+  // analytics could ever see the completion. updateTask now owns the
+  // completion-timestamp integrity for every caller.
+  describe('updateTask completedAt integrity', () => {
+    beforeEach(() => {
+      capturedUpdateTask = null;
+      dbMock.update.mockClear();
+    });
+
+    it('backfills completedAt when a task transitions to completed', async () => {
+      await mountWithTask(makeStoredTask());
+      await act(() => capturedUpdateTask!('t1', { status: 'completed' }));
+
+      const payload = dbMock.update.mock.calls.at(-1)?.[1] as Task;
+      expect(payload.status).toBe('completed');
+      expect(payload.completedAt).toBeInstanceOf(Date);
+    });
+
+    it('clears completedAt (null for Firestore) when a task is un-completed', async () => {
+      await mountWithTask(
+        makeStoredTask({ status: 'completed', completedAt: new Date(2026, 6, 10) })
+      );
+      await act(() => capturedUpdateTask!('t1', { status: 'pending' }));
+
+      const payload = dbMock.update.mock.calls.at(-1)?.[1] as Task;
+      expect(payload.status).toBe('pending');
+      expect(payload.completedAt).toBeNull();
+    });
+
+    it('respects an explicit completedAt passed by the caller', async () => {
+      const explicit = new Date(2026, 6, 12, 18, 30);
+      await mountWithTask(makeStoredTask());
+      await act(() => capturedUpdateTask!('t1', { status: 'completed', completedAt: explicit }));
+
+      const payload = dbMock.update.mock.calls.at(-1)?.[1] as Task;
+      expect(payload.completedAt).toEqual(explicit);
+    });
+
+    it('keeps an existing completedAt when completing an already-completed task again', async () => {
+      const original = new Date(2026, 6, 5, 9, 0);
+      await mountWithTask(makeStoredTask({ status: 'completed', completedAt: original }));
+      await act(() => capturedUpdateTask!('t1', { status: 'completed' }));
+
+      const payload = dbMock.update.mock.calls.at(-1)?.[1] as Task;
+      expect(payload.completedAt).toEqual(original);
     });
   });
 

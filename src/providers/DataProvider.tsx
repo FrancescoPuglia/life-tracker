@@ -931,6 +931,18 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     if (!existing) return;
 
     const updated = { ...existing, ...updates, updatedAt: new Date() };
+    // Keep the completion timestamp coherent with status transitions: every
+    // caller (OKR manager, AI flows, …) goes through here, and analytics
+    // recognize a completion only via completedAt. `null` (not undefined) is
+    // required to clear the field on Firestore, where stripped undefineds
+    // leave the old value in place.
+    if (updates.status && updates.completedAt === undefined) {
+      if (updates.status === 'completed' && !existing.completedAt) {
+        updated.completedAt = new Date();
+      } else if (updates.status !== 'completed' && existing.completedAt) {
+        updated.completedAt = null;
+      }
+    }
     setTasks(prev => prev.map(t => t.id === id ? updated : t));
 
     try {

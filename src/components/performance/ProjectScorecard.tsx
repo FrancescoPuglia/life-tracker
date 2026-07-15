@@ -12,7 +12,7 @@ import {
   formatMinutes,
   formatSignedMinutes,
 } from '@/lib/performance/format';
-import { STATUS_META } from './theme';
+import { STATUS_META, describeStatus } from './theme';
 
 interface ProjectScorecardProps {
   projects: ProjectPerformance[];
@@ -194,6 +194,7 @@ export default function ProjectScorecard({
                   <td className="py-2 px-2 text-right">
                     <span
                       className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}
+                      title={describeStatus(project.status, project)}
                     >
                       <span aria-hidden="true">{status.symbol}</span>
                       {status.label}
@@ -230,6 +231,7 @@ export default function ProjectScorecard({
                   </div>
                   <span
                     className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}
+                    title={describeStatus(project.status, project)}
                   >
                     <span aria-hidden="true">{status.symbol}</span>
                     {status.label}

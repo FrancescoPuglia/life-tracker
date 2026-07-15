@@ -173,8 +173,11 @@ export default function ConsistencyHeatmap({
         </div>
       </div>
 
+      {/* Arbitrary-value 7-col classes on purpose: globals.css hijacks the
+          literal `grid-cols-7` utility with `min-height: 480px` per cell
+          (a Time Planner patch), which would blow these compact cells up. */}
       {period.type === 'week' && (
-        <div className="grid grid-cols-7 gap-1.5">
+        <div className="grid grid-cols-[repeat(7,minmax(0,1fr))] gap-1.5">
           {days.map((day) => (
             <div key={day.key} className="text-center">
               <div className="text-[10px] font-semibold text-slate-400 mb-1">
@@ -197,7 +200,7 @@ export default function ConsistencyHeatmap({
 
       {period.type === 'month' && (
         <div>
-          <div className="grid grid-cols-7 gap-1 mb-1">
+          <div className="grid grid-cols-[repeat(7,minmax(0,1fr))] gap-1 mb-1">
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((label) => (
               <div key={label} className="text-center text-[10px] font-semibold text-slate-400">
                 {label}
@@ -206,7 +209,7 @@ export default function ConsistencyHeatmap({
           </div>
           <div className="space-y-1">
             {weeks.map((week, wi) => (
-              <div key={wi} className="grid grid-cols-7 gap-1">
+              <div key={wi} className="grid grid-cols-[repeat(7,minmax(0,1fr))] gap-1">
                 {week.map((day) => (
                   <div key={day.key} className="relative">
                     {renderCell(day, 'w-full h-9')}

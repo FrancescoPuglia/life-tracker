@@ -40,22 +40,30 @@ function Tile({ label, value, sub, delta, deltaTone = 'neutral', title, testId }
         : 'text-slate-500';
   return (
     <div
-      className="rounded-xl border border-slate-200 bg-white px-4 py-3 min-w-[148px]"
+      className="h-full flex flex-col rounded-xl border border-slate-200 bg-white px-4 py-3 min-w-0"
       title={title}
       data-testid={testId}
     >
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900 leading-none">{value}</div>
-      <div className="mt-1.5 flex items-baseline gap-2 text-xs">
-        {delta !== undefined && <span className={`font-semibold ${deltaClass}`}>{delta}</span>}
-        {sub && <span className="text-slate-400">{sub}</span>}
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 truncate">
+        {label}
+      </div>
+      <div className="mt-1 text-2xl font-bold text-slate-900 leading-none tabular-nums">{value}</div>
+      <div className="mt-auto pt-1.5 flex items-baseline gap-1.5 text-xs leading-snug">
+        {delta !== undefined && (
+          <span className={`font-semibold tabular-nums shrink-0 ${deltaClass}`}>{delta}</span>
+        )}
+        {sub && <span className="text-slate-400 truncate">{sub}</span>}
       </div>
     </div>
   );
 }
 
 export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial }: PerfKpiGridProps) {
-  const vsLabel = isPartial ? 'vs same elapsed span of previous period' : 'vs previous period';
+  // Short on the card, spelled out in the tooltip (title) of each tile.
+  const vsLabel = isPartial ? 'vs prev period to date' : 'vs previous period';
+  const vsExplainer = isPartial
+    ? ' Comparison uses the same elapsed span of the previous period (first N days vs first N days).'
+    : ' Comparison uses the full previous period.';
 
   const fulfillmentDelta =
     summary.planFulfillmentRate !== null && previous.planFulfillmentRate !== null
@@ -64,7 +72,7 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
 
   return (
     <div
-      className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-2.5"
+      className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5"
       data-testid="perf-kpi-grid"
       role="group"
       aria-label="Key performance indicators"
@@ -75,7 +83,7 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
         value={formatMinutes(summary.actualMinutes)}
         delta={`${formatSignedMinutes(summary.actualMinutes - previous.actualMinutes)}`}
         sub={vsLabel}
-        title="Actual = executed time from completed/overrun blocks (real timestamps when present, planned window otherwise) + ad-hoc sessions, clipped to the period."
+        title={`Actual = executed time from completed/overrun blocks (real timestamps when present, planned window otherwise) + ad-hoc sessions, clipped to the period.${vsExplainer}`}
       />
       <Tile
         testId="kpi-planned"
@@ -83,15 +91,19 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
         value={formatMinutes(summary.plannedMinutes)}
         delta={formatSignedMinutes(summary.plannedMinutes - previous.plannedMinutes)}
         sub={vsLabel}
-        title="Planned = time blocks scheduled in advance (created before their start), minus cancelled blocks and breaks, clipped to the period."
+        title={`Planned = time blocks scheduled in advance (created before their start), minus cancelled blocks and breaks, clipped to the period.${vsExplainer}`}
       />
       <Tile
         testId="kpi-execution"
         label="Plan vs actual"
         value={formatPercent(summary.executionRatio)}
         delta={formatSignedMinutes(summary.varianceMinutes)}
-        sub="variance"
-        title="Execution ratio = actual ÷ planned. Variance = actual − planned. Shown as — when nothing was planned; over 100% is not automatically good."
+        sub={
+          isPartial && summary.executionRatioToDate !== null
+            ? `variance · ${formatPercent(summary.executionRatioToDate)} of plan to date`
+            : 'variance'
+        }
+        title="Execution ratio = actual ÷ planned (full period). Variance = actual − planned. While the period is in progress, 'of plan to date' compares actual against only the plan matured so far. Shown as — when nothing was planned; over 100% is not automatically good."
       />
       <Tile
         testId="kpi-tasks"
@@ -108,7 +120,7 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
         sub={
           fulfillmentDelta !== null ? `${formatPointsDelta(fulfillmentDelta)} ${vsLabel}` : undefined
         }
-        title="Tasks due in the period or scheduled by planned blocks, completed on time (by their due date, or by period end when they have none)."
+        title={`Tasks due in the period or scheduled by planned blocks, completed on time (by their due date, or by period end when they have none).${vsExplainer}`}
       />
       <Tile
         testId="kpi-unplanned"
@@ -128,7 +140,7 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
         value={`${summary.activeDays}/${summary.elapsedDays}`}
         delta={`${summary.activeDays - previous.activeDays >= 0 ? '+' : ''}${summary.activeDays - previous.activeDays}`}
         sub={vsLabel}
-        title="Elapsed days with at least one executed block/session or one completed task."
+        title={`Elapsed days with at least one executed block/session or one completed task.${vsExplainer}`}
       />
       <Tile
         testId="kpi-coverage"

@@ -14,7 +14,7 @@ import {
   formatPercent,
   formatSignedMinutes,
 } from '@/lib/performance/format';
-import { CHART_COLORS, STATUS_META } from './theme';
+import { CHART_COLORS, STATUS_META, describeStatus } from './theme';
 
 interface GoalPerformancePanelProps {
   goals: GoalPerformance[];
@@ -64,6 +64,9 @@ export default function GoalPerformancePanel({
             const status = STATUS_META[goal.status];
             const plannedPct = (goal.plannedMinutes / maxMinutes) * 100;
             const actualPct = (goal.actualMinutes / maxMinutes) * 100;
+            const elapsedPct = (goal.plannedElapsedMinutes / maxMinutes) * 100;
+            // Tiny-but-real values must stay visible (min 4px sliver).
+            const barWidth = (pct: number) => (pct > 0 ? `max(${pct}%, 4px)` : '0%');
             return (
               <li key={key}>
                 <button
@@ -80,27 +83,34 @@ export default function GoalPerformancePanel({
                       : 'border-transparent hover:border-slate-200 hover:bg-slate-50'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-1.5">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[13px] font-semibold text-slate-900 truncate">
+                      <span
+                        className="text-[13px] font-semibold text-slate-900 truncate"
+                        title={goal.goalName}
+                      >
                         {goal.goalName}
                       </span>
                       {goal.goalStatus === 'archived' && (
                         <span className="text-[10px] text-slate-400 uppercase tracking-wide">archived</span>
                       )}
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}
+                        className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}
+                        title={describeStatus(goal.status, goal)}
                       >
                         <span aria-hidden="true">{status.symbol}</span>
                         {status.label}
                       </span>
                     </div>
-                    <div className="flex items-baseline gap-3 text-xs whitespace-nowrap tabular-nums">
-                      <span className="text-slate-500">
+                    <div className="ml-auto flex items-baseline gap-3 text-xs whitespace-nowrap tabular-nums">
+                      <span className="text-slate-500" title="Actual / Planned in this period">
                         {formatMinutes(goal.actualMinutes)}
                         <span className="text-slate-400"> / {formatMinutes(goal.plannedMinutes)}</span>
                       </span>
-                      <span className="font-semibold text-slate-700 w-14 text-right">
+                      <span
+                        className="font-semibold text-slate-700 w-16 text-right"
+                        title="Variance = actual − planned (full period)"
+                      >
                         {formatSignedMinutes(goal.varianceMinutes)}
                       </span>
                       <span className="text-slate-400 w-10 text-right" title="Share of the period's actual time">
@@ -108,17 +118,25 @@ export default function GoalPerformancePanel({
                       </span>
                     </div>
                   </div>
-                  {/* Bullet bars: planned track + actual fill, same scale across rows */}
+                  {/* Bullet bars: planned track + actual fill on one shared
+                      scale; the notch marks the plan matured up to today. */}
                   <div className="space-y-1" aria-hidden="true">
                     <div className="h-2 rounded-full bg-slate-100 relative overflow-hidden">
                       <div
                         className="absolute inset-y-0 left-0 rounded-full"
-                        style={{ width: `${plannedPct}%`, backgroundColor: CHART_COLORS.planned, opacity: 0.45 }}
+                        style={{ width: barWidth(plannedPct), backgroundColor: CHART_COLORS.planned, opacity: 0.35 }}
                       />
                       <div
                         className="absolute inset-y-0 left-0 rounded-full"
-                        style={{ width: `${actualPct}%`, backgroundColor: CHART_COLORS.actual }}
+                        style={{ width: barWidth(actualPct), backgroundColor: CHART_COLORS.actual }}
                       />
+                      {goal.plannedElapsedMinutes > 0 &&
+                        goal.plannedElapsedMinutes < goal.plannedMinutes && (
+                          <div
+                            className="absolute inset-y-0 w-[2px]"
+                            style={{ left: `${elapsedPct}%`, backgroundColor: '#475569' }}
+                          />
+                        )}
                     </div>
                   </div>
                   <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">

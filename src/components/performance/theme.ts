@@ -52,6 +52,8 @@ export const STATUS_META: Record<EntityStatus, StatusMeta> = {
   ahead: { label: 'Ahead', className: 'bg-emerald-50 text-emerald-700 border-emerald-200', symbol: '▲' },
   'on-track': { label: 'On track', className: 'bg-blue-50 text-blue-700 border-blue-200', symbol: '●' },
   behind: { label: 'Behind', className: 'bg-red-50 text-red-700 border-red-200', symbol: '▼' },
+  /** Plan exists but is entirely in the future — nothing exigible today. */
+  'not-due': { label: 'Not due yet', className: 'bg-slate-50 text-slate-500 border-slate-200', symbol: '◷' },
   'no-plan': { label: 'No plan', className: 'bg-amber-50 text-amber-700 border-amber-200', symbol: '◇' },
   inactive: { label: 'Inactive', className: 'bg-slate-100 text-slate-600 border-slate-200', symbol: '⏸' },
   'no-data': { label: 'No data', className: 'bg-slate-50 text-slate-500 border-slate-200', symbol: '–' },
@@ -63,6 +65,36 @@ export const INSIGHT_META: Record<InsightKind, { className: string; iconClassNam
   information: { className: 'border-blue-200 bg-blue-50/60', iconClassName: 'text-blue-600' },
   'data-quality': { className: 'border-slate-200 bg-slate-50/80', iconClassName: 'text-slate-500' },
 };
+
+import { formatMinutes } from '@/lib/performance/format';
+
+/**
+ * Native-tooltip explanation of a status chip, with the numbers that
+ * produced it (formula lives in metrics.entityStatus — this only narrates).
+ */
+export function describeStatus(
+  status: EntityStatus,
+  row: { plannedMinutes: number; plannedElapsedMinutes: number; actualMinutes: number }
+): string {
+  const done = formatMinutes(row.actualMinutes);
+  const toDate = formatMinutes(row.plannedElapsedMinutes);
+  switch (status) {
+    case 'ahead':
+      return `Ahead of today's plan: ${done} done vs ${toDate} planned so far.`;
+    case 'on-track':
+      return `On track vs today's plan: ${done} done vs ${toDate} planned so far.`;
+    case 'behind':
+      return `Behind as of today: ${done} done vs ${toDate} planned so far (full-period plan ${formatMinutes(row.plannedMinutes)}).`;
+    case 'not-due':
+      return `Nothing due yet: the ${formatMinutes(row.plannedMinutes)} planned sit later in the period.`;
+    case 'no-plan':
+      return `Executed ${done} without any planned time in this period.`;
+    case 'inactive':
+      return 'Open tasks but no tracked activity for 14+ days.';
+    case 'no-data':
+      return 'No plan and no execution in this period.';
+  }
+}
 
 /** Quantize a value into the heat ramp; returns HEAT_EMPTY for zero/absent. */
 export function heatColor(value: number, max: number): string {

@@ -9,6 +9,7 @@ import {
   type PerformanceInput,
 } from './metrics';
 import { EMPTY_FILTERS, type PerformanceFilters } from './types';
+import { MAX_INSIGHTS } from './insights';
 
 // ============================================================================
 // FIXTURES — Wed 2025-10-15 12:00 local; current week = Mon 13 → Mon 20 Oct.
@@ -502,6 +503,48 @@ describe('task metrics', () => {
     expect(overview.dataQuality.estimatedUnscheduledMinutes).toBe(90);
   });
 
+  // Regression (2026-07 "0/19 planned tasks done"): older UI paths set
+  // status 'completed' without ever writing completedAt, so every completion
+  // was invisible to the dashboard. Legacy rows must fall back to updatedAt.
+  it('counts legacy tasks completed without completedAt via the updatedAt fallback', () => {
+    const legacyDone = makeTask({
+      dueDate: at(15, 0),
+      status: 'completed',
+      completedAt: undefined,
+      updatedAt: at(14, 18), // completed (= last touched) inside the period
+    });
+    const overview = compute({ tasks: [legacyDone] });
+    expect(overview.summary.plannedTasks).toBe(1);
+    expect(overview.summary.completedPlannedTasks).toBe(1);
+    expect(overview.summary.completedTasksInPeriod).toBe(1);
+    expect(overview.summary.onTimeRate).toBe(1);
+  });
+
+  it('does not count open tasks without completedAt as completed', () => {
+    const open = makeTask({
+      dueDate: at(15, 0),
+      status: 'in_progress',
+      completedAt: undefined,
+      updatedAt: at(14, 18),
+    });
+    const overview = compute({ tasks: [open] });
+    expect(overview.summary.completedPlannedTasks).toBe(0);
+    expect(overview.summary.completedTasksInPeriod).toBe(0);
+  });
+
+  it('keeps legacy completions out of foreign periods (updatedAt outside window)', () => {
+    const doneLongAgo = makeTask({
+      dueDate: at(15, 0),
+      status: 'completed',
+      completedAt: undefined,
+      updatedAt: new Date(2025, 8, 1, 10, 0), // September — before this week
+    });
+    const overview = compute({ tasks: [doneLongAgo] });
+    // Fulfilled (completed before period end) but not "completed in period".
+    expect(overview.summary.completedPlannedTasks).toBe(1);
+    expect(overview.summary.completedTasksInPeriod).toBe(0);
+  });
+
   it('ignores cancelled and soft-deleted tasks', () => {
     const overview = compute({
       tasks: [
@@ -701,6 +744,80 @@ describe('goal and project status', () => {
     expect(byName['noplan']).toBe('no-plan');
   });
 
+  // Regression (2026-07 "everything is Behind"): during an in-progress
+  // period the reference is the plan matured up to NOW, not the full-period
+  // plan — future blocks must not count against today's status.
+  it('marks a goal with only future plan as not-due, never behind', () => {
+    const goal = makeGoal({ title: 'future-only' });
+    const overview = compute({
+      goals: [goal],
+      timeBlocks: [
+        // Planned Fri 17 (NOW is Wed 15 12:00) — nothing exigible yet.
+        makeBlock({ goalId: goal.id, startTime: at(17, 9), endTime: at(17, 13) }),
+      ],
+    });
+    expect(overview.goals.find((g) => g.goalName === 'future-only')?.status).toBe('not-due');
+  });
+
+  it('judges an in-progress period against the matured plan only', () => {
+    const goal = makeGoal({ title: 'paced' });
+    const overview = compute({
+      goals: [goal],
+      timeBlocks: [
+        // Matured: Mon 13, 2h planned and 2h done.
+        makeBlock({
+          goalId: goal.id,
+          status: 'completed',
+          startTime: at(13, 9),
+          endTime: at(13, 11),
+        }),
+        // Future: Sat 18, 8h planned — must not drag the status down.
+        makeBlock({ goalId: goal.id, startTime: at(18, 9), endTime: at(18, 17) }),
+      ],
+    });
+    const row = overview.goals.find((g) => g.goalName === 'paced');
+    expect(row?.plannedMinutes).toBe(600);
+    expect(row?.plannedElapsedMinutes).toBe(120);
+    expect(row?.status).toBe('on-track');
+  });
+
+  it('executing before any plan matured counts as ahead', () => {
+    const goal = makeGoal({ title: 'early-bird' });
+    const overview = compute({
+      goals: [goal],
+      timeBlocks: [
+        makeBlock({ goalId: goal.id, startTime: at(18, 9), endTime: at(18, 11) }), // future plan
+        // Retro-logged execution: real work done before any plan matured.
+        makeBlock({
+          goalId: goal.id,
+          status: 'completed',
+          startTime: at(13, 9),
+          endTime: at(13, 10),
+          createdAt: at(13, 10),
+        }),
+      ],
+    });
+    expect(overview.goals.find((g) => g.goalName === 'early-bird')?.status).toBe('ahead');
+  });
+
+  it('judges a closed period against the full plan (elapsed == full)', () => {
+    const prevWeek = resolvePeriod(new Date(2025, 9, 8), 'week', NOW); // Oct 6 → 13, closed
+    const goal = makeGoal({ title: 'closed-behind' });
+    const overview = compute(
+      {
+        goals: [goal],
+        timeBlocks: [
+          makeBlock({ goalId: goal.id, startTime: new Date(2025, 9, 10, 9), endTime: new Date(2025, 9, 10, 13) }),
+        ],
+      },
+      EMPTY_FILTERS,
+      prevWeek
+    );
+    const row = overview.goals.find((g) => g.goalName === 'closed-behind');
+    expect(row?.plannedElapsedMinutes).toBe(row?.plannedMinutes);
+    expect(row?.status).toBe('behind');
+  });
+
   it('marks stale projects with open tasks as inactive', () => {
     const goal = makeGoal();
     const project = makeProject({ goalId: goal.id });
@@ -736,7 +853,7 @@ describe('insights', () => {
     expect(insight?.link?.goalId).toBe(goal.id);
   });
 
-  it('caps the panel at 5 ranked insights', () => {
+  it('caps the engine output at MAX_INSIGHTS, ranked by priority', () => {
     // Build a messy period that trips many rules at once.
     const goals = ['G1', 'G2', 'G3', 'G4'].map((t) => makeGoal({ title: t }));
     const blocks = goals.flatMap((g, i) => [
@@ -755,7 +872,7 @@ describe('insights', () => {
         }),
       ],
     });
-    expect(overview.insights.length).toBeLessThanOrEqual(5);
+    expect(overview.insights.length).toBeLessThanOrEqual(MAX_INSIGHTS);
     const priorities = overview.insights.map((i) => i.priority);
     expect([...priorities].sort((a, b) => b - a)).toEqual(priorities);
   });

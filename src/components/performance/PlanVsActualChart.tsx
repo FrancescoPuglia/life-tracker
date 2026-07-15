@@ -137,12 +137,24 @@ export default function PlanVsActualChart({
 
   const data = useMemo(
     () =>
-      points.map((p) => ({
-        ...p,
-        plannedExecutedMinutes: Math.max(0, p.actualMinutes - p.unplannedMinutes),
-        // Recharts needs plain fields; keep Date objects off the axis payload.
-        axisLabel: p.label,
-      })),
+      points.map((p) => {
+        // UI boundary guard: a single NaN/Infinity poisons the whole Y scale
+        // (recharts then draws no bars, no ticks, no tooltips).
+        const finite = (v: number) => (Number.isFinite(v) ? v : 0);
+        const actualMinutes = finite(p.actualMinutes);
+        const unplannedMinutes = finite(p.unplannedMinutes);
+        return {
+          ...p,
+          plannedMinutes: finite(p.plannedMinutes),
+          actualMinutes,
+          unplannedMinutes,
+          cumulativePlannedMinutes: finite(p.cumulativePlannedMinutes),
+          cumulativeActualMinutes: finite(p.cumulativeActualMinutes),
+          plannedExecutedMinutes: Math.max(0, actualMinutes - unplannedMinutes),
+          // Recharts needs plain fields; keep Date objects off the axis payload.
+          axisLabel: p.label,
+        };
+      }),
     [points]
   );
 
@@ -246,8 +258,13 @@ export default function PlanVsActualChart({
               {todayPoint && mode === 'buckets' && (
                 <ReferenceLine x={todayPoint.label} stroke={CHART_COLORS.today} strokeWidth={1} />
               )}
-              {mode === 'buckets' ? (
-                <>
+              {/* Series MUST be direct children of the chart: recharts finds
+                  them by scanning children, and its react-is fragment
+                  detection fails under Next's vendored React 19 — a Bar/Line
+                  wrapped in <>…</> silently disappears (the 2026-07 empty
+                  chart). Conditional `&&` children are safe; fragments are
+                  not. */}
+              {mode === 'buckets' && (
                   <Bar
                     dataKey="plannedMinutes"
                     name="Planned"
@@ -263,6 +280,8 @@ export default function PlanVsActualChart({
                       />
                     ))}
                   </Bar>
+              )}
+              {mode === 'buckets' && (
                   <Bar
                     dataKey="plannedExecutedMinutes"
                     name="Actual (planned)"
@@ -278,6 +297,8 @@ export default function PlanVsActualChart({
                       />
                     ))}
                   </Bar>
+              )}
+              {mode === 'buckets' && (
                   <Bar
                     dataKey="unplannedMinutes"
                     name="Actual (unplanned)"
@@ -296,9 +317,8 @@ export default function PlanVsActualChart({
                       />
                     ))}
                   </Bar>
-                </>
-              ) : (
-                <>
+              )}
+              {mode === 'cumulative' && (
                   <Line
                     type="monotone"
                     dataKey="cumulativePlannedMinutes"
@@ -309,6 +329,8 @@ export default function PlanVsActualChart({
                     activeDot={{ r: 4, stroke: '#ffffff', strokeWidth: 2 }}
                     isAnimationActive={false}
                   />
+              )}
+              {mode === 'cumulative' && (
                   <Line
                     type="monotone"
                     dataKey="cumulativeActualMinutes"
@@ -319,15 +341,18 @@ export default function PlanVsActualChart({
                     activeDot={{ r: 4, stroke: '#ffffff', strokeWidth: 2 }}
                     isAnimationActive={false}
                   />
-                </>
               )}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      {/* Screen-reader table twin — values are never color/hover-gated. */}
-      <table className="sr-only">
+      {/* Screen-reader table twin — values are never color/hover-gated.
+          Wrapped in a sr-only DIV: a table styled sr-only directly keeps its
+          content width (display:table treats width as a minimum) and forces
+          horizontal scroll on narrow viewports. */}
+      <div className="sr-only">
+      <table>
         <caption>Planned and actual minutes per {period.type === 'year' ? 'month' : 'day'}</caption>
         <thead>
           <tr>
@@ -350,6 +375,7 @@ export default function PlanVsActualChart({
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }

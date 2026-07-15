@@ -38,8 +38,9 @@ export const IMPROVED_GOAL_MIN = 120;
 export const FULFILLMENT_DELTA = 0.1;
 /** Consistency delta (active-day rate points as 0..1) to call a change. */
 export const CONSISTENCY_DELTA = 0.2;
-/** How many insights the panel shows. */
-export const MAX_INSIGHTS = 5;
+/** How many insights the engine returns; the panel opens with the top few
+ *  and reveals the rest behind "Show more". */
+export const MAX_INSIGHTS = 8;
 
 function realGoals(overview: PerformanceOverview): GoalPerformance[] {
   return overview.goals.filter((g) => g.goalId !== null);

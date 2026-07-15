@@ -18,13 +18,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # v5+ of these actions declare the node24 runtime, silencing the
+      # "forced to run on node24" runner warnings emitted by the v4 tags.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          # Node 20 reached end-of-life in April 2026; 22 is the LTS the
+          # project is developed and built on locally.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -40,7 +44,8 @@ jobs:
         run: touch out/.nojekyll
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        # v5 wraps upload-artifact v7 (node24); v3 wrapped v4 (node20 warning).
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./out
 
@@ -53,4 +58,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
