@@ -221,6 +221,55 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect(plan.assumptions).toEqual([]);
   });
 
+  it('enforces the persisted minimum buffer through the shared WPI validator', async () => {
+    const { repository, domain } = harness();
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '07:00', end: '22:00' },
+      maxDailyPlannedMinutes: 600,
+      maxWeeklyPlannedMinutes: 3_000,
+      minBufferMinutes: 15,
+      maxConsecutiveHighEnergyBlocks: 3,
+    });
+    const plan = await domain.scheduling.replaceDaySchedule(context(UID, 'buffer-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [
+        block({ id: 'buffer-first', start: '2026-08-17T07:00:00.000Z', end: '2026-08-17T08:00:00.000Z' }),
+        block({ id: 'buffer-second', start: '2026-08-17T08:05:00.000Z', end: '2026-08-17T09:00:00.000Z' }),
+      ],
+      reason: 'The persisted buffer must be authoritative.',
+    });
+    expect(plan.conflicts.some((message) => /buffer insufficiente/i.test(message))).toBe(true);
+  });
+
+  it('persists a WPI semantic marker for calendar-only maintenance blocks', async () => {
+    const { repository, domain } = harness(['plan-maintenance', 'execution-maintenance']);
+    const plan = await domain.scheduling.replaceDaySchedule(context(UID, 'maintenance-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'maintenance-buffer',
+        type: 'buffer',
+        activityType: 'maintenance',
+        energyLevel: 'low',
+        taskId: null,
+        projectId: null,
+        goalId: null,
+      })],
+      reason: 'Create a bounded calendar buffer.',
+    });
+    await domain.changePlans.applyPlan(context(UID, 'maintenance-apply'), {
+      planId: plan.id,
+      approvalCapability: plan.approval.capability,
+      idempotencyKey: 'maintenance-wpi-key-00001',
+    });
+    expect((await repository.getEntity(UID, 'timeBlocks', 'maintenance-buffer'))?.notes)
+      .toMatch(/WPI_KEY: wpi:/);
+  });
+
   it('counts protected commitments toward capacity without emitting mutations for them', async () => {
     const { repository, domain } = harness();
     repository.setPlanningPreferencesForTest(UID, {

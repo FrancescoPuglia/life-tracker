@@ -44,6 +44,7 @@ export type MappingStatus =
 
 export type ConflictType =
   | 'overlap'
+  | 'insufficient_buffer'
   | 'daily_overload'
   | 'weekly_overload'
   | 'missing_goal'

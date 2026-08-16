@@ -44,6 +44,7 @@ export function detectConflicts(
   const byDay = groupByDay(blocks);
 
   detectOverlaps(byDay, conflicts);
+  detectInsufficientBuffers(byDay, constraints, conflicts);
   detectDailyOverload(byDay, constraints, conflicts);
   detectWeeklyOverload(blocks, constraints, conflicts);
   detectInvalidTimes(blocks, conflicts);
@@ -92,6 +93,35 @@ function detectOverlaps(
           });
         }
       }
+    }
+  }
+}
+
+function detectInsufficientBuffers(
+  byDay: Record<WeekDay, DraftTimeBlock[]>,
+  constraints: PlanningConstraint,
+  out: PlanConflict[],
+): void {
+  const required = constraints.minBufferMinutes;
+  if (required <= 0) return;
+  for (const day of allWeekDays()) {
+    const sorted = sortByStart(byDay[day]);
+    for (let index = 1; index < sorted.length; index += 1) {
+      const previous = sorted[index - 1];
+      const current = sorted[index];
+      if (!previous || !current) continue;
+      const gap = timeToMinutes(current.startTime) - timeToMinutes(previous.endTime);
+      // Overlaps have their own stronger error; this validator covers only a
+      // non-negative gap that is shorter than the persisted user constraint.
+      if (gap < 0 || gap >= required) continue;
+      out.push({
+        id: createStableId('conflict', `buffer:${previous.id}:${current.id}`, 0),
+        type: 'insufficient_buffer',
+        severity: 'error',
+        message: `Buffer insufficiente tra '${previous.label}' e '${current.label}': ${gap} minuti su ${required} richiesti.`,
+        blockIds: [previous.id, current.id],
+        intentIds: uniq([previous.intentId, current.intentId]),
+      });
     }
   }
 }

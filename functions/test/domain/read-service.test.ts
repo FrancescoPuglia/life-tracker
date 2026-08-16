@@ -89,6 +89,57 @@ describe('bounded canonical Life Tracker state', () => {
     expect(analytics.timeBlocks.completedCount).toBe(1);
   });
 
+  it('attributes normal Session records through TimeBlock and hierarchy links', async () => {
+    const service = new ReadService(seededRepository());
+    const alignment = await service.goalAlignment(context(), RANGE);
+    expect(alignment.goals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        goalId: 'goal-1',
+        plannedMinutes: 180,
+        actualMinutes: 45,
+      }),
+    ]));
+  });
+
+  it('clips planned, Session, and explicit actual intervals to the requested range', async () => {
+    const repository = new InMemoryRepository();
+    repository.seed(UID, 'timeBlocks', [
+      {
+        id: 'boundary-session-block',
+        startTime: '2026-08-16T23:30:00.000Z',
+        endTime: '2026-08-17T00:30:00.000Z',
+        status: 'planned',
+      },
+      {
+        id: 'boundary-explicit-block',
+        startTime: '2026-08-17T00:30:00.000Z',
+        endTime: '2026-08-17T01:30:00.000Z',
+        actualStartTime: '2026-08-17T00:30:00.000Z',
+        actualEndTime: '2026-08-17T01:30:00.000Z',
+        status: 'planned',
+      },
+    ]);
+    repository.seed(UID, 'sessions', [{
+      id: 'boundary-session',
+      timeBlockId: 'boundary-session-block',
+      startTime: '2026-08-16T23:30:00.000Z',
+      endTime: '2026-08-17T00:30:00.000Z',
+      duration: 3_600,
+      status: 'completed',
+    }]);
+    const service = new ReadService(repository);
+    const analytics = await service.analytics(context(), {
+      from: '2026-08-17T00:00:00.000Z',
+      to: '2026-08-17T01:00:00.000Z',
+    });
+    expect(analytics.timeBlocks.plannedMinutes).toBe(60);
+    expect(analytics.actual).toMatchObject({
+      sessionMinutes: 30,
+      timeBlockActualMinutes: 30,
+      totalMinutes: 60,
+    });
+  });
+
   it('bounds note payloads and collection pages before model serialization', async () => {
     const repository = seededRepository();
     repository.seed(UID, 'notes', Array.from({ length: 30 }, (_, index) => ({
@@ -182,7 +233,7 @@ function seededRepository(): InMemoryRepository {
   seed('sessions', [{
     id: 'session-1',
     timeBlockId: 'block-session',
-    goalIds: ['goal-1'],
+    taskId: 'task-1',
     startTime: '2026-08-18T08:10:00.000Z',
     endTime: '2026-08-18T08:40:00.000Z',
     duration: 1_800,

@@ -33,36 +33,63 @@ export default function AskAIDrawer({
 }: AskAIDrawerProps) {
   const configured = backendConfigured ?? isAIBackendConfigured();
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Close on Escape — common drawer convention.
+  // Keep the dialog keyboard-contained and return focus to its invoker.
   useEffect(() => {
     if (!open) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    closeBtnRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const focusable = panelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) {
+        e.preventDefault();
+        closeBtnRef.current?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
   }, [open, onClose]);
-
-  // Focus the close button when opened so keyboard users have an anchor.
-  useEffect(() => {
-    if (open) closeBtnRef.current?.focus();
-  }, [open]);
-
-  if (!open) return null;
 
   return (
     <div
-      data-testid="ai-drawer"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Ask AI"
+      data-testid={open ? 'ai-drawer' : undefined}
+      role={open ? 'dialog' : undefined}
+      aria-modal={open ? true : undefined}
+      aria-label={open ? 'Ask AI' : undefined}
+      aria-hidden={open ? undefined : true}
+      hidden={!open}
       className="fixed inset-0 z-[70]"
     >
       {/* Backdrop */}
-      <button
-        type="button"
-        aria-label="Close AI drawer"
+      <div
+        aria-hidden="true"
         onClick={onClose}
         data-testid="ai-drawer-backdrop"
         className="absolute inset-0 bg-black/30 backdrop-blur-[2px] cursor-default"
@@ -70,6 +97,7 @@ export default function AskAIDrawer({
 
       {/* Panel */}
       <aside
+        ref={panelRef}
         className="absolute right-0 top-0 h-full w-full max-w-[420px] bg-white shadow-2xl flex flex-col border-l border-gray-200"
         data-testid="ai-drawer-panel"
       >

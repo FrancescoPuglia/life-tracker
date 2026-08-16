@@ -42,6 +42,7 @@ interface WpiModule {
 }
 
 interface WpiCommitModule {
+  wpiKey(draftId: string, blockId: string): string;
   validateDraftForCommit(
     draft: WpiDraft,
     existing: readonly Readonly<Record<string, unknown>>[],
@@ -117,6 +118,13 @@ export function validateWithWeeklyPlanningIntelligence(
     // Its Date values are deliberately ignored; Temporal supplies the instants.
     const converted = commitModule.draftBlockToTimeBlockInput(block, completeDraft);
     if (typeof converted.notes === 'string') generatedNotes[block.id] = converted.notes;
+  }
+  for (const block of completeDraft.blocks) {
+    if (block.sourceText.startsWith('protected:') || generatedNotes[block.id]) continue;
+    // Calendar-only WPI blocks are deliberately not sent through Goal mapping,
+    // but they still need the same semantic origin marker for audit/analytics
+    // and replay protection as productive blocks.
+    generatedNotes[block.id] = `WPI_KEY: ${commitModule.wpiKey(completeDraft.id, block.id)}`;
   }
 
   const conflicts = detected.conflicts

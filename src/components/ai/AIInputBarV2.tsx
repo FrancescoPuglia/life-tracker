@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  parseLifePlanActionResponse,
+  parseLifePlanPreview,
+} from '@life-tracker/ai-contract';
+import {
   AlertCircle,
   Brain,
   Calendar,
@@ -48,9 +52,14 @@ interface Message {
   isStreaming?: boolean;
   actionStatus?: 'applying' | 'rolling_back';
   actionNotice?: string;
+  actionRecoveryPending?: boolean;
   planRejected?: boolean;
   planStale?: boolean;
 }
+
+const ACTION_SESSION_VERSION = 1;
+const ACTION_SESSION_PREFIX = 'life-tracker:secure-ai-actions:';
+const MAX_PERSISTED_ACTIONS = 8;
 
 type AIStatus =
   | 'checking'
@@ -175,6 +184,8 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const chatRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const planActionKeysRef = useRef(new Map<string, string>());
+  const [actionKeysVersion, setActionKeysVersion] = useState(0);
+  const [hydratedUid, setHydratedUid] = useState<string | null>(null);
 
   const status: AIStatus = authStatus === 'unknown'
     ? 'checking'
@@ -184,6 +195,31 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
         ? 'signed_out'
         : requestStatus ?? 'ready';
   const canSend = status === 'ready';
+
+  useEffect(() => {
+    if (authStatus === 'unknown') return;
+    const uid = user?.uid ?? null;
+    if (!uid) {
+      planActionKeysRef.current.clear();
+      setMessages([]);
+      setShowChat(false);
+      setHydratedUid(null);
+      setActionKeysVersion((version) => version + 1);
+      return;
+    }
+    const restored = restoreActionSession(uid);
+    planActionKeysRef.current = restored.actionKeys;
+    setMessages(restored.messages);
+    setShowChat(restored.messages.length > 0);
+    setHydratedUid(uid);
+    setActionKeysVersion((version) => version + 1);
+  }, [authStatus, user?.uid]);
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid || hydratedUid !== uid) return;
+    persistActionSession(uid, messages, planActionKeysRef.current);
+  }, [actionKeysVersion, hydratedUid, messages, user?.uid]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -312,6 +348,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
     if (!idempotencyKey) {
       idempotencyKey = createIdempotencyKey();
       planActionKeysRef.current.set(mapKey, idempotencyKey);
+      setActionKeysVersion((version) => version + 1);
     }
 
     setMessages((previous) => previous.map((message) => (
@@ -320,6 +357,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           ...message,
           actionStatus: action === 'apply' ? 'applying' : 'rolling_back',
           actionNotice: undefined,
+          actionRecoveryPending: false,
         }
         : message
     )));
@@ -331,6 +369,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           execution!.executionId,
           execution!.rollback!.capability,
           idempotencyKey,
+          { planId: plan.id, hash: plan.hash },
         );
       const nextPlan: AIPlanPreview = {
         ...plan,
@@ -344,21 +383,38 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
             execution: result,
             actionStatus: undefined,
             actionNotice: result.message,
+            actionRecoveryPending: false,
           }
           : message
       )));
       planActionKeysRef.current.delete(mapKey);
+      setActionKeysVersion((version) => version + 1);
       setRequestStatus(null);
     } catch (error) {
       setRequestStatus(getRequestStatus(error));
-      const planStale = error instanceof AIClientError
-        && (error.code === 'state_changed' || error.code === 'approval_expired');
+      const errorCode = error instanceof AIClientError ? error.code : null;
+      const planStale = errorCode !== null && [
+        'state_changed',
+        'approval_expired',
+        'approval_replayed',
+        'conflict',
+      ].includes(errorCode);
+      const recoveryPending = errorCode === null || [
+        'committed_unverified',
+        'unavailable',
+        'session_expired',
+      ].includes(errorCode);
+      if (!recoveryPending) {
+        planActionKeysRef.current.delete(mapKey);
+        setActionKeysVersion((version) => version + 1);
+      }
       setMessages((previous) => previous.map((message) => (
         message.id === messageId
           ? {
             ...message,
             actionStatus: undefined,
             actionNotice: getSafeClientMessage(error),
+            actionRecoveryPending: recoveryPending,
             planStale: message.planStale || planStale,
           }
           : message
@@ -367,6 +423,11 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   };
 
   const rejectPlan = (messageId: string) => {
+    const plan = messages.find((message) => message.id === messageId)?.plan;
+    if (plan) {
+      planActionKeysRef.current.delete(`apply:${plan.id}`);
+      setActionKeysVersion((version) => version + 1);
+    }
     setMessages((previous) => previous.map((message) => (
       message.id === messageId
         ? {
@@ -397,6 +458,18 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
 
   const currentMode = MODE_CONFIG[mode];
   const statusConfig = STATUS_CONFIG[status];
+  const hasProtectedActionState = messages.some((message) => (
+    Boolean(message.actionStatus || message.actionRecoveryPending)
+    || Boolean(
+      message.plan
+      && !message.planRejected
+      && !message.planStale
+      && (
+        message.plan.status === 'previewed'
+        || (message.plan.status === 'applied' && message.execution?.receipt.rollbackAvailable)
+      )
+    )
+  ));
 
   return (
     <div className={`bg-gray-900/95 backdrop-blur-lg border border-gray-700 rounded-2xl shadow-2xl ${className}`}>
@@ -446,6 +519,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
                     execution={message.execution}
                     actionStatus={message.actionStatus}
                     actionNotice={message.actionNotice}
+                    actionRecoveryPending={message.actionRecoveryPending}
                     rejected={message.planRejected}
                     stale={message.planStale}
                     onAction={runPlanAction}
@@ -595,8 +669,13 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
                 setShowChat(false);
                 setRequestStatus(null);
                 planActionKeysRef.current.clear();
+                setActionKeysVersion((version) => version + 1);
               }}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              disabled={hasProtectedActionState}
+              title={hasProtectedActionState
+                ? 'Completa, riconcilia o rifiuta il piano prima di cancellare questa sessione.'
+                : undefined}
+              className="text-xs text-gray-500 hover:text-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             >
               Nuova chat
             </button>
@@ -613,6 +692,7 @@ function PlanPreviewCard({
   execution,
   actionStatus,
   actionNotice,
+  actionRecoveryPending,
   rejected,
   stale,
   onAction,
@@ -623,6 +703,7 @@ function PlanPreviewCard({
   execution?: AIPlanActionResult;
   actionStatus?: Message['actionStatus'];
   actionNotice?: string;
+  actionRecoveryPending?: boolean;
   rejected?: boolean;
   stale?: boolean;
   onAction: (
@@ -641,6 +722,8 @@ function PlanPreviewCard({
   const rollbackAvailable = applied
     && execution?.receipt.rollbackAvailable === true
     && Boolean(execution.rollback);
+  const rollbackUnexpired = rollbackAvailable
+    && Date.parse(execution!.rollback!.expiresAt) > Date.now();
 
   return (
     <div
@@ -789,7 +872,7 @@ function PlanPreviewCard({
             {actionStatus === 'applying'
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
               : <ShieldCheck className="w-3.5 h-3.5" />}
-            Applica piano
+            {actionRecoveryPending ? 'Riconcilia applicazione' : 'Applica piano'}
           </button>
         )}
         {!applied && !rolledBack && !rejected && (
@@ -802,7 +885,7 @@ function PlanPreviewCard({
             Rifiuta
           </button>
         )}
-        {rollbackAvailable && (
+        {rollbackUnexpired && (
           <button
             type="button"
             onClick={() => onAction(messageId, plan, 'rollback', execution)}
@@ -812,10 +895,10 @@ function PlanPreviewCard({
             {actionStatus === 'rolling_back'
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
               : <RotateCcw className="w-3.5 h-3.5" />}
-            Annulla modifiche
+            {actionRecoveryPending ? 'Riconcilia rollback' : 'Annulla modifiche'}
           </button>
         )}
-        {applied && !rollbackAvailable && (
+        {applied && !rollbackUnexpired && (
           <span className="text-gray-400">Rollback non disponibile</span>
         )}
         {rolledBack && (
@@ -883,4 +966,107 @@ function getRequestStatus(error: unknown): AIStatus | null {
   // authenticated backend unavailable. Keep the global status ready while
   // the plan card renders the action-specific recovery message.
   return null;
+}
+
+function actionStorageKey(uid: string): string {
+  return `${ACTION_SESSION_PREFIX}${uid}`;
+}
+
+function persistActionSession(
+  uid: string,
+  messages: readonly Message[],
+  actionKeys: ReadonlyMap<string, string>,
+): void {
+  if (typeof window === 'undefined') return;
+  const entries = messages
+    .filter((message) => (
+      message.plan
+      && !message.planRejected
+      && !message.planStale
+      && (
+        message.plan.status === 'previewed'
+        || message.actionRecoveryPending
+        || (message.plan.status === 'applied' && message.execution?.receipt.rollbackAvailable)
+      )
+    ))
+    .slice(-MAX_PERSISTED_ACTIONS)
+    .map((message) => ({
+      plan: message.plan,
+      execution: message.execution,
+      recoveryPending: Boolean(message.actionStatus || message.actionRecoveryPending),
+    }));
+  if (!entries.length) {
+    window.sessionStorage.removeItem(actionStorageKey(uid));
+    return;
+  }
+  // Capabilities remain only in this tab's session storage and are scoped by
+  // authenticated UID. They expire server-side and never enter logs or URLs.
+  window.sessionStorage.setItem(actionStorageKey(uid), JSON.stringify({
+    version: ACTION_SESSION_VERSION,
+    entries,
+    actionKeys: [...actionKeys.entries()],
+  }));
+}
+
+function restoreActionSession(uid: string): {
+  messages: Message[];
+  actionKeys: Map<string, string>;
+} {
+  if (typeof window === 'undefined') return { messages: [], actionKeys: new Map() };
+  const key = actionStorageKey(uid);
+  const raw = window.sessionStorage.getItem(key);
+  if (!raw) return { messages: [], actionKeys: new Map() };
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid');
+    const record = value as Record<string, unknown>;
+    if (record.version !== ACTION_SESSION_VERSION || !Array.isArray(record.entries)) throw new Error('invalid');
+    const messages = record.entries.slice(-MAX_PERSISTED_ACTIONS).map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('invalid');
+      const stored = entry as Record<string, unknown>;
+      const plan = parseLifePlanPreview(stored.plan);
+      const execution = stored.execution === undefined
+        ? undefined
+        : parseLifePlanActionResponse(stored.execution);
+      if (execution && (execution.planId !== plan.id || execution.hash !== plan.hash)) throw new Error('invalid');
+      const recoveryPending = stored.recoveryPending === true;
+      return {
+        id: `recovered-${plan.id}-${index}`,
+        role: 'assistant' as const,
+        content: 'Sessione di modifica sicura ripristinata.',
+        plan,
+        ...(execution ? { execution } : {}),
+        ...(recoveryPending
+          ? {
+              actionRecoveryPending: true,
+              actionNotice: 'L’esito della richiesta precedente non è certo. Riconcilia usando la stessa chiave idempotente.',
+            }
+          : {}),
+      };
+    });
+    const allowedActionIds = new Set(messages.flatMap((message) => [
+      `apply:${message.plan!.id}`,
+      ...(message.execution ? [`rollback:${message.execution.executionId}`] : []),
+    ]));
+    const actionKeys = new Map<string, string>();
+    if (Array.isArray(record.actionKeys)) {
+      for (const item of record.actionKeys) {
+        if (!Array.isArray(item) || item.length !== 2) continue;
+        const [actionId, idempotencyKey] = item;
+        if (
+          typeof actionId === 'string'
+          && allowedActionIds.has(actionId)
+          && typeof idempotencyKey === 'string'
+          && idempotencyKey.length >= 8
+          && idempotencyKey.length <= 200
+        ) {
+          actionKeys.set(actionId, idempotencyKey);
+        }
+      }
+    }
+    return { messages, actionKeys };
+  } catch {
+    window.sessionStorage.removeItem(key);
+    return { messages: [], actionKeys: new Map() };
+  }
 }

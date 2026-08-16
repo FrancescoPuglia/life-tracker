@@ -36,6 +36,7 @@ vi.mock('@/lib/voice/voiceService', () => ({
 
 describe('AIInputBarV2 secure client flow', () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
     mocks.authState.user = { uid: 'firebase-user' };
     mocks.authState.status = 'signedIn';
     mocks.configured = true;
@@ -233,6 +234,7 @@ describe('AIInputBarV2 secure client flow', () => {
         'execution_123',
         'r'.repeat(43),
         'idem_1234567890123456',
+        { planId: 'plan_123', hash: 'b'.repeat(64) },
       );
     });
     expect((await screen.findAllByText('Rollback completato')).length).toBeGreaterThan(0);
@@ -338,6 +340,39 @@ describe('AIInputBarV2 secure client flow', () => {
     expect(screen.getByLabelText('Valore proposto priority')).toHaveTextContent('high');
     expect(screen.getByLabelText('Valore proposto estimatedMinutes')).toHaveTextContent('90');
     expect(screen.getByLabelText('Valore proposto description')).toHaveTextContent(longDescription);
+  });
+
+  it('persists an uncertain action and reuses its idempotency key after remount', async () => {
+    mocks.requestAIChat.mockResolvedValueOnce({
+      message: 'Anteprima pronta',
+      plan: minimalPlan(),
+    });
+    mocks.applyAIPlan.mockRejectedValueOnce(new AIClientError('committed_unverified', 503));
+    const first = render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Pianifica in sicurezza' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
+
+    expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuova chat' })).toBeDisabled();
+    expect(window.sessionStorage.length).toBe(1);
+    first.unmount();
+
+    mocks.applyAIPlan.mockResolvedValueOnce(validActionResult());
+    render(<AIInputBarV2 />);
+    expect(await screen.findByText('Sessione di modifica sicura ripristinata.')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Riconcilia applicazione' }));
+
+    await waitFor(() => {
+      expect(mocks.applyAIPlan).toHaveBeenLastCalledWith(
+        expect.objectContaining({ id: 'plan_123' }),
+        'idem_1234567890123456',
+      );
+    });
+    expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
   });
 });
 

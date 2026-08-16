@@ -138,6 +138,11 @@ export async function applyAIPlan(
       approvalCapability: plan.approval.capability,
       idempotencyKey,
     },
+    {
+      planId: plan.id,
+      hash: plan.hash,
+      status: 'applied',
+    },
   );
 }
 
@@ -145,10 +150,17 @@ export async function rollbackAIExecution(
   executionId: string,
   rollbackCapability: string,
   idempotencyKey: string,
+  expectedPlan: Readonly<{ planId: string; hash: string }>,
 ): Promise<AIPlanActionResult> {
   return requestPlanAction(
     `/v1/executions/${encodeURIComponent(executionId)}/rollback`,
     { rollbackCapability, idempotencyKey },
+    {
+      executionId,
+      planId: expectedPlan.planId,
+      hash: expectedPlan.hash,
+      status: 'rolled_back',
+    },
   );
 }
 
@@ -171,6 +183,12 @@ export function createIdempotencyKey(): string {
 async function requestPlanAction(
   path: string,
   body: Readonly<Record<string, string>>,
+  expected: Readonly<{
+    executionId?: string;
+    planId: string;
+    hash: string;
+    status: 'applied' | 'rolled_back';
+  }>,
 ): Promise<AIPlanActionResult> {
   const resourceId = path.split('/')[3] ?? '';
   const capability = body.approvalCapability ?? body.rollbackCapability ?? '';
@@ -184,7 +202,16 @@ async function requestPlanAction(
 
   const data = await authenticatedRequest(path, { body: { ...body } });
   try {
-    return parseLifePlanActionResponse(data);
+    const result = parseLifePlanActionResponse(data);
+    if (
+      result.planId !== expected.planId
+      || result.hash !== expected.hash
+      || result.status !== expected.status
+      || (expected.executionId !== undefined && result.executionId !== expected.executionId)
+    ) {
+      throw new Error('response binding mismatch');
+    }
+    return result;
   } catch {
     throw new AIClientError('invalid_response');
   }

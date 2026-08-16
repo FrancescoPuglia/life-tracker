@@ -51,6 +51,20 @@ describe('detectConflicts', () => {
     expect(conflicts.filter((c) => c.type === 'overlap')).toHaveLength(0);
   });
 
+  it('enforces the persisted minimum buffer between adjacent blocks', () => {
+    const { conflicts } = detectConflicts(
+      [
+        block({ id: 'b1', intentId: 'i1', startTime: '09:00', endTime: '10:00' }),
+        block({ id: 'b2', intentId: 'i2', startTime: '10:05', endTime: '11:00', durationMinutes: 55 }),
+      ],
+      [],
+      { ...DEFAULT_PLANNING_CONSTRAINTS, minBufferMinutes: 15 },
+    );
+    expect(conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'insufficient_buffer', severity: 'error' }),
+    ]));
+  });
+
   it('flags daily overload', () => {
     const big = block({
       id: 'big',

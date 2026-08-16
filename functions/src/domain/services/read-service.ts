@@ -92,8 +92,14 @@ export class ReadService {
       this.readBounded(context.uid, 'timeBlocks', filter),
     ]);
 
-    const sessionMinutes = sessions.reduce((sum, record) => sum + sessionDurationMinutes(record), 0);
-    const blockMinutes = timeBlocks.reduce((sum, record) => sum + plannedDurationMinutes(record), 0);
+    const sessionMinutes = sessions.reduce(
+      (sum, record) => sum + sessionDurationMinutes(record, args.from, args.to),
+      0,
+    );
+    const blockMinutes = timeBlocks.reduce(
+      (sum, record) => sum + plannedDurationMinutes(record, args.from, args.to),
+      0,
+    );
     const sessionBlockIds = new Set(
       sessions
         .map((session) => session.timeBlockId)
@@ -101,7 +107,7 @@ export class ReadService {
     );
     const explicitBlockActualMinutes = timeBlocks
       .filter((block) => !sessionBlockIds.has(block.id))
-      .reduce((sum, block) => sum + explicitActualMinutes(block), 0);
+      .reduce((sum, block) => sum + explicitActualMinutes(block, args.from, args.to), 0);
     const actualMinutes = sessionMinutes + explicitBlockActualMinutes;
     return {
       from: args.from,
@@ -251,13 +257,34 @@ export class ReadService {
   ): Promise<Readonly<{ from: string; to: string; goals: readonly Readonly<Record<string, unknown>>[] }>> {
     assertAuthenticated(context);
     const filter = { ...emptyFilter(), from: args.from, to: args.to };
-    const [goals, sessions, blocks] = await Promise.all([
+    const [goals, sessions, blocks, tasks, projects] = await Promise.all([
       this.readBounded(context.uid, 'goals', emptyFilter()),
       this.readBounded(context.uid, 'sessions', filter),
       this.readBounded(context.uid, 'timeBlocks', filter),
+      this.readBounded(context.uid, 'tasks', emptyFilter()),
+      this.readBounded(context.uid, 'projects', emptyFilter()),
     ]);
-    const planned = groupMinutesByGoal(blocks, plannedDurationMinutes);
-    const actual = groupMinutesByGoal(sessions, sessionDurationMinutes);
+    const goalResolver = createGoalResolver(blocks, tasks, projects);
+    const planned = groupMinutesByGoal(
+      blocks,
+      (record) => plannedDurationMinutes(record, args.from, args.to),
+      goalResolver,
+    );
+    const actual = groupMinutesByGoal(
+      sessions,
+      (record) => sessionDurationMinutes(record, args.from, args.to),
+      goalResolver,
+    );
+    const sessionBlockIds = new Set(
+      sessions
+        .map((session) => session.timeBlockId)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    mergeGoalMinutes(actual, groupMinutesByGoal(
+      blocks.filter((block) => !sessionBlockIds.has(block.id)),
+      (record) => explicitActualMinutes(record, args.from, args.to),
+      goalResolver,
+    ));
     return {
       from: args.from,
       to: args.to,
@@ -301,29 +328,48 @@ export class ReadService {
   }
 }
 
-function plannedDurationMinutes(record: EntityRecord): number {
+function plannedDurationMinutes(record: EntityRecord, from?: string, to?: string): number {
+  const interval = clippedIntervalMinutes(record.startTime, record.endTime, from, to);
+  if (interval !== null) return interval;
   if (typeof record.durationMinutes === 'number' && Number.isFinite(record.durationMinutes)) {
     return Math.max(0, Math.min(record.durationMinutes, 7 * 24 * 60));
-  }
-  if (typeof record.startTime === 'string' && typeof record.endTime === 'string') {
-    const duration = (Date.parse(record.endTime) - Date.parse(record.startTime)) / 60_000;
-    return Number.isFinite(duration) ? Math.max(0, Math.min(duration, 7 * 24 * 60)) : 0;
   }
   return 0;
 }
 
-function sessionDurationMinutes(record: EntityRecord): number {
-  if (typeof record.duration === 'number' && Number.isFinite(record.duration)) {
-    // Life Tracker persists Session.duration in seconds.
-    return Math.max(0, Math.min(record.duration / 60, 7 * 24 * 60));
+function sessionDurationMinutes(record: EntityRecord, from?: string, to?: string): number {
+  // Life Tracker persists Session.duration in seconds. When a requested range
+  // clips the wall-clock interval, proportionally clip paused/net duration too.
+  const persisted = typeof record.duration === 'number' && Number.isFinite(record.duration)
+    ? Math.max(0, Math.min(record.duration / 60, 7 * 24 * 60))
+    : null;
+  const fullInterval = clippedIntervalMinutes(record.startTime, record.endTime);
+  const clippedInterval = clippedIntervalMinutes(record.startTime, record.endTime, from, to);
+  if (persisted !== null && fullInterval !== null && clippedInterval !== null) {
+    return fullInterval > 0 ? persisted * clippedInterval / fullInterval : 0;
   }
-  return plannedDurationMinutes(record);
+  if (clippedInterval !== null) return clippedInterval;
+  if (persisted !== null) return persisted;
+  return plannedDurationMinutes(record, from, to);
 }
 
-function explicitActualMinutes(record: EntityRecord): number {
-  if (typeof record.actualStartTime !== 'string' || typeof record.actualEndTime !== 'string') return 0;
-  const duration = (Date.parse(record.actualEndTime) - Date.parse(record.actualStartTime)) / 60_000;
-  return Number.isFinite(duration) ? Math.max(0, Math.min(duration, 7 * 24 * 60)) : 0;
+function explicitActualMinutes(record: EntityRecord, from?: string, to?: string): number {
+  return clippedIntervalMinutes(record.actualStartTime, record.actualEndTime, from, to) ?? 0;
+}
+
+function clippedIntervalMinutes(
+  rawStart: unknown,
+  rawEnd: unknown,
+  from?: string,
+  to?: string,
+): number | null {
+  if (typeof rawStart !== 'string' || typeof rawEnd !== 'string') return null;
+  const start = Date.parse(rawStart);
+  const end = Date.parse(rawEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return 0;
+  const clippedStart = from ? Math.max(start, Date.parse(from)) : start;
+  const clippedEnd = to ? Math.min(end, Date.parse(to)) : end;
+  return Math.max(0, Math.min((clippedEnd - clippedStart) / 60_000, 7 * 24 * 60));
 }
 
 function stateRange(
@@ -369,7 +415,14 @@ function calculateKpis(
   const keyResults = authoritative.keyResults?.items ?? [];
   const focusMinutes = sessions
     .filter((session) => Array.isArray(session.tags) && session.tags.includes('focus'))
-    .reduce((sum, session) => sum + sessionDurationMinutes(session as EntityRecord), 0);
+    .reduce(
+      (sum, session) => sum + sessionDurationMinutes(
+        session as EntityRecord,
+        analytics.from,
+        analytics.to,
+      ),
+      0,
+    );
   const progressValues = keyResults
     .map((result) => typeof result.progress === 'number' ? result.progress : null)
     .filter((value): value is number => value !== null && Number.isFinite(value));
@@ -387,19 +440,71 @@ function calculateKpis(
 function groupMinutesByGoal(
   records: readonly EntityRecord[],
   duration: (record: EntityRecord) => number,
+  resolveGoalIds: (record: EntityRecord) => readonly string[] = directGoalIds,
 ): Map<string, number> {
   const output = new Map<string, number>();
   for (const record of records) {
-    const ids = Array.isArray(record.goalIds)
-      ? record.goalIds.filter((value): value is string => typeof value === 'string')
-      : typeof record.goalId === 'string'
-        ? [record.goalId]
-        : [];
+    const ids = resolveGoalIds(record);
     if (!ids.length) continue;
     const each = duration(record) / ids.length;
     for (const id of ids) output.set(id, (output.get(id) ?? 0) + each);
   }
   return output;
+}
+
+function createGoalResolver(
+  blocks: readonly EntityRecord[],
+  tasks: readonly EntityRecord[],
+  projects: readonly EntityRecord[],
+): (record: EntityRecord) => readonly string[] {
+  const blocksById = new Map(blocks.map((record) => [record.id, record]));
+  const tasksById = new Map(tasks.map((record) => [record.id, record]));
+  const projectsById = new Map(projects.map((record) => [record.id, record]));
+  return (record) => {
+    const direct = directGoalIds(record);
+    if (direct.length) return direct;
+    const linkedBlock = typeof record.timeBlockId === 'string'
+      ? blocksById.get(record.timeBlockId)
+      : null;
+    if (linkedBlock) {
+      const linkedGoals = directGoalIds(linkedBlock);
+      if (linkedGoals.length) return linkedGoals;
+      const linkedTask = typeof linkedBlock.taskId === 'string'
+        ? tasksById.get(linkedBlock.taskId)
+        : null;
+      const linkedTaskGoals = linkedTask ? directGoalIds(linkedTask) : [];
+      if (linkedTaskGoals.length) return linkedTaskGoals;
+    }
+    const task = typeof record.taskId === 'string' ? tasksById.get(record.taskId) : null;
+    if (task) {
+      const taskGoals = directGoalIds(task);
+      if (taskGoals.length) return taskGoals;
+      const taskProject = typeof task.projectId === 'string' ? projectsById.get(task.projectId) : null;
+      const taskProjectGoals = taskProject ? directGoalIds(taskProject) : [];
+      if (taskProjectGoals.length) return taskProjectGoals;
+    }
+    const projectId = typeof record.projectId === 'string'
+      ? record.projectId
+      : linkedBlock && typeof linkedBlock.projectId === 'string'
+        ? linkedBlock.projectId
+        : null;
+    const project = projectId ? projectsById.get(projectId) : null;
+    return project ? directGoalIds(project) : [];
+  };
+}
+
+function directGoalIds(record: EntityRecord): readonly string[] {
+  return Array.isArray(record.goalIds)
+    ? [...new Set(record.goalIds.filter((value): value is string => typeof value === 'string'))]
+    : typeof record.goalId === 'string'
+      ? [record.goalId]
+      : [];
+}
+
+function mergeGoalMinutes(target: Map<string, number>, source: ReadonlyMap<string, number>): void {
+  for (const [goalId, minutes] of source) {
+    target.set(goalId, (target.get(goalId) ?? 0) + minutes);
+  }
 }
 
 function isLocked(record: EntityRecord): boolean {

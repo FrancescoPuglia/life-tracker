@@ -184,6 +184,7 @@ describe('authenticated AI client', () => {
       applyResult.executionId,
       applyResult.rollback!.capability,
       idempotencyKey,
+      { planId: plan.id, hash: plan.hash },
     );
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -224,6 +225,21 @@ describe('authenticated AI client', () => {
     await expect(applyAIPlan(validPlan(), 'idem_1234567890123456')).rejects.toMatchObject({
       code: 'state_changed',
       status: 409,
+    });
+  });
+
+  it('rejects a well-formed action response that is not bound to the submitted plan', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({
+      ...validActionResult(),
+      planId: 'different_plan',
+      receipt: {
+        ...validActionResult().receipt,
+        planId: 'different_plan',
+      },
+    }));
+
+    await expect(applyAIPlan(validPlan(), 'idem_1234567890123456')).rejects.toMatchObject({
+      code: 'invalid_response',
     });
   });
 });
