@@ -15,15 +15,17 @@
     "test:rules": "firebase emulators:exec --only firestore --project life-tracker-test \"vitest run --config vitest.rules.config.ts\"",
     "test:functions:emulator": "firebase emulators:exec --only firestore --project life-tracker-test \"npm --prefix functions test -- --run test/domain/firestore-repository.emulator.test.ts\"",
     "test:auth:emulator": "firebase emulators:exec --only auth --project life-tracker-test \"npm --prefix functions test -- --run test/http/auth.emulator.test.ts\"",
+    "test:e2e": "playwright test",
+    "test:e2e:emulator": "firebase emulators:exec --only auth,firestore --project life-tracker-test \"npm run test:e2e\"",
     "check:static-security": "node scripts/check-static-security.mjs",
     "firebase:deploy": "npm run build && firebase deploy",
     "firebase:rules": "firebase deploy --only firestore:rules"
   },
   "dependencies": {
-    "@life-tracker/ai-contract": "file:packages/ai-contract",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@life-tracker/ai-contract": "file:packages/ai-contract",
     "@tiptap/extension-color": "^3.15.0",
     "@tiptap/extension-font-family": "^3.15.0",
     "@tiptap/extension-highlight": "^3.15.0",
@@ -47,6 +49,7 @@
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/test": "1.58.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",

@@ -105,12 +105,16 @@ npm --prefix functions run build
 npm run test:rules
 npm run test:functions:emulator
 npm run test:auth:emulator
+npm run test:e2e:emulator
 GITHUB_PAGES=true NEXT_PUBLIC_AI_API_BASE_URL=https://europe-west1-PROJECT_ID.cloudfunctions.net/lifeTrackerAiApi npm run build
 npm run check:static-security -- --include-output
 ```
 
 Automated tests use synthetic data, fake Responses transports, and demo
-emulators. They must never call a live model or production Firebase project.
+emulators. The Playwright gate signs in through the Auth emulator, exercises
+desktop and mobile UI flows, and intercepts only the fake AI transport. Its
+screenshots/traces are written to ignored `test-results/` evidence. Tests must
+never call a live model or production Firebase project.
 
 ## Secrets and configuration
 

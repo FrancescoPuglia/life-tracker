@@ -117,10 +117,15 @@ export default function DailyMotivation() {
     : 'from-blue-900 to-gray-900';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
       <div className={`max-w-2xl w-full relative overflow-hidden rounded-2xl bg-gradient-to-br ${urgencyColor} border border-gray-700/50 shadow-2xl`}>
         {/* Close */}
-        <button onClick={handleDismiss} className="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
+        <button
+          type="button"
+          aria-label="Chiudi motivazione giornaliera"
+          onClick={handleDismiss}
+          className="absolute top-4 right-4 text-gray-400 hover:text-white z-10"
+        >
           <X className="w-5 h-5" />
         </button>
 

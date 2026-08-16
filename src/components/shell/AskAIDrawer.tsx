@@ -57,7 +57,7 @@ export default function AskAIDrawer({
       role="dialog"
       aria-modal="true"
       aria-label="Ask AI"
-      className="fixed inset-0 z-50"
+      className="fixed inset-0 z-[70]"
     >
       {/* Backdrop */}
       <button
