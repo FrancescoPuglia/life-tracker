@@ -67,6 +67,65 @@ describe('Goal Architect deterministic backend adapter', () => {
     })).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
+  it('rejects the second of two equivalent previews when the duplicate scope changes', async () => {
+    const { repository, domain } = harness([
+      'plan-concurrent-a',
+      'plan-concurrent-b',
+      'execution-concurrent-a',
+      'execution-concurrent-b',
+    ]);
+    const first = await domain.goalArchitect.preview(context(UID, 'preview-concurrent-a'), validDraft());
+    const secondDraft = validDraft({
+      goalId: 'goal-concurrent-b',
+      projectId: 'project-concurrent-b',
+      taskId: 'task-concurrent-b',
+      keyResultIds: ['kr-concurrent-b1', 'kr-concurrent-b2'],
+    });
+    const second = await domain.goalArchitect.preview(context(UID, 'preview-concurrent-b'), secondDraft);
+    expect(first.conflicts).toEqual([]);
+    expect(second.conflicts).toEqual([]);
+
+    await domain.changePlans.applyPlan(context(UID, 'apply-concurrent-a'), {
+      planId: first.id,
+      approvalCapability: first.approval.capability,
+      idempotencyKey: 'concurrent-ga-first-key-001',
+    });
+    await expect(domain.changePlans.applyPlan(context(UID, 'apply-concurrent-b'), {
+      planId: second.id,
+      approvalCapability: second.approval.capability,
+      idempotencyKey: 'concurrent-ga-second-key-01',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect(await repository.getEntity(UID, 'goals', 'goal-concurrent-b')).toBeNull();
+    expect(await repository.getEntity(UID, 'tasks', 'task-concurrent-b')).toBeNull();
+  });
+
+  it('refuses rollback when a newer human child depends on an AI-created parent', async () => {
+    const { repository, domain } = harness(['plan-dependent-rollback', 'execution-dependent-rollback']);
+    const preview = await domain.goalArchitect.preview(context(UID, 'dependent-preview'), validDraft());
+    const applied = await domain.changePlans.applyPlan(context(UID, 'dependent-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'dependent-apply-key-00001',
+    });
+    repository.seed(UID, 'tasks', [{
+      id: 'human-new-child',
+      title: 'Human follow-up',
+      projectId: 'project-new',
+      goalId: 'goal-new',
+      domainId: 'domain-1',
+      status: 'pending',
+      priority: 'medium',
+      estimatedMinutes: 30,
+    }]);
+    await expect(domain.changePlans.rollbackExecution(context(UID, 'dependent-rollback'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'dependent-rollback-key-001',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect(await repository.getEntity(UID, 'projects', 'project-new')).not.toBeNull();
+    expect(await repository.getEntity(UID, 'tasks', 'human-new-child')).not.toBeNull();
+  });
+
   it('rejects orphan task references before a proposal is persisted', async () => {
     const { domain } = harness();
     const draft = validDraft();

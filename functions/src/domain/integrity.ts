@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { DomainError } from './errors';
-import type { ChangeSnapshot, EntityRecord, ImmutableChangePlan, StoredChangePlan } from './types';
+import type {
+  ChangeSnapshot,
+  EntityRecord,
+  ImmutableChangePlan,
+  StoredChangePlan,
+  UserPlanningPreferences,
+  ValidationScopeQuery,
+} from './types';
 
 export function hashPlan(plan: Omit<ImmutableChangePlan, 'hash'>): string {
   return createHash('sha256').update(canonicalJson(plan)).digest('hex');
@@ -14,6 +21,8 @@ export function verifyStoredPlan(plan: StoredChangePlan): void {
     rolledBackAt: _rolledBackAt,
     appliedVersions: _versions,
     appliedStateHashes: _stateHashes,
+    appliedDependencyStateHashes: _dependencyStateHashes,
+    appliedScopeHashes: _scopeHashes,
     ...immutable
   } = plan;
   if (hashPlan(immutable) !== hash) {
@@ -25,9 +34,11 @@ export function hashEntityState(record: EntityRecord): string {
   return createHash('sha256').update(canonicalJson(record)).digest('hex');
 }
 
-export function hashSnapshotState(snapshot: Pick<ChangeSnapshot, 'entries'>): string {
-  return createHash('sha256').update(canonicalJson(
-    [...snapshot.entries]
+export function hashSnapshotState(
+  snapshot: Pick<ChangeSnapshot, 'entries' | 'scopes' | 'planningPreferencesHash'>,
+): string {
+  return createHash('sha256').update(canonicalJson({
+    entries: [...snapshot.entries]
       .map(({ collection, id, existed, version, contentHash }) => ({
         collection,
         id,
@@ -36,7 +47,36 @@ export function hashSnapshotState(snapshot: Pick<ChangeSnapshot, 'entries'>): st
         contentHash,
       }))
       .sort((a, b) => `${a.collection}/${a.id}`.localeCompare(`${b.collection}/${b.id}`)),
+    scopes: [...snapshot.scopes]
+      .map(({ collection, field, value, from, to, maxItems, stateHash, itemCount }) => ({
+        collection, field, value, from, to, maxItems, stateHash, itemCount,
+      }))
+      .sort((a, b) => validationScopeKey(a).localeCompare(validationScopeKey(b))),
+    planningPreferencesHash: snapshot.planningPreferencesHash,
+  })).digest('hex');
+}
+
+export function hashValidationScopeRecords(records: readonly EntityRecord[]): string {
+  return createHash('sha256').update(canonicalJson(
+    records
+      .map((record) => ({ id: record.id, contentHash: hashEntityState(record) }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
   )).digest('hex');
+}
+
+export function hashPlanningPreferences(preferences: UserPlanningPreferences): string {
+  return createHash('sha256').update(canonicalJson(preferences)).digest('hex');
+}
+
+export function validationScopeKey(scope: ValidationScopeQuery): string {
+  return canonicalJson({
+    collection: scope.collection,
+    field: scope.field,
+    value: scope.value,
+    from: scope.from,
+    to: scope.to,
+    maxItems: scope.maxItems,
+  });
 }
 
 export function hashResultState(

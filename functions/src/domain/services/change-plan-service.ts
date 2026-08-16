@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { CapabilityIssuer, hashCapability } from '../capabilities';
 import { DomainError, isDomainError } from '../errors';
-import { hashIdempotencyKey, hashPlan, hashSnapshotState, verifyStoredPlan } from '../integrity';
+import {
+  hashIdempotencyKey,
+  hashPlan,
+  hashSnapshotState,
+  hashValidationScopeRecords,
+  validationScopeKey,
+  verifyStoredPlan,
+} from '../integrity';
 import {
   assertAuthenticated,
   normalizePublicOperation,
@@ -22,7 +29,10 @@ import type {
   PlanActionResult,
   PublicChangePlan,
   PublicChangeDiff,
+  PreviewValidationRequirements,
   ReadFilter,
+  EntityReference,
+  ValidationScopeExpectation,
   WriteValue,
   StoredChangePlan,
 } from '../types';
@@ -51,6 +61,7 @@ export interface PreviewMetadata {
   readonly reason?: string;
   readonly assumptions?: readonly string[];
   readonly expectedImpact?: readonly string[];
+  readonly validation?: PreviewValidationRequirements;
 }
 
 const DEFAULT_TTL_MS = 15 * 60_000;
@@ -63,6 +74,7 @@ const MAX_STORED_SNAPSHOT_BYTES = 750_000;
 const MAX_PUBLIC_PREVIEW_BYTES = 240_000;
 const AI_DELETABLE_COLLECTIONS = new Set<EntityCollection>(['timeBlocks', 'notes']);
 const UNMAPPED_TIMEBLOCK_TYPES = new Set(['break', 'buffer', 'travel', 'admin']);
+const MAX_VALIDATION_SCOPE_ITEMS = 2_000;
 
 export class ChangePlanService {
   private readonly clock: () => Date;
@@ -107,19 +119,34 @@ export class ChangePlanService {
     if (!operations.length || operations.length > MAX_OPERATIONS) {
       throw new DomainError('LIMIT_EXCEEDED', `A preview must contain 1-${MAX_OPERATIONS} operations.`);
     }
-    await this.validateOperations(context.uid, operations);
+    const operationValidation = await this.validateOperations(context.uid, operations);
+    const validation = mergeValidationRequirements(operationValidation, metadata.validation);
 
     const planId = this.idFactory();
     const now = this.clock();
     const createdAt = now.toISOString();
     const expiresAt = new Date(now.getTime() + this.previewTtlMs).toISOString();
-    const refs = operations.map(({ collection, id }) => ({ collection, id }));
+    const refs = uniqueReferences([
+      ...operations.map(({ collection, id }) => ({ collection, id })),
+      ...validation.refs,
+    ]);
     const snapshot = await this.repository.captureSnapshot(
       context.uid,
       planId,
       refs,
       createdAt,
+      validation,
     );
+    // Close the validation-to-snapshot race. Service-specific scope hashes are
+    // checked inside captureSnapshot; generic references/scopes are recomputed
+    // once after capture and must describe the identical state.
+    const postCaptureValidation = mergeValidationRequirements(
+      await this.validateOperations(context.uid, operations),
+      metadata.validation,
+    );
+    if (validationRequirementsKey(postCaptureValidation) !== validationRequirementsKey(validation)) {
+      throw new DomainError('STATE_CHANGED', 'Authoritative state changed while creating the preview.');
+    }
     const baseStateHash = hashSnapshotState(snapshot);
     const snapshotByRef = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
     const diff = operations.map((operation) => {
@@ -227,6 +254,7 @@ export class ChangePlanService {
         rollbackCapabilityHash: hashCapability(rollbackCapability),
         rollbackExpiresAt,
       });
+      if (result.status !== 'applied' || !result.receipt.rollbackAvailable) return result;
       const replayRollbackCapability = this.issuer().issue(
         'rollback',
         context.uid,
@@ -241,6 +269,7 @@ export class ChangePlanService {
         },
       };
     } catch (error) {
+      if (isDomainError(error) && error.code === 'COMMITTED_UNVERIFIED') throw error;
       const now = this.clock().toISOString();
       await this.recordRejectedAction({
         id: randomUUID(),
@@ -283,6 +312,7 @@ export class ChangePlanService {
         now: this.clock().toISOString(),
       });
     } catch (error) {
+      if (isDomainError(error) && error.code === 'COMMITTED_UNVERIFIED') throw error;
       await this.recordRejectedAction({
         id: randomUUID(),
         uid: context.uid,
@@ -325,9 +355,14 @@ export class ChangePlanService {
     return this.capabilityIssuer;
   }
 
-  private async validateOperations(uid: string, operations: readonly ChangeOperation[]): Promise<void> {
+  private async validateOperations(
+    uid: string,
+    operations: readonly ChangeOperation[],
+  ): Promise<PreviewValidationRequirements> {
     const refs = new Set<string>();
     const existingByRef = new Map<string, EntityRecord | null>();
+    const dependencyRefs = new Map<string, EntityReference>();
+    const validationScopes = new Map<string, ValidationScopeExpectation>();
     for (const operation of operations) {
       const key = refKey(operation.collection, operation.id);
       if (refs.has(key)) throw new DomainError('INVALID_ARGUMENT', `Duplicate operation for ${key}.`);
@@ -360,7 +395,14 @@ export class ChangePlanService {
       ) {
         throw new DomainError('FORBIDDEN', 'Completed, in-progress, fixed, or locked time blocks cannot be changed by AI.');
       }
-      if (operation.op === 'delete') await this.assertNoInboundReferences(uid, operation.collection, operation.id);
+      if (operation.op === 'delete' || operation.op === 'create') {
+        await this.assertNoInboundReferences(
+          uid,
+          operation.collection,
+          operation.id,
+          validationScopes,
+        );
+      }
     }
 
     const mergedByRef = new Map<string, EntityRecord | null>();
@@ -388,12 +430,19 @@ export class ChangePlanService {
     const resolve = async (collection: EntityCollection, id: string): Promise<EntityRecord | null> => {
       const key = refKey(collection, id);
       if (mergedByRef.has(key)) return mergedByRef.get(key) ?? null;
-      return this.repository.getEntity(uid, collection, id);
+      const entity = await this.repository.getEntity(uid, collection, id);
+      dependencyRefs.set(key, { collection, id });
+      return entity;
     };
     for (const operation of operations) {
       const merged = mergedByRef.get(refKey(operation.collection, operation.id));
       if (merged) await assertReferenceChain(operation.collection, merged, resolve);
     }
+    return {
+      refs: [...dependencyRefs.values()].sort((a, b) => refKey(a.collection, a.id).localeCompare(refKey(b.collection, b.id))),
+      scopes: [...validationScopes.values()].sort((a, b) => validationScopeKey(a).localeCompare(validationScopeKey(b))),
+      planningPreferencesHash: null,
+    };
   }
 
   private async assertOwnedReferences(
@@ -414,27 +463,51 @@ export class ChangePlanService {
     uid: string,
     collection: EntityCollection,
     id: string,
+    scopes: Map<string, ValidationScopeExpectation>,
   ): Promise<void> {
-    const lookups: readonly [EntityCollection, keyof ReadFilter][] =
+    const lookups: readonly [EntityCollection, ValidationScopeExpectation['field']][] =
       collection === 'domains'
-        ? [['goals', 'domainId'], ['keyResults', 'domainId'], ['projects', 'domainId'], ['tasks', 'domainId'], ['timeBlocks', 'domainId'], ['habits', 'domainId'], ['notes', 'domainId']]
+        ? [['goals', 'domainId'], ['keyResults', 'domainId'], ['projects', 'domainId'], ['tasks', 'domainId'], ['timeBlocks', 'domainId'], ['habits', 'domainId'], ['notes', 'domainId'], ['goalRoadmaps', 'domainId']]
         : collection === 'goals'
-          ? [['keyResults', 'goalId'], ['projects', 'goalId'], ['tasks', 'goalId'], ['timeBlocks', 'goalId']]
+          ? [['keyResults', 'goalId'], ['projects', 'goalId'], ['tasks', 'goalId'], ['timeBlocks', 'goalId'], ['goalRoadmaps', 'goalId']]
           : collection === 'projects'
-            ? [['tasks', 'projectId'], ['timeBlocks', 'projectId'], ['notes', 'projectId']]
+            ? [['tasks', 'projectId'], ['timeBlocks', 'projectId'], ['notes', 'entityId']]
             : collection === 'tasks'
-              ? [['timeBlocks', 'taskId']]
-              : [];
+              ? [['timeBlocks', 'taskId'], ['sessions', 'taskId'], ['notes', 'entityId']]
+              : collection === 'timeBlocks'
+                ? [['sessions', 'timeBlockId']]
+                : collection === 'habits'
+                  ? [['habitLogs', 'habitId']]
+                  : [];
     for (const [childCollection, field] of lookups) {
+      if (!field) continue;
       const filter: ReadFilter = emptyFilter();
       const page = await this.repository.listEntities(uid, childCollection, {
-        filter: { ...filter, [field]: id },
+        filter: {
+          ...filter,
+          ...(field === 'domainId' || field === 'goalId' || field === 'projectId' || field === 'taskId'
+            ? { [field]: id }
+            : {}),
+        },
         cursor: null,
         limit: 1,
       });
-      if (page.items.length) {
+      const exactItems = field === 'entityId' || field === 'timeBlockId' || field === 'habitId'
+        ? page.items.filter((item) => item[field] === id)
+        : page.items;
+      if (exactItems.length) {
         throw new DomainError('CONFLICT', `Cannot delete referenced ${collection}/${id}.`);
       }
+      const scope: ValidationScopeExpectation = {
+        collection: childCollection,
+        field,
+        value: id,
+        from: null,
+        to: null,
+        maxItems: MAX_VALIDATION_SCOPE_ITEMS,
+        expectedStateHash: hashValidationScopeRecords([]),
+      };
+      scopes.set(validationScopeKey(scope), scope);
     }
   }
 }
@@ -740,6 +813,46 @@ function auditFor(
         : {}),
     },
   };
+}
+
+function mergeValidationRequirements(
+  first: PreviewValidationRequirements,
+  second?: PreviewValidationRequirements,
+): PreviewValidationRequirements {
+  const refs = uniqueReferences([...(first.refs ?? []), ...(second?.refs ?? [])]);
+  const scopes = new Map<string, ValidationScopeExpectation>();
+  for (const scope of [...(first.scopes ?? []), ...(second?.scopes ?? [])]) {
+    const key = validationScopeKey(scope);
+    const existing = scopes.get(key);
+    if (existing && existing.expectedStateHash !== scope.expectedStateHash) {
+      throw new DomainError('STATE_CHANGED', 'Validation scope changed while creating the preview.');
+    }
+    scopes.set(key, scope);
+  }
+  const preferenceHashes = [first.planningPreferencesHash, second?.planningPreferencesHash]
+    .filter((value): value is string => value !== null && value !== undefined);
+  if (new Set(preferenceHashes).size > 1) {
+    throw new DomainError('STATE_CHANGED', 'Planning preferences changed while creating the preview.');
+  }
+  return {
+    refs,
+    scopes: [...scopes.values()].sort((a, b) => validationScopeKey(a).localeCompare(validationScopeKey(b))),
+    planningPreferencesHash: preferenceHashes[0] ?? null,
+  };
+}
+
+function uniqueReferences(refs: readonly EntityReference[]): readonly EntityReference[] {
+  const byKey = new Map<string, EntityReference>();
+  for (const ref of refs) byKey.set(refKey(ref.collection, ref.id), ref);
+  return [...byKey.values()].sort((a, b) => refKey(a.collection, a.id).localeCompare(refKey(b.collection, b.id)));
+}
+
+function validationRequirementsKey(requirements: PreviewValidationRequirements): string {
+  return JSON.stringify({
+    refs: requirements.refs.map((ref) => refKey(ref.collection, ref.id)),
+    scopes: requirements.scopes.map((scope) => [validationScopeKey(scope), scope.expectedStateHash]),
+    planningPreferencesHash: requirements.planningPreferencesHash,
+  });
 }
 
 function refKey(collection: EntityCollection, id: string): string {

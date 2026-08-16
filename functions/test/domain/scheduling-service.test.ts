@@ -136,6 +136,64 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect(preview.operations.some((operation) => operation.entityId === 'cross-midnight-locked')).toBe(false);
   });
 
+  it('rejects a preview when a different-id overlapping block appears before apply', async () => {
+    const { repository, domain } = harness(['plan-phantom', 'execution-phantom']);
+    const preview = await domain.scheduling.replaceDaySchedule(context(UID, 'phantom-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'ai-proposed',
+        start: '2026-08-17T08:00:00.000Z',
+        end: '2026-08-17T09:00:00.000Z',
+      })],
+      reason: 'Create a guarded schedule.',
+    });
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'human-phantom',
+      title: 'New human commitment',
+      domainId: 'domain-1',
+      startTime: '2026-08-17T08:30:00.000Z',
+      endTime: '2026-08-17T09:30:00.000Z',
+      status: 'planned',
+      type: 'meeting',
+      locked: true,
+    }]);
+
+    await expect(domain.changePlans.applyPlan(context(UID, 'phantom-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'phantom-scope-apply-key-001',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect(await repository.getEntity(UID, 'timeBlocks', 'ai-proposed')).toBeNull();
+    expect(await repository.getEntity(UID, 'timeBlocks', 'human-phantom')).not.toBeNull();
+  });
+
+  it('rejects a schedule preview after authoritative planning preferences change', async () => {
+    const { repository, domain } = harness(['plan-preference-drift', 'execution-preference-drift']);
+    const preview = await domain.scheduling.replaceDaySchedule(context(UID, 'preference-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({ id: 'preference-guarded' })],
+      reason: 'Guard the current planning constraints.',
+    });
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '08:00', end: '18:00' },
+      maxDailyPlannedMinutes: 480,
+      maxWeeklyPlannedMinutes: 2_400,
+      minBufferMinutes: 30,
+      maxConsecutiveHighEnergyBlocks: 2,
+    });
+    await expect(domain.changePlans.applyPlan(context(UID, 'preference-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'preference-drift-key-0001',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect(await repository.getEntity(UID, 'timeBlocks', 'preference-guarded')).toBeNull();
+  });
+
   it('surfaces overlap and persisted capacity constraints from the authoritative WPI engine', async () => {
     const { repository, domain } = harness();
     repository.setPlanningPreferencesForTest(UID, {

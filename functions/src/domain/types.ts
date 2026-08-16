@@ -103,6 +103,46 @@ export interface EntityReference {
   readonly id: string;
 }
 
+export const VALIDATION_SCOPE_FIELDS = [
+  'domainId',
+  'goalId',
+  'projectId',
+  'taskId',
+  'timeBlockId',
+  'entityId',
+  'habitId',
+] as const;
+
+export type ValidationScopeField = (typeof VALIDATION_SCOPE_FIELDS)[number];
+
+/**
+ * Server-authored bounded query whose complete result set is part of a plan
+ * precondition. It detects phantom documents that per-entity snapshots miss.
+ */
+export interface ValidationScopeQuery {
+  readonly collection: EntityCollection;
+  readonly field: ValidationScopeField | null;
+  readonly value: string | null;
+  readonly from: string | null;
+  readonly to: string | null;
+  readonly maxItems: number;
+}
+
+export interface ValidationScopeExpectation extends ValidationScopeQuery {
+  readonly expectedStateHash: string;
+}
+
+export interface ValidationScopeSnapshot extends ValidationScopeQuery {
+  readonly stateHash: string;
+  readonly itemCount: number;
+}
+
+export interface PreviewValidationRequirements {
+  readonly refs: readonly EntityReference[];
+  readonly scopes: readonly ValidationScopeExpectation[];
+  readonly planningPreferencesHash: string | null;
+}
+
 export interface SnapshotEntry extends EntityReference {
   readonly existed: boolean;
   readonly version: number | null;
@@ -117,6 +157,8 @@ export interface ChangeSnapshot {
   readonly planId: string;
   readonly createdAt: string;
   readonly entries: readonly SnapshotEntry[];
+  readonly scopes: readonly ValidationScopeSnapshot[];
+  readonly planningPreferencesHash: string | null;
 }
 
 export interface UserPlanningPreferences {
@@ -173,6 +215,10 @@ export interface StoredChangePlan extends ImmutableChangePlan {
   /** Version after apply; null means the entity was deleted. */
   readonly appliedVersions?: Readonly<Record<string, number | null>>;
   readonly appliedStateHashes?: Readonly<Record<string, string | null>>;
+  /** Exact non-operation dependencies at apply time, checked before rollback. */
+  readonly appliedDependencyStateHashes?: Readonly<Record<string, string | null>>;
+  /** Complete result-set hashes after apply, including plan-created children. */
+  readonly appliedScopeHashes?: Readonly<Record<string, string>>;
 }
 
 /** Canonical browser-safe contract owned by packages/ai-contract. */
@@ -225,7 +271,11 @@ export interface StoredExecution {
   readonly uid: string;
   readonly planId: string;
   readonly requestId: string;
+  /** Immutable audit identifier for the original apply. */
+  readonly applyAuditId?: string;
+  /** Most recent mutation audit identifier. */
   readonly auditId: string;
+  readonly rollbackAuditId?: string;
   readonly idempotencyKeyHash: string;
   readonly createdAt: string;
   readonly status: 'applied' | 'rolled_back';

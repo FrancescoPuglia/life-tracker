@@ -12,6 +12,7 @@ import type {
   StoredChangePlan,
   StoredExecution,
   UserPlanningPreferences,
+  PreviewValidationRequirements,
 } from './types';
 
 export interface SavePreviewRequest {
@@ -74,6 +75,7 @@ export interface Repository {
     planId: string,
     refs: readonly EntityReference[],
     createdAt: string,
+    validation?: PreviewValidationRequirements,
   ): Promise<ChangeSnapshot>;
 
   savePreview(request: SavePreviewRequest): Promise<StoredChangePlan>;

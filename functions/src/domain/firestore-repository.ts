@@ -6,10 +6,20 @@ import {
   type DocumentReference,
   type DocumentSnapshot,
   type Firestore,
+  type Query,
+  type Transaction,
 } from 'firebase-admin/firestore';
 import { capabilityHashMatches } from './capabilities';
 import { DomainError } from './errors';
-import { hashEntityState, hashResultState, hashSnapshotState, verifyStoredPlan } from './integrity';
+import {
+  hashEntityState,
+  hashPlanningPreferences,
+  hashResultState,
+  hashSnapshotState,
+  hashValidationScopeRecords,
+  validationScopeKey,
+  verifyStoredPlan,
+} from './integrity';
 import { assertEntityId } from './policy';
 import type {
   ApplyPlanRequest,
@@ -24,12 +34,15 @@ import type {
   EntityCollection,
   EntityRecord,
   EntityReference,
+  PreviewValidationRequirements,
   PlanActionResult,
   ReadPage,
   ReadPageRequest,
   StoredChangePlan,
   StoredExecution,
   UserPlanningPreferences,
+  ValidationScopeQuery,
+  ValidationScopeSnapshot,
 } from './types';
 import { SERVER_ONLY_PATHS } from './types';
 
@@ -146,8 +159,72 @@ export class FirestoreRepository implements AuditableRepository {
   async getUserPlanningPreferences(uid: string): Promise<UserPlanningPreferences> {
     assertUid(uid);
     const snapshot = await this.firestore.doc(`users/${uid}`).get();
-    if (!snapshot.exists) return clone(PRODUCT_DEFAULT_PREFERENCES);
-    const data = decodeFirestore(snapshot.data() ?? {});
+    return this.planningPreferencesFromData(
+      uid,
+      snapshot.exists ? decodeFirestore(snapshot.data() ?? {}) : null,
+    );
+  }
+
+  async captureSnapshot(
+    uid: string,
+    planId: string,
+    refs: readonly EntityReference[],
+    createdAt: string,
+    validation: PreviewValidationRequirements = {
+      refs: [],
+      scopes: [],
+      planningPreferencesHash: null,
+    },
+  ): Promise<ChangeSnapshot> {
+    assertUid(uid);
+    assertEntityId(planId);
+    if (refs.length < 1 || refs.length > 400) {
+      throw new DomainError('LIMIT_EXCEEDED', 'A snapshot must contain 1-400 entities.');
+    }
+    const references = refs.map(({ collection, id }) => this.entityRef(uid, collection, id));
+    const documents = await this.firestore.getAll(...references);
+    const entries = documents.map((document, index) => {
+      const reference = refs[index];
+      if (!reference) throw new DomainError('INTERNAL', 'Snapshot reference mismatch.');
+      const record = document.exists ? normalizeEntitySnapshot(uid, document) : null;
+      return {
+        collection: reference.collection,
+        id: reference.id,
+        existed: Boolean(record),
+        version: record?._version ?? null,
+        contentHash: record ? hashEntityState(record) : null,
+        value: record,
+      };
+    });
+    const scopes: ValidationScopeSnapshot[] = [];
+    for (const expectation of validation.scopes) {
+      const records = await this.readValidationScope(uid, expectation);
+      const stateHash = hashValidationScopeRecords(records);
+      if (stateHash !== expectation.expectedStateHash) {
+        throw new DomainError('STATE_CHANGED', 'Validation scope changed while creating the preview.');
+      }
+      scopes.push({
+        collection: expectation.collection,
+        field: expectation.field,
+        value: expectation.value,
+        from: expectation.from,
+        to: expectation.to,
+        maxItems: expectation.maxItems,
+        stateHash,
+        itemCount: records.length,
+      });
+    }
+    const planningPreferencesHash = validation.planningPreferencesHash;
+    if (
+      planningPreferencesHash
+      && hashPlanningPreferences(await this.getUserPlanningPreferences(uid)) !== planningPreferencesHash
+    ) {
+      throw new DomainError('STATE_CHANGED', 'Planning preferences changed while creating the preview.');
+    }
+    return { id: planId, uid, planId, createdAt, entries, scopes, planningPreferencesHash };
+  }
+
+  private planningPreferencesFromData(uid: string, data: unknown): UserPlanningPreferences {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return clone(PRODUCT_DEFAULT_PREFERENCES);
     }
@@ -219,35 +296,6 @@ export class FirestoreRepository implements AuditableRepository {
     };
   }
 
-  async captureSnapshot(
-    uid: string,
-    planId: string,
-    refs: readonly EntityReference[],
-    createdAt: string,
-  ): Promise<ChangeSnapshot> {
-    assertUid(uid);
-    assertEntityId(planId);
-    if (refs.length < 1 || refs.length > 100) {
-      throw new DomainError('LIMIT_EXCEEDED', 'A snapshot must contain 1-100 entities.');
-    }
-    const references = refs.map(({ collection, id }) => this.entityRef(uid, collection, id));
-    const documents = await this.firestore.getAll(...references);
-    const entries = documents.map((document, index) => {
-      const reference = refs[index];
-      if (!reference) throw new DomainError('INTERNAL', 'Snapshot reference mismatch.');
-      const record = document.exists ? normalizeEntitySnapshot(uid, document) : null;
-      return {
-        collection: reference.collection,
-        id: reference.id,
-        existed: Boolean(record),
-        version: record?._version ?? null,
-        contentHash: record ? hashEntityState(record) : null,
-        value: record,
-      };
-    });
-    return { id: planId, uid, planId, createdAt, entries };
-  }
-
   async savePreview(request: SavePreviewRequest): Promise<StoredChangePlan> {
     const { plan, snapshot, approval, audit } = request;
     assertPreviewRelationships(plan, snapshot, approval, audit);
@@ -285,7 +333,13 @@ export class FirestoreRepository implements AuditableRepository {
       const idempotencyRef = this.idempotencyRef(request.uid, 'apply', request.idempotencyKeyHash);
       const idempotencySnapshot = await transaction.get(idempotencyRef);
       if (idempotencySnapshot.exists) {
-        return replayResult(idempotencySnapshot, request.uid, 'apply', request.planId);
+        return replayResult(
+          idempotencySnapshot,
+          request.uid,
+          'apply',
+          request.planId,
+          request.approvalCapabilityHash,
+        );
       }
 
       const planRef = this.firestore.doc(SERVER_ONLY_PATHS.changePlan(request.uid, request.planId));
@@ -311,19 +365,56 @@ export class FirestoreRepository implements AuditableRepository {
       const approval = decodeOwnedServerDocument<ApprovalRecord>(approvalSnapshot, request.uid);
       validateApply(request, plan, snapshot, approval);
 
-      const entityRefs = plan.operations.map(({ collection, id }) => this.entityRef(request.uid, collection, id));
-      const entitySnapshots = await transaction.getAll(...entityRefs);
-      const currentRecords = entitySnapshots.map((document) =>
+      const snapshotEntityRefs = snapshot.entries.map(({ collection, id }) =>
+        this.entityRef(request.uid, collection, id));
+      const entitySnapshots = await transaction.getAll(...snapshotEntityRefs);
+      const snapshotRecords = entitySnapshots.map((document) =>
         document.exists ? normalizeEntitySnapshot(request.uid, document) : null,
       );
-      assertSnapshotCurrent(snapshot, plan.operations, currentRecords);
+      const scopeRecords: EntityRecord[][] = [];
+      for (const scope of snapshot.scopes) {
+        scopeRecords.push([...(await this.readValidationScope(request.uid, scope, transaction))]);
+      }
+      const preferencesSnapshot = snapshot.planningPreferencesHash
+        ? await transaction.get(this.firestore.doc(`users/${request.uid}`))
+        : null;
+      assertSnapshotCurrent(snapshot, snapshotRecords);
+      assertValidationScopesCurrent(snapshot, scopeRecords);
+      if (snapshot.planningPreferencesHash) {
+        const preferences = this.planningPreferencesFromData(
+          request.uid,
+          preferencesSnapshot?.exists ? decodeFirestore(preferencesSnapshot.data() ?? {}) : null,
+        );
+        if (hashPlanningPreferences(preferences) !== snapshot.planningPreferencesHash) {
+          throw new DomainError('STATE_CHANGED', 'The preview is stale because planning preferences changed.');
+        }
+      }
+
+      const currentByKey = new Map(snapshot.entries.map((entry, index) => [
+        refKey(entry.collection, entry.id),
+        snapshotRecords[index] ?? null,
+      ]));
+      const operationEntityRefs = plan.operations.map(({ collection, id }) =>
+        this.entityRef(request.uid, collection, id));
+      const operationKeys = new Set(plan.operations.map((operation) => refKey(operation.collection, operation.id)));
+      const appliedDependencyStateHashes = Object.fromEntries(
+        snapshot.entries
+          .filter((entry) => !operationKeys.has(refKey(entry.collection, entry.id)))
+          .map((entry) => {
+            const current = currentByKey.get(refKey(entry.collection, entry.id)) ?? null;
+            return [refKey(entry.collection, entry.id), current ? hashEntityState(current) : null];
+          }),
+      );
 
       const appliedVersions: Record<string, number | null> = {};
       const appliedStateHashes: Record<string, string | null> = {};
+      const afterByKey = new Map<string, EntityRecord | null>();
       for (let index = 0; index < plan.operations.length; index += 1) {
         const operation = plan.operations[index];
-        const entityRef = entityRefs[index];
-        const current = currentRecords[index] ?? null;
+        const entityRef = operationEntityRefs[index];
+        const current = operation
+          ? currentByKey.get(refKey(operation.collection, operation.id)) ?? null
+          : null;
         if (!operation || !entityRef) throw new DomainError('INTERNAL', 'Plan operation mismatch.');
         const key = refKey(operation.collection, operation.id);
         if (operation.op === 'create') {
@@ -332,19 +423,27 @@ export class FirestoreRepository implements AuditableRepository {
           transaction.create(entityRef, encodeEntity(created));
           appliedVersions[key] = created._version;
           appliedStateHashes[key] = hashEntityState(created);
+          afterByKey.set(key, created);
         } else if (operation.op === 'update') {
           if (!current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
           const updated = entityAfterUpdate(request.uid, current, operation.values, request.now);
           transaction.set(entityRef, encodeEntity(updated));
           appliedVersions[key] = updated._version;
           appliedStateHashes[key] = hashEntityState(updated);
+          afterByKey.set(key, updated);
         } else {
           if (!current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
           transaction.delete(entityRef);
           appliedVersions[key] = null;
           appliedStateHashes[key] = null;
+          afterByKey.set(key, null);
         }
       }
+
+      const appliedScopeHashes = Object.fromEntries(snapshot.scopes.map((scope, index) => [
+        validationScopeKey(scope),
+        hashValidationScopeRecords(applyOperationsToScope(scopeRecords[index] ?? [], scope, afterByKey)),
+      ]));
 
       const updatedPlan: StoredChangePlan = {
         ...plan,
@@ -352,6 +451,8 @@ export class FirestoreRepository implements AuditableRepository {
         appliedAt: request.now,
         appliedVersions,
         appliedStateHashes,
+        appliedDependencyStateHashes,
+        appliedScopeHashes,
       };
       const affected = plan.operations.map(({ collection, id }) => ({ collection, id }));
       const result: PlanActionResult = {
@@ -379,6 +480,7 @@ export class FirestoreRepository implements AuditableRepository {
         uid: request.uid,
         planId: plan.id,
         requestId: request.requestId,
+        applyAuditId: auditId,
         auditId,
         idempotencyKeyHash: request.idempotencyKeyHash,
         createdAt: request.now,
@@ -397,6 +499,8 @@ export class FirestoreRepository implements AuditableRepository {
         request.now,
         false,
         appliedStateHashes,
+        request.executionId,
+        request.idempotencyKeyHash,
       );
 
       transaction.set(planRef, encodeServer(updatedPlan));
@@ -414,6 +518,7 @@ export class FirestoreRepository implements AuditableRepository {
         resourceId: plan.id,
         executionId: request.executionId,
         createdAt: request.now,
+        capabilityHash: request.approvalCapabilityHash,
         result: withoutRollback(result),
       }));
       return { result, replay: false };
@@ -429,7 +534,13 @@ export class FirestoreRepository implements AuditableRepository {
       const idempotencyRef = this.idempotencyRef(request.uid, 'rollback', request.idempotencyKeyHash);
       const idempotencySnapshot = await transaction.get(idempotencyRef);
       if (idempotencySnapshot.exists) {
-        return replayResult(idempotencySnapshot, request.uid, 'rollback', request.executionId);
+        return replayResult(
+          idempotencySnapshot,
+          request.uid,
+          'rollback',
+          request.executionId,
+          request.rollbackCapabilityHash,
+        );
       }
 
       const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(request.uid, request.executionId));
@@ -442,15 +553,22 @@ export class FirestoreRepository implements AuditableRepository {
       const snapshotRef = this.firestore.doc(SERVER_ONLY_PATHS.snapshot(request.uid, execution.planId));
       const auditId = randomUUID();
       const auditRef = this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${request.uid}_${auditId}`);
-      const [planSnapshot, beforeSnapshot, auditSnapshot] = await transaction.getAll(
+      const applyIdempotencyRef = this.idempotencyRef(
+        request.uid,
+        'apply',
+        execution.idempotencyKeyHash,
+      );
+      const [planSnapshot, beforeSnapshot, auditSnapshot, applyIdempotencySnapshot] = await transaction.getAll(
         planRef,
         snapshotRef,
         auditRef,
+        applyIdempotencyRef,
       );
-      if (!planSnapshot || !beforeSnapshot || !auditSnapshot) {
+      if (!planSnapshot || !beforeSnapshot || !auditSnapshot || !applyIdempotencySnapshot) {
         throw new DomainError('INTERNAL', 'Rollback transaction read is incomplete.');
       }
       if (!planSnapshot.exists || !beforeSnapshot.exists) throw new DomainError('NOT_FOUND', 'Execution not found.');
+      if (!applyIdempotencySnapshot.exists) throw new DomainError('INTERNAL', 'Original apply receipt is unavailable.');
       if (auditSnapshot.exists) throw new DomainError('CONFLICT', 'Audit identifier already exists.');
       const plan = decodeOwnedServerDocument<StoredChangePlan>(planSnapshot, request.uid);
       const snapshot = decodeOwnedServerDocument<ChangeSnapshot>(beforeSnapshot, request.uid);
@@ -459,18 +577,46 @@ export class FirestoreRepository implements AuditableRepository {
         throw new DomainError('APPROVAL_REPLAYED', 'Execution was already actioned.');
       }
 
-      const entityRefs = plan.operations.map(({ collection, id }) => this.entityRef(request.uid, collection, id));
-      const entitySnapshots = await transaction.getAll(...entityRefs);
-      const currentRecords = entitySnapshots.map((document) =>
+      const snapshotEntityRefs = snapshot.entries.map(({ collection, id }) =>
+        this.entityRef(request.uid, collection, id));
+      const entitySnapshots = await transaction.getAll(...snapshotEntityRefs);
+      const snapshotRecords = entitySnapshots.map((document) =>
         document.exists ? normalizeEntitySnapshot(request.uid, document) : null,
       );
-      assertAppliedStateCurrent(plan, currentRecords);
+      const scopeRecords: EntityRecord[][] = [];
+      for (const scope of snapshot.scopes) {
+        scopeRecords.push([...(await this.readValidationScope(request.uid, scope, transaction))]);
+      }
+      const preferencesSnapshot = snapshot.planningPreferencesHash
+        ? await transaction.get(this.firestore.doc(`users/${request.uid}`))
+        : null;
+      const currentByKey = new Map(snapshot.entries.map((entry, index) => [
+        refKey(entry.collection, entry.id),
+        snapshotRecords[index] ?? null,
+      ]));
+      const operationRecords = plan.operations.map((operation) =>
+        currentByKey.get(refKey(operation.collection, operation.id)) ?? null);
+      assertAppliedStateCurrent(plan, operationRecords);
+      assertAppliedDependenciesCurrent(plan, snapshot, currentByKey);
+      assertAppliedScopesCurrent(plan, snapshot, scopeRecords);
+      if (snapshot.planningPreferencesHash) {
+        const preferences = this.planningPreferencesFromData(
+          request.uid,
+          preferencesSnapshot?.exists ? decodeFirestore(preferencesSnapshot.data() ?? {}) : null,
+        );
+        if (hashPlanningPreferences(preferences) !== snapshot.planningPreferencesHash) {
+          throw new DomainError('STATE_CHANGED', 'Rollback refused because planning preferences changed after apply.');
+        }
+      }
 
       const restoredStateHashes: Record<string, string | null> = {};
-      for (let index = 0; index < snapshot.entries.length; index += 1) {
-        const entry = snapshot.entries[index];
-        const entityRef = entityRefs[index];
-        const current = currentRecords[index] ?? null;
+      const entryByKey = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
+      for (let index = 0; index < plan.operations.length; index += 1) {
+        const operation = plan.operations[index];
+        if (!operation) throw new DomainError('INTERNAL', 'Rollback operation mismatch.');
+        const entry = entryByKey.get(refKey(operation.collection, operation.id));
+        const entityRef = this.entityRef(request.uid, operation.collection, operation.id);
+        const current = operationRecords[index] ?? null;
         if (!entry || !entityRef) throw new DomainError('INTERNAL', 'Rollback snapshot mismatch.');
         const key = refKey(entry.collection, entry.id);
         if (!entry.existed) {
@@ -519,7 +665,9 @@ export class FirestoreRepository implements AuditableRepository {
       };
       const updatedExecution: StoredExecution = {
         ...execution,
+        applyAuditId: execution.applyAuditId ?? execution.auditId,
         auditId,
+        rollbackAuditId: auditId,
         status: 'rolled_back',
         verified: false,
         rollbackConsumedAt: request.now,
@@ -535,6 +683,8 @@ export class FirestoreRepository implements AuditableRepository {
         request.now,
         false,
         restoredStateHashes,
+        execution.id,
+        request.idempotencyKeyHash,
       );
 
       transaction.set(planRef, encodeServer(updatedPlan));
@@ -546,8 +696,12 @@ export class FirestoreRepository implements AuditableRepository {
         resourceId: request.executionId,
         executionId: request.executionId,
         createdAt: request.now,
+        capabilityHash: request.rollbackCapabilityHash,
         result: withoutRollback(result),
       }));
+      transaction.update(applyIdempotencyRef, {
+        result: encodeServer(withoutRollback(result)),
+      });
       return { result, replay: false };
     });
 
@@ -617,6 +771,14 @@ export class FirestoreRepository implements AuditableRepository {
         result: encodeServer(withoutReplay(verified)),
       });
       batch.update(idempotencyRef, { result: encodeServer(withoutRollback(verified)) });
+      if (result.status === 'rolled_back') {
+        const originalApplyRef = this.idempotencyRef(
+          execution.uid,
+          'apply',
+          execution.idempotencyKeyHash,
+        );
+        batch.update(originalApplyRef, { result: encodeServer(withoutRollback(verified)) });
+      }
       batch.update(auditRef, { 'metadata.verified': true });
       await batch.commit();
       return verified;
@@ -648,6 +810,42 @@ export class FirestoreRepository implements AuditableRepository {
         throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state changed before verification.');
       }
     }
+  }
+
+  private async readValidationScope(
+    uid: string,
+    scope: ValidationScopeQuery,
+    transaction?: Transaction,
+  ): Promise<readonly EntityRecord[]> {
+    assertUid(uid);
+    if (!Number.isInteger(scope.maxItems) || scope.maxItems < 1 || scope.maxItems > 2_000) {
+      throw new DomainError('LIMIT_EXCEEDED', 'Validation scope bound is invalid.');
+    }
+    let query: Query<DocumentData> = this.firestore.collection(`users/${uid}/${scope.collection}`);
+    if (scope.field) {
+      if (!scope.value) throw new DomainError('INVALID_ARGUMENT', 'Validation scope value is missing.');
+      assertEntityId(scope.value);
+      query = query.where(scope.field, '==', scope.value);
+    } else if (scope.value) {
+      throw new DomainError('INVALID_ARGUMENT', 'Validation scope field is missing.');
+    }
+    if (scope.from || scope.to) {
+      if (!scope.from || !scope.to || Date.parse(scope.from) >= Date.parse(scope.to)) {
+        throw new DomainError('INVALID_ARGUMENT', 'Validation scope interval is invalid.');
+      }
+      query = query
+        .where('startTime', '<', Timestamp.fromDate(new Date(scope.to)))
+        .where('endTime', '>', Timestamp.fromDate(new Date(scope.from)));
+    }
+    query = query.limit(scope.maxItems + 1);
+    const snapshot = transaction ? await transaction.get(query) : await query.get();
+    if (snapshot.size > scope.maxItems) {
+      throw new DomainError('LIMIT_EXCEEDED', 'Validation scope exceeds its safe bound.');
+    }
+    return snapshot.docs
+      .map((document) => normalizeEntitySnapshot(uid, document))
+      .filter((record) => !isSoftDeleted(record) && matchesValidationScope(record, scope))
+      .sort((a, b) => a.id.localeCompare(b.id));
   }
 
   private entityRef(
@@ -744,14 +942,11 @@ function validateRollback(request: RollbackExecutionRequest, execution: StoredEx
 
 function assertSnapshotCurrent(
   snapshot: ChangeSnapshot,
-  operations: StoredChangePlan['operations'],
   currentRecords: readonly (EntityRecord | null)[],
 ): void {
-  const byReference = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
-  for (let index = 0; index < operations.length; index += 1) {
-    const operation = operations[index];
-    if (!operation) throw new DomainError('INTERNAL', 'Plan operation mismatch.');
-    const entry = byReference.get(refKey(operation.collection, operation.id));
+  for (let index = 0; index < snapshot.entries.length; index += 1) {
+    const entry = snapshot.entries[index];
+    if (!entry) throw new DomainError('INTERNAL', 'Snapshot entry mismatch.');
     const current = currentRecords[index] ?? null;
     if (
       !entry ||
@@ -760,6 +955,24 @@ function assertSnapshotCurrent(
       entry.contentHash !== (current ? hashEntityState(current) : null)
     ) {
       throw new DomainError('STATE_CHANGED', 'The preview is stale.');
+    }
+  }
+}
+
+function assertValidationScopesCurrent(
+  snapshot: ChangeSnapshot,
+  scopeRecords: readonly (readonly EntityRecord[])[],
+): void {
+  for (let index = 0; index < snapshot.scopes.length; index += 1) {
+    const scope = snapshot.scopes[index];
+    const records = scopeRecords[index];
+    if (
+      !scope
+      || !records
+      || records.length !== scope.itemCount
+      || hashValidationScopeRecords(records) !== scope.stateHash
+    ) {
+      throw new DomainError('STATE_CHANGED', 'The preview is stale because its validation scope changed.');
     }
   }
 }
@@ -782,15 +995,75 @@ function assertAppliedStateCurrent(
   }
 }
 
+function assertAppliedDependenciesCurrent(
+  plan: StoredChangePlan,
+  snapshot: ChangeSnapshot,
+  currentByKey: ReadonlyMap<string, EntityRecord | null>,
+): void {
+  const operationKeys = new Set(plan.operations.map((operation) => refKey(operation.collection, operation.id)));
+  for (const entry of snapshot.entries) {
+    const key = refKey(entry.collection, entry.id);
+    if (operationKeys.has(key)) continue;
+    const current = currentByKey.get(key) ?? null;
+    if ((current ? hashEntityState(current) : null) !== plan.appliedDependencyStateHashes?.[key]) {
+      throw new DomainError('STATE_CHANGED', 'Rollback refused because referenced state changed after apply.');
+    }
+  }
+}
+
+function assertAppliedScopesCurrent(
+  plan: StoredChangePlan,
+  snapshot: ChangeSnapshot,
+  scopeRecords: readonly (readonly EntityRecord[])[],
+): void {
+  for (let index = 0; index < snapshot.scopes.length; index += 1) {
+    const scope = snapshot.scopes[index];
+    const records = scopeRecords[index];
+    if (
+      !scope
+      || !records
+      || hashValidationScopeRecords(records) !== plan.appliedScopeHashes?.[validationScopeKey(scope)]
+    ) {
+      throw new DomainError('STATE_CHANGED', 'Rollback refused because dependent state changed after apply.');
+    }
+  }
+}
+
+function applyOperationsToScope(
+  before: readonly EntityRecord[],
+  scope: ValidationScopeQuery,
+  afterByKey: ReadonlyMap<string, EntityRecord | null>,
+): readonly EntityRecord[] {
+  const records = new Map(before.map((record) => [record.id, record]));
+  for (const [key, after] of afterByKey) {
+    const separator = key.indexOf('/');
+    const collection = key.slice(0, separator);
+    const id = key.slice(separator + 1);
+    if (collection !== scope.collection || !id) continue;
+    records.delete(id);
+    if (after && !isSoftDeleted(after) && matchesValidationScope(after, scope)) records.set(id, after);
+  }
+  const output = [...records.values()].sort((a, b) => a.id.localeCompare(b.id));
+  if (output.length > scope.maxItems) {
+    throw new DomainError('LIMIT_EXCEEDED', 'Applied validation scope exceeds its safe bound.');
+  }
+  return output;
+}
+
 function replayResult(
   snapshot: DocumentSnapshot,
   uid: string,
   action: 'apply' | 'rollback',
   resourceId: string,
+  capabilityHash: string,
 ): TransactionResult {
   const data = decodeOwnedServerDocument<Record<string, unknown>>(snapshot, uid);
   if (data.action !== action || data.resourceId !== resourceId) {
     throw new DomainError('CONFLICT', 'Idempotency key was already used for another operation.');
+  }
+  if (typeof data.capabilityHash !== 'string'
+    || !capabilityHashMatches(capabilityHash, data.capabilityHash)) {
+    throw new DomainError('APPROVAL_REQUIRED', 'Idempotent replay capability is invalid.');
   }
   const result = asRecord(data.result);
   if (!result) throw new DomainError('INTERNAL', 'Idempotency receipt is invalid.');
@@ -842,6 +1115,8 @@ function actionAudit(
   timestamp: string,
   verified: boolean,
   resultStateHashes: Readonly<Record<string, string | null>>,
+  executionId: string,
+  idempotencyKeyHash: string,
 ): AuditEvent {
   return {
     id,
@@ -859,6 +1134,9 @@ function actionAudit(
       changesetHash: plan.hash,
       baseStateHash: plan.baseStateHash,
       resultStateHash: hashResultState(resultStateHashes),
+      executionId,
+      idempotencyKeyHash,
+      rollbackStatus: action === 'apply' ? 'available' : 'consumed',
       verified,
       ...(plan.orchestration
         ? {
@@ -982,6 +1260,18 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
   // overlaps [from,to), including commitments that started before the range.
   if (filter.from && end <= Date.parse(filter.from)) return false;
   if (filter.to && start >= Date.parse(filter.to)) return false;
+  return true;
+}
+
+function matchesValidationScope(record: EntityRecord, scope: ValidationScopeQuery): boolean {
+  if (scope.field && record[scope.field] !== scope.value) return false;
+  if (scope.from || scope.to) {
+    const start = typeof record.startTime === 'string' ? Date.parse(record.startTime) : Number.NaN;
+    const end = typeof record.endTime === 'string' ? Date.parse(record.endTime) : Number.NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return false;
+    if (scope.from && end <= Date.parse(scope.from)) return false;
+    if (scope.to && start >= Date.parse(scope.to)) return false;
+  }
   return true;
 }
 

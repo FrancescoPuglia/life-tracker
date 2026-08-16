@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Temporal } from '@js-temporal/polyfill';
 import { DomainError } from '../errors';
+import { hashPlanningPreferences, hashValidationScopeRecords } from '../integrity';
 import type { Repository } from '../repository';
 import type {
   ReplaceDayScheduleArgs,
@@ -16,6 +17,7 @@ import type {
   ReadFilter,
   ScalarPatchValue,
   UserPlanningPreferences,
+  PreviewValidationRequirements,
 } from '../types';
 import type { WpiBlock, WpiDraft } from '../scheduling/wpi-adapter';
 import { validateWithWeeklyPlanningIntelligence } from '../scheduling/wpi-adapter';
@@ -172,6 +174,7 @@ export class SchedulingService {
         reason: args.reason,
         assumptions: preferenceAssumptions(preferences),
         expectedImpact: [`${args.action} TimeBlock '${args.block.title}' within ${args.timezone}.`],
+        validation: scheduleValidation(existing, range.from, range.to, preferences),
       },
     );
   }
@@ -259,6 +262,7 @@ export class SchedulingService {
         reason,
         assumptions: preferenceAssumptions(preferences),
         expectedImpact: [`Replace ${tool === 'replace_day_schedule' ? 'one day' : 'one week'} within ${timezone}.`],
+        validation: scheduleValidation(existing, range.from, range.to, preferences),
       },
     );
   }
@@ -303,6 +307,27 @@ export class SchedulingService {
     } while (cursor);
     return output;
   }
+}
+
+function scheduleValidation(
+  existing: readonly EntityRecord[],
+  from: string,
+  to: string,
+  preferences: UserPlanningPreferences,
+): PreviewValidationRequirements {
+  return {
+    refs: [],
+    scopes: [{
+      collection: 'timeBlocks',
+      field: null,
+      value: null,
+      from,
+      to,
+      maxItems: MAX_EXISTING_BLOCKS,
+      expectedStateHash: hashValidationScopeRecords(existing),
+    }],
+    planningPreferencesHash: hashPlanningPreferences(preferences),
+  };
 }
 
 function parseDate(value: string): Temporal.PlainDate {

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root = resolve(new URL('..', import.meta.url).pathname);
 const includeOutput = process.argv.includes('--include-output');
@@ -95,6 +96,8 @@ validateRootDependencies();
 
 validateConfiguredBackend();
 
+scanTrackedSecrets();
+
 if (includeOutput) {
   const outputPath = join(root, 'out');
   if (!existsSync(outputPath)) {
@@ -156,6 +159,69 @@ function validateRootDependencies() {
       file: 'package.json',
       label: 'OpenAI SDK belongs in the backend Functions package, not the static frontend package',
     });
+  }
+}
+
+/**
+ * Scan only Git-tracked files. This deliberately never opens ignored local
+ * secret files such as .env.local. Patterns are intentionally high confidence;
+ * normal Firebase Web configuration is public product configuration and is not
+ * treated as a credential.
+ */
+function scanTrackedSecrets() {
+  let trackedOutput = '';
+  try {
+    trackedOutput = execFileSync('git', ['ls-files', '-z'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+  } catch (error) {
+    // Some managed sandboxes deny the spawn after Git has returned successful
+    // stdout. Preserve that read-only result instead of weakening the scan.
+    if (typeof error?.stdout !== 'string' || !error.stdout) throw error;
+    trackedOutput = error.stdout;
+  }
+  const tracked = trackedOutput.split('\0').filter(Boolean);
+  const secretPatterns = [
+    {
+      label: 'OpenAI API key-shaped credential in tracked content',
+      pattern: /\bsk-(?:proj-)?(?!(?:YOUR_KEY_HERE|test-|fake-|example-))[A-Za-z0-9_-]{20,}\b/i,
+    },
+    {
+      label: 'private-key material in tracked content',
+      pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+    },
+    {
+      label: 'Firebase/Google service-account credential in tracked content',
+      pattern: /["']type["']\s*:\s*["']service_account["']/,
+    },
+    {
+      label: 'literal bearer JWT in tracked content',
+      pattern: /\bBearer\s+eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+    },
+    {
+      label: 'GitHub token-shaped credential in tracked content',
+      pattern: /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
+    },
+    {
+      label: 'Slack token-shaped credential in tracked content',
+      pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/,
+    },
+    {
+      label: 'AWS access-key-shaped credential in tracked content',
+      pattern: /\bAKIA[0-9A-Z]{16}\b/,
+    },
+  ];
+
+  for (const trackedPath of tracked) {
+    const absolute = join(root, trackedPath);
+    if (!existsSync(absolute) || statSync(absolute).size > 5_000_000) continue;
+    const contents = readFileSync(absolute);
+    if (contents.includes(0)) continue;
+    const text = contents.toString('utf8');
+    for (const { label, pattern } of secretPatterns) {
+      if (pattern.test(text)) findings.push({ file: trackedPath, label });
+    }
   }
 }
 

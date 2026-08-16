@@ -3,8 +3,10 @@ import { getFirestore, Timestamp, type Firestore } from 'firebase-admin/firestor
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CapabilityIssuer } from '../../src/domain/capabilities';
 import { FirestoreRepository } from '../../src/domain/firestore-repository';
+import { createLifeTrackerDomain } from '../../src/domain/factory';
 import { ChangePlanService } from '../../src/domain/services/change-plan-service';
 import { FirestoreRateLimiter } from '../../src/http/rate-limiter';
+import type { PreviewGoalArchitectureArgs, ScheduleBlockInput } from '../../src/domain/schemas';
 import type { AuthContext } from '../../src/domain/types';
 
 const PROJECT_ID = 'demo-life-tracker-functions';
@@ -57,11 +59,14 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     const approval = await firestore.doc(`aiApprovals/${uid}_${preview.id}`).get();
     expect(approval.data()?.status).toBe('consumed');
     expect(JSON.stringify(approval.data())).not.toContain(preview.approval.capability);
-    const audit = await firestore.doc(`aiAuditLogs/${uid}_execution-first`).get();
+    const audit = await firestore.doc(`aiAuditLogs/${uid}_${first.executionId}`).get();
     expect(audit.data()?.metadata).toMatchObject({
       changesetHash: preview.hash,
       baseStateHash: preview.baseStateHash,
       resultStateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      executionId: first.executionId,
+      idempotencyKeyHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      rollbackStatus: 'available',
       verified: true,
     });
   }, 30_000);
@@ -155,6 +160,224 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     })).rejects.toMatchObject({ code: 'APPROVAL_REPLAYED' });
     expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?._version).toBe(1);
   });
+
+  it('binds idempotent apply/rollback replays to the exact capability and current execution state', async () => {
+    const uid = uniqueUid('capability-replay');
+    await seedSchedule(firestore, uid);
+    const { service } = serviceFor(firestore, ['plan-capability', 'execution-capability', 'execution-replay']);
+    const preview = await previewTitle(service, uid, 'Capability title');
+    const applyInput = {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-capability-apply-001',
+    };
+    const applied = await service.applyPlan(context(uid, 'capability-apply'), applyInput);
+    await expect(service.applyPlan(context(uid, 'capability-wrong-apply'), {
+      ...applyInput,
+      approvalCapability: 'x'.repeat(43),
+    })).rejects.toMatchObject({ code: 'APPROVAL_REQUIRED' });
+
+    const rollbackInput = {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'emulator-capability-rollback-01',
+    };
+    await service.rollbackExecution(context(uid, 'capability-rollback'), rollbackInput);
+    await expect(service.rollbackExecution(context(uid, 'capability-wrong-rollback'), {
+      ...rollbackInput,
+      rollbackCapability: 'y'.repeat(43),
+    })).rejects.toMatchObject({ code: 'APPROVAL_REQUIRED' });
+
+    const applyReplay = await service.applyPlan(context(uid, 'apply-after-rollback'), applyInput);
+    expect(applyReplay).toMatchObject({
+      executionId: applied.executionId,
+      status: 'rolled_back',
+      idempotentReplay: true,
+      receipt: { status: 'rolled_back', rollbackAvailable: false },
+    });
+    expect(applyReplay.rollback).toBeUndefined();
+  }, 30_000);
+
+  it('rejects a phantom schedule block with zero partial writes in a multi-entity replacement', async () => {
+    const uid = uniqueUid('schedule-phantom');
+    await seedHierarchy(firestore, uid);
+    const { domain } = domainFor(firestore, ['plan-schedule-phantom', 'execution-schedule-phantom']);
+    const preview = await domain.scheduling.replaceDaySchedule(context(uid, 'schedule-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [scheduleBlock({ id: 'ai-new-block' })],
+      reason: 'Atomic schedule replacement with scope guard.',
+    });
+    expect(preview.operations).toEqual(expect.arrayContaining([
+      { action: 'delete', entityType: 'timeBlocks', entityId: 'block-1' },
+      { action: 'create', entityType: 'timeBlocks', entityId: 'ai-new-block' },
+    ]));
+    const createdAt = Timestamp.fromDate(new Date('2026-08-17T08:05:00.000Z'));
+    await firestore.doc(`users/${uid}/timeBlocks/human-phantom`).set({
+      id: 'human-phantom',
+      userId: uid,
+      domainId: 'domain-1',
+      title: 'New locked commitment',
+      startTime: Timestamp.fromDate(new Date('2026-08-17T08:30:00.000Z')),
+      endTime: Timestamp.fromDate(new Date('2026-08-17T09:30:00.000Z')),
+      status: 'planned',
+      type: 'meeting',
+      locked: true,
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    await expect(domain.changePlans.applyPlan(context(uid, 'schedule-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-schedule-phantom-key',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).exists).toBe(true);
+    expect((await firestore.doc(`users/${uid}/timeBlocks/ai-new-block`).get()).exists).toBe(false);
+    expect((await firestore.doc(`users/${uid}/timeBlocks/human-phantom`).get()).exists).toBe(true);
+  }, 30_000);
+
+  it('guards Goal Architect duplicate scopes and refuses rollback over a newer dependent child', async () => {
+    const uid = uniqueUid('goal-scope');
+    await seedDomain(firestore, uid);
+    const { domain } = domainFor(firestore, [
+      'plan-goal-a',
+      'plan-goal-b',
+      'execution-goal-a',
+      'execution-goal-b',
+    ]);
+    const first = await domain.goalArchitect.preview(context(uid, 'goal-preview-a'), goalDraft());
+    const second = await domain.goalArchitect.preview(context(uid, 'goal-preview-b'), goalDraft({
+      goalId: 'goal-copy',
+      projectId: 'project-copy',
+      taskId: 'task-copy',
+      keyResultIds: ['kr-copy-1', 'kr-copy-2'],
+    }));
+    const applied = await domain.changePlans.applyPlan(context(uid, 'goal-apply-a'), {
+      planId: first.id,
+      approvalCapability: first.approval.capability,
+      idempotencyKey: 'emulator-goal-first-key-001',
+    });
+    await expect(domain.changePlans.applyPlan(context(uid, 'goal-apply-b'), {
+      planId: second.id,
+      approvalCapability: second.approval.capability,
+      idempotencyKey: 'emulator-goal-second-key-01',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/goals/goal-copy`).get()).exists).toBe(false);
+
+    const timestamp = Timestamp.fromDate(new Date('2026-08-17T08:20:00.000Z'));
+    await firestore.doc(`users/${uid}/tasks/human-dependent`).set({
+      id: 'human-dependent',
+      userId: uid,
+      title: 'New human child',
+      projectId: 'project-new',
+      goalId: 'goal-new',
+      domainId: 'domain-1',
+      status: 'pending',
+      priority: 'medium',
+      estimatedMinutes: 30,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await expect(domain.changePlans.rollbackExecution(context(uid, 'goal-rollback'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'emulator-dependent-rollback-01',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/projects/project-new`).get()).exists).toBe(true);
+    expect((await firestore.doc(`users/${uid}/tasks/human-dependent`).get()).exists).toBe(true);
+  }, 30_000);
+
+  it('atomically applies and rolls back a complete Goal Architect hierarchy', async () => {
+    const uid = uniqueUid('goal-rollback-success');
+    await seedDomain(firestore, uid);
+    const { domain } = domainFor(firestore, ['plan-goal-rollback', 'execution-goal-rollback']);
+    const preview = await domain.goalArchitect.preview(context(uid, 'goal-rollback-preview'), goalDraft());
+    const applied = await domain.changePlans.applyPlan(context(uid, 'goal-rollback-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-goal-rollback-apply',
+    });
+    for (const path of [
+      'goals/goal-new',
+      'projects/project-new',
+      'tasks/task-new',
+      'keyResults/kr-new-1',
+      'keyResults/kr-new-2',
+    ]) {
+      expect((await firestore.doc(`users/${uid}/${path}`).get()).exists).toBe(true);
+    }
+    const rolledBack = await domain.changePlans.rollbackExecution(context(uid, 'goal-rollback-action'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'emulator-goal-rollback-key-01',
+    });
+    expect(rolledBack).toMatchObject({ status: 'rolled_back', verified: true });
+    for (const path of [
+      'goals/goal-new',
+      'projects/project-new',
+      'tasks/task-new',
+      'keyResults/kr-new-1',
+      'keyResults/kr-new-2',
+    ]) {
+      expect((await firestore.doc(`users/${uid}/${path}`).get()).exists).toBe(false);
+    }
+  }, 30_000);
+
+  it('aborts every write when a multi-entity schedule transaction hits an audit conflict', async () => {
+    const uid = uniqueUid('schedule-atomic-failure');
+    await seedHierarchy(firestore, uid);
+    const { domain } = domainFor(firestore, ['plan-schedule-failure', 'execution-schedule-failure']);
+    const preview = await domain.scheduling.replaceDaySchedule(context(uid, 'schedule-failure-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [scheduleBlock({ id: 'replacement-after-failure' })],
+      reason: 'Prove a failed atomic replacement leaves the calendar intact.',
+    });
+    await firestore.doc(`aiAuditLogs/${uid}_execution-schedule-failure`).set({
+      uid,
+      actorUid: uid,
+      sentinel: true,
+    });
+    await expect(domain.changePlans.applyPlan(context(uid, 'schedule-failure-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-schedule-failure-key',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).exists).toBe(true);
+    expect((await firestore.doc(`users/${uid}/timeBlocks/replacement-after-failure`).get()).exists).toBe(false);
+    expect((await firestore.doc(`aiApprovals/${uid}_${preview.id}`).get()).data()?.status).toBe('pending');
+  }, 30_000);
+
+  it('rejects a schedule after persisted planning preferences change', async () => {
+    const uid = uniqueUid('schedule-preference-drift');
+    await seedHierarchy(firestore, uid);
+    const { domain } = domainFor(firestore, ['plan-preference-drift', 'execution-preference-drift']);
+    const preview = await domain.scheduling.replaceDaySchedule(context(uid, 'preference-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [scheduleBlock({ id: 'preference-guarded-block' })],
+      reason: 'Bind the preview to current planning constraints.',
+    });
+    await firestore.doc(`users/${uid}`).set({
+      uid,
+      preferences: {
+        timezone: 'Europe/Rome',
+        workingHours: { start: '08:00', end: '18:00' },
+        maxDailyPlannedMinutes: 480,
+        maxWeeklyPlannedMinutes: 2_400,
+        minBufferMinutes: 30,
+        maxConsecutiveHighEnergyBlocks: 2,
+      },
+    });
+    await expect(domain.changePlans.applyPlan(context(uid, 'preference-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-preference-drift-key',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).exists).toBe(true);
+    expect((await firestore.doc(`users/${uid}/timeBlocks/preference-guarded-block`).get()).exists).toBe(false);
+  }, 30_000);
 
   it('rolls back once, verifies restoration, denies wrong-user rollback, and refuses newer edits', async () => {
     const owner = uniqueUid('rollback-owner');
@@ -320,6 +543,17 @@ function serviceFor(firestore: Firestore, ids: readonly string[]) {
   return { repository, service };
 }
 
+function domainFor(firestore: Firestore, ids: readonly string[]) {
+  let index = 0;
+  const repository = new FirestoreRepository(firestore);
+  const domain = createLifeTrackerDomain(repository, {
+    clock: () => new Date(START),
+    idFactory: () => ids[index++] ?? `fallback-domain-${index}`,
+    capabilityIssuer: new CapabilityIssuer(TEST_CAPABILITY_SECRET),
+  });
+  return { repository, domain };
+}
+
 async function previewTitle(service: ChangePlanService, uid: string, title: string) {
   return service.previewChanges(context(uid, `preview-${title}`), {
     operations: [{
@@ -357,6 +591,109 @@ async function seedSchedule(firestore: Firestore, uid: string): Promise<void> {
       updatedAt: createdAt,
     }),
   ]);
+}
+
+async function seedDomain(firestore: Firestore, uid: string): Promise<void> {
+  const createdAt = Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z'));
+  await firestore.doc(`users/${uid}/domains/domain-1`).set({
+    id: 'domain-1',
+    userId: uid,
+    name: 'Work',
+    color: '#336699',
+    icon: 'briefcase',
+    createdAt,
+    updatedAt: createdAt,
+  });
+}
+
+async function seedHierarchy(firestore: Firestore, uid: string): Promise<void> {
+  await seedSchedule(firestore, uid);
+  const createdAt = Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z'));
+  await Promise.all([
+    firestore.doc(`users/${uid}/goals/goal-1`).set({
+      id: 'goal-1', userId: uid, title: 'Outcome', domainId: 'domain-1', status: 'active',
+      createdAt, updatedAt: createdAt,
+    }),
+    firestore.doc(`users/${uid}/projects/project-1`).set({
+      id: 'project-1', userId: uid, name: 'Result', goalId: 'goal-1', domainId: 'domain-1', status: 'active',
+      createdAt, updatedAt: createdAt,
+    }),
+    firestore.doc(`users/${uid}/tasks/task-1`).set({
+      id: 'task-1', userId: uid, title: 'Action', projectId: 'project-1', goalId: 'goal-1', domainId: 'domain-1', status: 'pending',
+      createdAt, updatedAt: createdAt,
+    }),
+  ]);
+}
+
+function scheduleBlock(overrides: Partial<ScheduleBlockInput> = {}): ScheduleBlockInput {
+  return {
+    id: 'ai-new-block',
+    title: 'Guarded deep work',
+    start: '2026-08-17T11:00:00.000Z',
+    end: '2026-08-17T12:00:00.000Z',
+    type: 'deep',
+    status: 'planned',
+    taskId: 'task-1',
+    projectId: 'project-1',
+    goalId: 'goal-1',
+    domainId: 'domain-1',
+    notes: null,
+    activityType: 'deep_work',
+    energyLevel: 'high',
+    flexibility: 'flexible',
+    ...overrides,
+  };
+}
+
+function goalDraft(ids: {
+  goalId?: string;
+  projectId?: string;
+  taskId?: string;
+  keyResultIds?: readonly [string, string];
+} = {}): PreviewGoalArchitectureArgs {
+  const goalId = ids.goalId ?? 'goal-new';
+  const projectId = ids.projectId ?? 'project-new';
+  return {
+    domainId: 'domain-1',
+    reason: 'Create an emulator-tested deterministic hierarchy.',
+    goal: {
+      id: goalId,
+      title: 'Ship the verified release',
+      description: null,
+      targetHours: 100,
+      dueDateISO: '2026-12-31T00:00:00.000Z',
+      priority: 'high',
+      timeAllocationTarget: 5,
+      category: 'important_not_urgent',
+      complexity: 'moderate',
+    },
+    projects: [{
+      id: projectId,
+      title: 'Release candidate ready',
+      description: null,
+      targetHours: 50,
+      dueDateISO: null,
+      priority: 'high',
+    }],
+    tasks: [{
+      id: ids.taskId ?? 'task-new',
+      title: 'Run the release checklist',
+      description: null,
+      estimatedHours: 2,
+      dueDateISO: null,
+      priority: 'high',
+      parentProjectId: projectId,
+    }],
+    keyResults: (ids.keyResultIds ?? ['kr-new-1', 'kr-new-2']).map((id, index) => ({
+      id,
+      title: `Verified evidence ${index + 1}`,
+      description: null,
+      targetValue: 100,
+      currentValue: 0,
+      unit: 'percent' as const,
+      customUnit: null,
+    })),
+  };
 }
 
 function context(uid: string, requestId: string): AuthContext {

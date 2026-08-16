@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { DomainError } from '../errors';
+import { hashValidationScopeRecords } from '../integrity';
 import {
   normalizeGoalArchitectTitle,
   validateWithGoalArchitect,
@@ -13,6 +14,7 @@ import type {
   EntityCollection,
   EntityRecord,
   PublicChangePlan,
+  PreviewValidationRequirements,
   ReadFilter,
   WriteValue,
 } from '../types';
@@ -56,6 +58,7 @@ export class GoalArchitectService {
         expectedImpact: [
           `Create one Goal, ${args.projects.length} Project(s), ${args.tasks.length} Task(s), and ${args.keyResults.length} Key Result(s) as one validated hierarchy.`,
         ],
+        validation: goalArchitectValidation(existing, args.domainId),
       },
     );
   }
@@ -122,6 +125,7 @@ export class GoalArchitectService {
       {
         reason: args.reason,
         expectedImpact: [`${args.action === 'create' ? 'Create' : 'Update'} Task '${args.title}' in its validated Goal Architect hierarchy.`],
+        validation: goalArchitectValidation({ tasks: existing }, args.domainId),
       },
     );
   }
@@ -171,6 +175,31 @@ export class GoalArchitectService {
     } while (cursor);
     return output;
   }
+}
+
+function goalArchitectValidation(
+  existing: Partial<Readonly<Record<'goals' | 'projects' | 'tasks' | 'keyResults', readonly EntityRecord[]>>>,
+  domainId: string,
+): PreviewValidationRequirements {
+  const collectionMap = {
+    goals: 'goals',
+    projects: 'projects',
+    tasks: 'tasks',
+    keyResults: 'keyResults',
+  } as const;
+  return {
+    refs: [],
+    scopes: Object.entries(existing).map(([key, records]) => ({
+      collection: collectionMap[key as keyof typeof collectionMap],
+      field: 'domainId' as const,
+      value: domainId,
+      from: null,
+      to: null,
+      maxItems: 2_000,
+      expectedStateHash: hashValidationScopeRecords(records ?? []),
+    })),
+    planningPreferencesHash: null,
+  };
 }
 
 function buildDraft(args: PreviewGoalArchitectureArgs): GoalArchitectureDraftLike {

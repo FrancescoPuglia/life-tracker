@@ -53,6 +53,42 @@ describe('ChangePlanService authorization and lifecycle', () => {
       .rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
+  it('binds every idempotent replay to its capability and returns authoritative rollback state', async () => {
+    const harness = createHarness(['plan-capability', 'execution-capability', 'execution-replay']);
+    const preview = await updateTitlePreview(harness.service, UID, 'Capability-bound title');
+    const applyInput = {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'capability-bound-apply-key-01',
+    };
+    const applied = await harness.service.applyPlan(context(UID, 'apply-capability'), applyInput);
+
+    await expect(harness.service.applyPlan(context(UID, 'apply-wrong-capability'), {
+      ...applyInput,
+      approvalCapability: 'x'.repeat(43),
+    })).rejects.toMatchObject({ code: 'APPROVAL_REQUIRED' });
+
+    const rollbackInput = {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'capability-bound-rollback-01',
+    };
+    await harness.service.rollbackExecution(context(UID, 'rollback-capability'), rollbackInput);
+    await expect(harness.service.rollbackExecution(context(UID, 'rollback-wrong-capability'), {
+      ...rollbackInput,
+      rollbackCapability: 'y'.repeat(43),
+    })).rejects.toMatchObject({ code: 'APPROVAL_REQUIRED' });
+
+    const applyReplay = await harness.service.applyPlan(context(UID, 'apply-after-rollback'), applyInput);
+    expect(applyReplay).toMatchObject({
+      executionId: applied.executionId,
+      status: 'rolled_back',
+      idempotentReplay: true,
+      receipt: { status: 'rolled_back', rollbackAvailable: false },
+    });
+    expect(applyReplay.rollback).toBeUndefined();
+  });
+
   it('binds approval to owner, exact plan, capability, and expiry', async () => {
     const harness = createHarness(['plan-owner', 'plan-other', 'execution-invalid']);
     seedUser(harness.repository, OTHER_UID);

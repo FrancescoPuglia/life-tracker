@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { capabilityHashMatches } from './capabilities';
 import { DomainError } from './errors';
-import { hashEntityState, hashResultState, verifyStoredPlan } from './integrity';
+import {
+  hashEntityState,
+  hashPlanningPreferences,
+  hashResultState,
+  hashValidationScopeRecords,
+  validationScopeKey,
+  verifyStoredPlan,
+} from './integrity';
 import type {
   ApplyPlanRequest,
   AuditableRepository,
@@ -15,12 +22,14 @@ import type {
   EntityCollection,
   EntityRecord,
   EntityReference,
+  PreviewValidationRequirements,
   PlanActionResult,
   ReadPage,
   ReadPageRequest,
   StoredChangePlan,
   StoredExecution,
   UserPlanningPreferences,
+  ValidationScopeQuery,
 } from './types';
 import { ENTITY_COLLECTIONS } from './types';
 
@@ -30,6 +39,7 @@ type UserStore = Map<EntityCollection, CollectionStore>;
 interface IdempotencyEntry {
   readonly action: 'apply' | 'rollback';
   readonly planId: string;
+  readonly capabilityHash: string;
   readonly result: PlanActionResult;
 }
 
@@ -121,6 +131,11 @@ export class InMemoryRepository implements AuditableRepository {
     planId: string,
     refs: readonly EntityReference[],
     createdAt: string,
+    validation: PreviewValidationRequirements = {
+      refs: [],
+      scopes: [],
+      planningPreferencesHash: null,
+    },
   ): Promise<ChangeSnapshot> {
     const entries = refs.map(({ collection, id }) => {
       const record = this.collection(uid, collection).get(id);
@@ -133,7 +148,31 @@ export class InMemoryRepository implements AuditableRepository {
         value: record ? clone(record) : null,
       };
     });
-    return { id: planId, uid, planId, createdAt, entries };
+    const scopes = validation.scopes.map((scope) => {
+      const records = validationScopeRecords(this.user(uid), scope);
+      const stateHash = hashValidationScopeRecords(records);
+      if (stateHash !== scope.expectedStateHash) {
+        throw new DomainError('STATE_CHANGED', 'Validation scope changed while creating the preview.');
+      }
+      return {
+        collection: scope.collection,
+        field: scope.field,
+        value: scope.value,
+        from: scope.from,
+        to: scope.to,
+        maxItems: scope.maxItems,
+        stateHash,
+        itemCount: records.length,
+      };
+    });
+    const planningPreferencesHash = validation.planningPreferencesHash;
+    if (
+      planningPreferencesHash
+      && hashPlanningPreferences(this.planningPreferences.get(uid) ?? DEFAULT_PLANNING_PREFERENCES) !== planningPreferencesHash
+    ) {
+      throw new DomainError('STATE_CHANGED', 'Planning preferences changed while creating the preview.');
+    }
+    return { id: planId, uid, planId, createdAt, entries, scopes, planningPreferencesHash };
   }
 
   async savePreview(request: SavePreviewRequest): Promise<StoredChangePlan> {
@@ -172,7 +211,10 @@ export class InMemoryRepository implements AuditableRepository {
     return this.withTransaction(() => {
       const idempotencyPath = `${request.uid}:apply:${request.idempotencyKeyHash}`;
       const replay = this.idempotency.get(idempotencyPath);
-      if (replay) return { ...clone(replay.result), idempotentReplay: true };
+      if (replay) {
+        assertIdempotencyCapability(replay, request.approvalCapabilityHash);
+        return { ...clone(replay.result), idempotentReplay: true };
+      }
 
       const key = planKey(request.uid, request.planId);
       const plan = this.plans.get(key);
@@ -196,10 +238,20 @@ export class InMemoryRepository implements AuditableRepository {
       if (Date.parse(approval.expiresAt) <= Date.parse(request.now)) throw new DomainError('EXPIRED', 'Approval expired.');
       if (plan.conflicts.length) throw new DomainError('CONFLICT', 'Plan has unresolved conflicts.');
       this.assertSnapshotStillCurrent(request.uid, snapshot);
+      this.assertValidationGuardsStillCurrent(request.uid, snapshot);
 
       const staged = cloneUserStore(this.user(request.uid));
       const appliedVersions: Record<string, number | null> = {};
       const appliedStateHashes: Record<string, string | null> = {};
+      const operationKeys = new Set(plan.operations.map((operation) => refKey(operation.collection, operation.id)));
+      const appliedDependencyStateHashes = Object.fromEntries(
+        snapshot.entries
+          .filter((entry) => !operationKeys.has(refKey(entry.collection, entry.id)))
+          .map((entry) => {
+            const current = this.collection(request.uid, entry.collection).get(entry.id);
+            return [refKey(entry.collection, entry.id), current ? hashEntityState(current) : null];
+          }),
+      );
       for (const operation of plan.operations) {
         const collection = staged.get(operation.collection);
         if (!collection) throw new DomainError('INTERNAL', 'Missing collection store.');
@@ -239,6 +291,10 @@ export class InMemoryRepository implements AuditableRepository {
         }
       }
 
+      const appliedScopeHashes = Object.fromEntries(snapshot.scopes.map((scope) => [
+        validationScopeKey(scope),
+        hashValidationScopeRecords(validationScopeRecords(staged, scope)),
+      ]));
       this.users.set(request.uid, staged);
       const updated: StoredChangePlan = {
         ...plan,
@@ -246,6 +302,8 @@ export class InMemoryRepository implements AuditableRepository {
         appliedAt: request.now,
         appliedVersions,
         appliedStateHashes,
+        appliedDependencyStateHashes,
+        appliedScopeHashes,
       };
       this.plans.set(key, updated);
       this.approvals.set(key, {
@@ -280,6 +338,7 @@ export class InMemoryRepository implements AuditableRepository {
         uid: request.uid,
         planId: plan.id,
         requestId: request.requestId,
+        applyAuditId: request.executionId,
         auditId: request.executionId,
         idempotencyKeyHash: request.idempotencyKeyHash,
         createdAt: request.now,
@@ -289,8 +348,19 @@ export class InMemoryRepository implements AuditableRepository {
         rollbackExpiresAt: request.rollbackExpiresAt,
         result: withoutReplay(result),
       });
-      this.idempotency.set(idempotencyPath, { action: 'apply', planId: plan.id, result });
-      this.appendAudit(actionAudit(updated, request, 'apply', appliedStateHashes));
+      this.idempotency.set(idempotencyPath, {
+        action: 'apply',
+        planId: plan.id,
+        capabilityHash: request.approvalCapabilityHash,
+        result,
+      });
+      this.appendAudit(actionAudit(
+        request.executionId,
+        updated,
+        request,
+        'apply',
+        appliedStateHashes,
+      ));
       return clone(result);
     });
   }
@@ -299,7 +369,10 @@ export class InMemoryRepository implements AuditableRepository {
     return this.withTransaction(() => {
       const idempotencyPath = `${request.uid}:rollback:${request.idempotencyKeyHash}`;
       const replay = this.idempotency.get(idempotencyPath);
-      if (replay) return { ...clone(replay.result), idempotentReplay: true };
+      if (replay) {
+        assertIdempotencyCapability(replay, request.rollbackCapabilityHash);
+        return { ...clone(replay.result), idempotentReplay: true };
+      }
 
       const executionKeyValue = executionKey(request.uid, request.executionId);
       const execution = this.executions.get(executionKeyValue);
@@ -328,10 +401,14 @@ export class InMemoryRepository implements AuditableRepository {
         throw new DomainError('CONFLICT', 'Only an applied plan can be rolled back.');
       }
       this.assertAppliedVersionsStillCurrent(request.uid, plan);
+      this.assertRollbackGuardsStillCurrent(request.uid, plan, snapshot);
 
       const staged = cloneUserStore(this.user(request.uid));
       const restoredStateHashes: Record<string, string | null> = {};
-      for (const entry of snapshot.entries) {
+      const entriesByKey = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
+      for (const operation of plan.operations) {
+        const entry = entriesByKey.get(refKey(operation.collection, operation.id));
+        if (!entry) throw new DomainError('INTERNAL', 'Rollback snapshot mismatch.');
         const collection = staged.get(entry.collection);
         if (!collection) throw new DomainError('INTERNAL', 'Missing collection store.');
         const current = collection.get(entry.id);
@@ -378,16 +455,36 @@ export class InMemoryRepository implements AuditableRepository {
           rollbackExpiresAt: null,
         },
       };
+      const rollbackAuditId = randomUUID();
       this.executions.set(executionKeyValue, {
         ...execution,
+        applyAuditId: execution.applyAuditId ?? execution.auditId,
+        auditId: rollbackAuditId,
+        rollbackAuditId,
         status: 'rolled_back',
         verified: true,
         rollbackConsumedAt: request.now,
         restoredStateHashes,
         result: withoutReplay(result),
       });
-      this.idempotency.set(idempotencyPath, { action: 'rollback', planId: plan.id, result });
-      this.appendAudit(actionAudit(updated, request, 'rollback', restoredStateHashes));
+      this.idempotency.set(idempotencyPath, {
+        action: 'rollback',
+        planId: plan.id,
+        capabilityHash: request.rollbackCapabilityHash,
+        result,
+      });
+      const applyPath = `${request.uid}:apply:${execution.idempotencyKeyHash}`;
+      const applyEntry = this.idempotency.get(applyPath);
+      if (applyEntry) {
+        this.idempotency.set(applyPath, { ...applyEntry, result });
+      }
+      this.appendAudit(actionAudit(
+        rollbackAuditId,
+        updated,
+        request,
+        'rollback',
+        restoredStateHashes,
+      ));
       return clone(result);
     });
   }
@@ -443,6 +540,54 @@ export class InMemoryRepository implements AuditableRepository {
       ) {
         throw new DomainError('STATE_CHANGED', 'The preview is stale because referenced state changed.');
       }
+    }
+  }
+
+  private assertValidationGuardsStillCurrent(uid: string, snapshot: ChangeSnapshot): void {
+    for (const scope of snapshot.scopes) {
+      const records = validationScopeRecords(this.user(uid), scope);
+      if (
+        records.length !== scope.itemCount
+        || hashValidationScopeRecords(records) !== scope.stateHash
+      ) {
+        throw new DomainError('STATE_CHANGED', 'The preview is stale because its validation scope changed.');
+      }
+    }
+    if (
+      snapshot.planningPreferencesHash
+      && hashPlanningPreferences(this.planningPreferences.get(uid) ?? DEFAULT_PLANNING_PREFERENCES)
+        !== snapshot.planningPreferencesHash
+    ) {
+      throw new DomainError('STATE_CHANGED', 'The preview is stale because planning preferences changed.');
+    }
+  }
+
+  private assertRollbackGuardsStillCurrent(
+    uid: string,
+    plan: StoredChangePlan,
+    snapshot: ChangeSnapshot,
+  ): void {
+    const operationKeys = new Set(plan.operations.map((operation) => refKey(operation.collection, operation.id)));
+    for (const entry of snapshot.entries) {
+      const key = refKey(entry.collection, entry.id);
+      if (operationKeys.has(key)) continue;
+      const current = this.collection(uid, entry.collection).get(entry.id);
+      if ((current ? hashEntityState(current) : null) !== plan.appliedDependencyStateHashes?.[key]) {
+        throw new DomainError('STATE_CHANGED', 'Rollback refused because referenced state changed after apply.');
+      }
+    }
+    for (const scope of snapshot.scopes) {
+      const currentHash = hashValidationScopeRecords(validationScopeRecords(this.user(uid), scope));
+      if (currentHash !== plan.appliedScopeHashes?.[validationScopeKey(scope)]) {
+        throw new DomainError('STATE_CHANGED', 'Rollback refused because dependent state changed after apply.');
+      }
+    }
+    if (
+      snapshot.planningPreferencesHash
+      && hashPlanningPreferences(this.planningPreferences.get(uid) ?? DEFAULT_PLANNING_PREFERENCES)
+        !== snapshot.planningPreferencesHash
+    ) {
+      throw new DomainError('STATE_CHANGED', 'Rollback refused because planning preferences changed after apply.');
     }
   }
 
@@ -520,6 +665,39 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
   return true;
 }
 
+function validationScopeRecords(
+  user: UserStore,
+  scope: ValidationScopeQuery,
+): readonly EntityRecord[] {
+  const collection = user.get(scope.collection);
+  if (!collection) throw new DomainError('INTERNAL', 'Validation collection is unavailable.');
+  const records = [...collection.values()]
+    .filter((record) => !isSoftDeleted(record) && matchesValidationScope(record, scope))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (records.length > scope.maxItems) {
+    throw new DomainError('LIMIT_EXCEEDED', 'Validation scope exceeds its safe bound.');
+  }
+  return records;
+}
+
+function matchesValidationScope(record: EntityRecord, scope: ValidationScopeQuery): boolean {
+  if (scope.field && record[scope.field] !== scope.value) return false;
+  if (scope.from || scope.to) {
+    const start = typeof record.startTime === 'string' ? Date.parse(record.startTime) : Number.NaN;
+    const end = typeof record.endTime === 'string' ? Date.parse(record.endTime) : Number.NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return false;
+    if (scope.from && end <= Date.parse(scope.from)) return false;
+    if (scope.to && start >= Date.parse(scope.to)) return false;
+  }
+  return true;
+}
+
+function assertIdempotencyCapability(entry: IdempotencyEntry, actualHash: string): void {
+  if (!capabilityHashMatches(actualHash, entry.capabilityHash)) {
+    throw new DomainError('APPROVAL_REQUIRED', 'Idempotent replay capability is invalid.');
+  }
+}
+
 function isSoftDeleted(record: EntityRecord): boolean {
   return record.deleted === true;
 }
@@ -566,13 +744,14 @@ function cloneUserStore(source: UserStore): UserStore {
 }
 
 function actionAudit(
+  id: string,
   plan: StoredChangePlan,
   request: ApplyPlanRequest | RollbackExecutionRequest,
   action: 'apply' | 'rollback',
   resultStateHashes: Readonly<Record<string, string | null>>,
 ): AuditEvent {
   return {
-    id: randomUUID(),
+    id,
     uid: request.uid,
     actorUid: request.uid,
     requestId: request.requestId,
@@ -587,6 +766,9 @@ function actionAudit(
       changesetHash: plan.hash,
       baseStateHash: plan.baseStateHash,
       resultStateHash: hashResultState(resultStateHashes),
+      executionId: request.executionId,
+      idempotencyKeyHash: request.idempotencyKeyHash,
+      rollbackStatus: action === 'apply' ? 'available' : 'consumed',
       verified: true,
       ...(plan.orchestration
         ? {
