@@ -42,7 +42,10 @@ const browserSourcePatterns = [
 ];
 
 const outputPatterns = [
-  ...browserSourcePatterns,
+  // Next's framework runtime always contains its own `isAPIRoute('/api/...')`
+  // helper. Application source is checked above for generic same-origin API
+  // calls, while compiled output retains every provider/legacy-route check.
+  ...browserSourcePatterns.filter(({ label }) => label !== 'same-origin server route used by static browser source'),
   {
     label: 'private-key material in static output',
     pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
