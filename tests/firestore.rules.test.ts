@@ -13,8 +13,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -50,6 +52,8 @@ const CLIENT_COLLECTIONS = [
 const SERVER_ONLY_COLLECTIONS = [
   'aiChangePlans',
   'aiSnapshots',
+  'aiApprovals',
+  'aiExecutions',
   'aiAuditLogs',
   'aiIdempotency',
   'aiRateLimits',
@@ -127,12 +131,22 @@ describe('Firestore user isolation rules', () => {
     await testEnv?.cleanup();
   });
 
-  it('denies unauthenticated reads and writes', async () => {
+  it('denies unauthenticated read, create, update, and delete', async () => {
     const db = testEnv.unauthenticatedContext().firestore();
     const goal = doc(db, 'users/alice/goals/goal-1');
 
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), 'users/alice/goals/existing-goal'),
+        ownedEntity('alice', 'existing-goal'),
+      );
+    });
+
     await assertFails(getDoc(goal));
     await assertFails(setDoc(goal, ownedEntity('alice', 'goal-1')));
+    const existing = doc(db, 'users/alice/goals/existing-goal');
+    await assertFails(updateDoc(existing, { title: 'Anonymous update' }));
+    await assertFails(deleteDoc(existing));
   });
 
   it('allows an authenticated user to complete a representative CRUD flow', async () => {
@@ -141,7 +155,10 @@ describe('Firestore user isolation rules', () => {
 
     await assertSucceeds(setDoc(goal, ownedEntity('alice', 'goal-1')));
     await assertSucceeds(getDoc(goal));
-    await assertSucceeds(getDocs(collection(db, 'users/alice/goals')));
+    await assertSucceeds(getDocs(query(
+      collection(db, 'users/alice/goals'),
+      where('userId', '==', 'alice'),
+    )));
     await assertSucceeds(updateDoc(goal, {
       title: 'Updated goal',
       updatedAt: new Date('2026-08-10T09:00:00.000Z'),
@@ -196,6 +213,10 @@ describe('Firestore user isolation rules', () => {
     await assertFails(getDoc(aliceTask));
     await assertFails(updateDoc(aliceTask, { title: 'Taken over' }));
     await assertFails(deleteDoc(aliceTask));
+    await assertFails(getDocs(query(
+      collection(bobDb, 'users/alice/tasks'),
+      where('userId', '==', 'alice'),
+    )));
     await assertFails(setDoc(
       doc(bobDb, 'users/alice/tasks/task-2'),
       ownedEntity('bob', 'task-2'),
@@ -213,6 +234,11 @@ describe('Firestore user isolation rules', () => {
     const aliceDb = testEnv.authenticatedContext('alice').firestore();
     await assertFails(getDoc(doc(aliceDb, 'users/alice/tasks/misowned-task')));
     await assertFails(getDocs(collection(aliceDb, 'users/alice/tasks')));
+    const listed = await assertSucceeds(getDocs(query(
+      collection(aliceDb, 'users/alice/tasks'),
+      where('userId', '==', 'alice'),
+    )));
+    expect(listed.docs.map((snapshot) => snapshot.id)).not.toContain('misowned-task');
   });
 
   it('rejects spoofed owner fields and a mismatched document id', async () => {

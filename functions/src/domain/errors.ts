@@ -7,6 +7,11 @@ export type DomainErrorCode =
   | 'EXPIRED'
   | 'UNKNOWN_TOOL'
   | 'LIMIT_EXCEEDED'
+  | 'RATE_LIMITED'
+  | 'STATE_CHANGED'
+  | 'APPROVAL_REQUIRED'
+  | 'APPROVAL_REPLAYED'
+  | 'COMMITTED_UNVERIFIED'
   | 'INTERNAL';
 
 /** Error safe to map to an HTTP status without exposing stack traces or secrets. */

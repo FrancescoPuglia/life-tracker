@@ -1,5 +1,6 @@
 import type {
   AuditEvent,
+  ApprovalRecord,
   ChangeSnapshot,
   EntityCollection,
   EntityRecord,
@@ -9,18 +10,34 @@ import type {
   ReadPage,
   ReadPageRequest,
   StoredChangePlan,
+  StoredExecution,
+  UserPlanningPreferences,
 } from './types';
 
 export interface SavePreviewRequest {
   readonly plan: ImmutableChangePlan;
   readonly snapshot: ChangeSnapshot;
+  readonly approval: ApprovalRecord;
   readonly audit: AuditEvent;
 }
 
-export interface PlanActionRequest {
+export interface ApplyPlanRequest {
   readonly uid: string;
   readonly planId: string;
+  readonly approvalCapabilityHash: string;
   /** SHA-256 of the caller-provided key. Raw idempotency keys are never stored. */
+  readonly idempotencyKeyHash: string;
+  readonly requestId: string;
+  readonly now: string;
+  readonly executionId: string;
+  readonly rollbackCapabilityHash: string;
+  readonly rollbackExpiresAt: string;
+}
+
+export interface RollbackExecutionRequest {
+  readonly uid: string;
+  readonly executionId: string;
+  readonly rollbackCapabilityHash: string;
   readonly idempotencyKeyHash: string;
   readonly requestId: string;
   readonly now: string;
@@ -49,6 +66,8 @@ export interface Repository {
     id: string,
   ): Promise<EntityRecord | null>;
 
+  getUserPlanningPreferences(uid: string): Promise<UserPlanningPreferences>;
+
   /** A consistent read of all refs, used for optimistic concurrency. */
   captureSnapshot(
     uid: string,
@@ -61,9 +80,11 @@ export interface Repository {
 
   getPlan(uid: string, planId: string): Promise<StoredChangePlan | null>;
 
-  applyPlanAtomically(request: PlanActionRequest): Promise<PlanActionResult>;
+  applyPlanAtomically(request: ApplyPlanRequest): Promise<PlanActionResult>;
 
-  rollbackPlanAtomically(request: PlanActionRequest): Promise<PlanActionResult>;
+  rollbackExecutionAtomically(request: RollbackExecutionRequest): Promise<PlanActionResult>;
+
+  getExecution(uid: string, executionId: string): Promise<StoredExecution | null>;
 
   /** Append-only rejection/conflict audit; never exposed as an AI read tool. */
   recordAudit(event: AuditEvent): Promise<void>;

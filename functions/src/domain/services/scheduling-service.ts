@@ -5,6 +5,7 @@ import type { Repository } from '../repository';
 import type {
   ReplaceDayScheduleArgs,
   ReplaceWeekScheduleArgs,
+  PreviewTimeBlockChangeArgs,
   ScheduleBlockInput,
 } from '../schemas';
 import type {
@@ -14,6 +15,7 @@ import type {
   PublicChangePlan,
   ReadFilter,
   ScalarPatchValue,
+  UserPlanningPreferences,
 } from '../types';
 import type { WpiBlock, WpiDraft } from '../scheduling/wpi-adapter';
 import { validateWithWeeklyPlanningIntelligence } from '../scheduling/wpi-adapter';
@@ -22,6 +24,7 @@ import { ChangePlanService } from './change-plan-service';
 const MAX_EXISTING_BLOCKS = 2_000;
 const INTERNAL_PAGE_SIZE = 200;
 const MAX_PLAN_OPERATIONS = 100;
+const MAX_EXISTING_SCAN_PAGES = 10;
 const UNMAPPED_SAFE_TYPES = new Set(['break', 'buffer', 'travel', 'admin']);
 
 interface NormalizedBlock {
@@ -44,6 +47,7 @@ export class SchedulingService {
   ): Promise<PublicChangePlan> {
     const date = parseDate(args.date);
     assertTimeZone(args.timezone);
+    const preferences = await this.authoritativePreferences(context.uid, args.timezone);
     return this.previewRange(
       context,
       'replace_day_schedule',
@@ -51,6 +55,8 @@ export class SchedulingService {
       date.add({ days: 1 }),
       args.timezone,
       args.blocks,
+      args.reason,
+      preferences,
     );
   }
 
@@ -63,6 +69,7 @@ export class SchedulingService {
       throw new DomainError('INVALID_ARGUMENT', 'weekStart must be a Monday calendar date.');
     }
     assertTimeZone(args.timezone);
+    const preferences = await this.authoritativePreferences(context.uid, args.timezone);
     return this.previewRange(
       context,
       'replace_week_schedule',
@@ -70,6 +77,102 @@ export class SchedulingService {
       start.add({ days: 7 }),
       args.timezone,
       args.blocks,
+      args.reason,
+      preferences,
+    );
+  }
+
+  async previewTimeBlockChange(
+    context: AuthContext,
+    args: PreviewTimeBlockChangeArgs,
+  ): Promise<PublicChangePlan> {
+    assertTimeZone(args.timezone);
+    const preferences = await this.authoritativePreferences(context.uid, args.timezone);
+    let start: Temporal.Instant;
+    try {
+      start = Temporal.Instant.from(args.block.start);
+    } catch {
+      throw new DomainError('INVALID_ARGUMENT', 'Invalid TimeBlock start instant.');
+    }
+    const date = start.toZonedDateTimeISO(args.timezone).toPlainDate();
+    const range = instantRange(date, date.add({ days: 1 }), args.timezone);
+    const proposed = normalizeBlock(
+      args.block,
+      args.timezone,
+      date,
+      date.add({ days: 1 }),
+      'preview_timeblock_change',
+    );
+    const existing = await this.readExisting(context.uid, range.from, range.to);
+    // A move may cross a calendar-day boundary, so the target entity cannot
+    // be discovered solely through the proposed day's bounded schedule scan.
+    // Resolve it directly through the same UID-scoped repository path.
+    const current = await this.repository.getEntity(context.uid, 'timeBlocks', proposed.id);
+    if (args.action === 'create' && current) {
+      throw new DomainError('CONFLICT', 'The TimeBlock already exists; request an update instead.');
+    }
+    if (args.action !== 'create' && !current) {
+      throw new DomainError('NOT_FOUND', 'The TimeBlock is unavailable for this user.');
+    }
+    if (current && isProtected(current)) {
+      throw new DomainError('FORBIDDEN', 'Completed, in-progress, fixed, or locked TimeBlocks cannot be changed by AI.');
+    }
+    if (
+      args.action === 'move'
+      && current
+      && current.startTime === args.block.start
+      && current.endTime === args.block.end
+    ) {
+      throw new DomainError('INVALID_ARGUMENT', 'A move must change the TimeBlock interval.');
+    }
+    if (
+      args.action === 'update'
+      && current
+      && (current.startTime !== args.block.start || current.endTime !== args.block.end)
+    ) {
+      throw new DomainError('INVALID_ARGUMENT', 'Changing TimeBlock times requires the explicit move action.');
+    }
+
+    const commitments = existing.filter((record) => record.id !== proposed.id);
+    const conflicts = [
+      ...detectExistingConflicts([proposed], commitments),
+      ...(!hasEntityMapping(proposed.input) && !UNMAPPED_SAFE_TYPES.has(proposed.input.type)
+        ? [`Productive block '${proposed.input.title}' requires a Goal, Project, or Task mapping.`]
+        : []),
+    ];
+    const draft = buildWpiDraft(
+      'preview_timeblock_change',
+      date,
+      args.timezone,
+      [proposed],
+      commitments,
+    );
+    const wpi = validateWithWeeklyPlanningIntelligence(draft, {
+      earliestHour: preferences.workingHours?.start ?? '07:00',
+      latestHour: preferences.workingHours?.end ?? '22:00',
+      maxDailyPlannedMinutes: preferences.maxDailyPlannedMinutes,
+      maxWeeklyPlannedMinutes: preferences.maxWeeklyPlannedMinutes,
+      minBufferMinutes: preferences.minBufferMinutes,
+      maxConsecutiveHighEnergyBlocks: preferences.maxConsecutiveHighEnergyBlocks,
+    });
+    conflicts.push(...wpi.conflicts);
+    const operation: ChangeOperation = {
+      op: args.action === 'create' ? 'create' : 'update',
+      collection: 'timeBlocks',
+      id: proposed.id,
+      values: scheduleValues(args.block, wpi.generatedNotes[proposed.id]),
+    };
+    return this.changePlans.previewOperations(
+      context,
+      'preview_timeblock_change',
+      [operation],
+      [...new Set(wpi.warnings)],
+      [...new Set(conflicts)],
+      {
+        reason: args.reason,
+        assumptions: preferenceAssumptions(preferences),
+        expectedImpact: [`${args.action} TimeBlock '${args.block.title}' within ${args.timezone}.`],
+      },
     );
   }
 
@@ -80,6 +183,8 @@ export class SchedulingService {
     endDate: Temporal.PlainDate,
     timezone: string,
     inputs: readonly ScheduleBlockInput[],
+    reason: string,
+    preferences: UserPlanningPreferences,
   ): Promise<PublicChangePlan> {
     const range = instantRange(startDate, endDate, timezone);
     const normalized = inputs.map((input) => normalizeBlock(input, timezone, startDate, endDate, tool));
@@ -104,8 +209,15 @@ export class SchedulingService {
       }
     }
 
-    const draft = buildWpiDraft(tool, startDate, timezone, normalized);
-    const wpi = validateWithWeeklyPlanningIntelligence(draft);
+    const draft = buildWpiDraft(tool, startDate, timezone, normalized, protectedBlocks);
+    const wpi = validateWithWeeklyPlanningIntelligence(draft, {
+      earliestHour: preferences.workingHours?.start ?? '07:00',
+      latestHour: preferences.workingHours?.end ?? '22:00',
+      maxDailyPlannedMinutes: preferences.maxDailyPlannedMinutes,
+      maxWeeklyPlannedMinutes: preferences.maxWeeklyPlannedMinutes,
+      minBufferMinutes: preferences.minBufferMinutes,
+      maxConsecutiveHighEnergyBlocks: preferences.maxConsecutiveHighEnergyBlocks,
+    });
     conflicts.push(...wpi.conflicts);
     warnings.push(...wpi.warnings);
 
@@ -143,7 +255,20 @@ export class SchedulingService {
       operations,
       [...new Set(warnings)],
       [...new Set(conflicts)],
+      {
+        reason,
+        assumptions: preferenceAssumptions(preferences),
+        expectedImpact: [`Replace ${tool === 'replace_day_schedule' ? 'one day' : 'one week'} within ${timezone}.`],
+      },
     );
+  }
+
+  private async authoritativePreferences(uid: string, requestedTimezone: string): Promise<UserPlanningPreferences> {
+    const preferences = await this.repository.getUserPlanningPreferences(uid);
+    if (requestedTimezone !== preferences.timezone) {
+      throw new DomainError('INVALID_ARGUMENT', 'Requested timezone does not match the authenticated user preference.');
+    }
+    return preferences;
   }
 
   private async readExisting(uid: string, from: string, to: string): Promise<readonly EntityRecord[]> {
@@ -159,6 +284,7 @@ export class SchedulingService {
     };
     const output: EntityRecord[] = [];
     let cursor: string | null = null;
+    let pages = 0;
     do {
       const page = await this.repository.listEntities(uid, 'timeBlocks', {
         filter,
@@ -170,6 +296,10 @@ export class SchedulingService {
         throw new DomainError('LIMIT_EXCEEDED', 'Too many existing blocks in the requested range.');
       }
       cursor = page.nextCursor;
+      pages += 1;
+      if (cursor && pages >= MAX_EXISTING_SCAN_PAGES) {
+        throw new DomainError('LIMIT_EXCEEDED', 'Schedule scan limit exceeded; narrow the replacement range.');
+      }
     } while (cursor);
     return output;
   }
@@ -277,14 +407,38 @@ function detectProtectedConflicts(
   return conflicts;
 }
 
+function detectExistingConflicts(
+  proposed: readonly NormalizedBlock[],
+  existingBlocks: readonly EntityRecord[],
+): readonly string[] {
+  const conflicts: string[] = [];
+  for (const block of proposed) {
+    for (const existing of existingBlocks) {
+      if (typeof existing.startTime !== 'string' || typeof existing.endTime !== 'string') {
+        conflicts.push(`Existing block '${existing.id}' has an invalid interval.`);
+        continue;
+      }
+      const start = Date.parse(existing.startTime);
+      const end = Date.parse(existing.endTime);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
+        conflicts.push(`Existing block '${existing.id}' has an invalid interval.`);
+      } else if (block.startMs < end && start < block.endMs) {
+        conflicts.push(`Block '${block.input.title}' overlaps existing block '${String(existing.title ?? existing.id)}'.`);
+      }
+    }
+  }
+  return conflicts;
+}
+
 function buildWpiDraft(
   tool: string,
   rangeStart: Temporal.PlainDate,
   timezone: string,
   blocks: readonly NormalizedBlock[],
+  protectedBlocks: readonly EntityRecord[],
 ): WpiDraft {
   const monday = rangeStart.subtract({ days: rangeStart.dayOfWeek - 1 });
-  const wpiBlocks: WpiBlock[] = blocks.map((block) => {
+  const proposedWpiBlocks: WpiBlock[] = blocks.map((block) => {
     const localDate = Temporal.PlainDate.from(block.localDate);
     const day = monday.until(localDate, { largestUnit: 'days' }).days as 0 | 1 | 2 | 3 | 4 | 5 | 6;
     const start = Temporal.Instant.from(block.input.start).toZonedDateTimeISO(timezone);
@@ -320,6 +474,14 @@ function buildWpiDraft(
       isRoutine: block.input.activityType === 'routine',
     };
   });
+  // Fixed/completed/in-progress commitments are never emitted as operations,
+  // but they still consume real daily/weekly capacity. Include bounded,
+  // read-only representations in WPI conflict detection so a nearly-full week
+  // cannot appear feasible merely because its commitments are protected.
+  const wpiBlocks = [
+    ...proposedWpiBlocks,
+    ...protectedBlocks.flatMap((record) => protectedWpiBlocks(record, timezone, monday)),
+  ];
   const parsedIntents = wpiBlocks.map((block) => ({
     id: block.intentId,
     label: block.label,
@@ -364,10 +526,73 @@ function buildWpiDraft(
   };
 }
 
+function protectedWpiBlocks(
+  record: EntityRecord,
+  timezone: string,
+  monday: Temporal.PlainDate,
+): readonly WpiBlock[] {
+  if (typeof record.startTime !== 'string' || typeof record.endTime !== 'string') return [];
+  try {
+    const end = Temporal.Instant.from(record.endTime);
+    let cursor = Temporal.Instant.from(record.startTime);
+    const output: WpiBlock[] = [];
+    let segment = 0;
+    while (Temporal.Instant.compare(cursor, end) < 0 && segment < 8) {
+      const localStart = cursor.toZonedDateTimeISO(timezone);
+      const nextMidnight = localStart.toPlainDate().add({ days: 1 })
+        .toZonedDateTime({ timeZone: timezone, plainTime: Temporal.PlainTime.from('00:00') })
+        .toInstant();
+      const segmentEnd = Temporal.Instant.compare(end, nextMidnight) < 0 ? end : nextMidnight;
+      const localEnd = segmentEnd.toZonedDateTimeISO(timezone);
+      const dayOffset = monday.until(localStart.toPlainDate(), { largestUnit: 'days' }).days;
+      if (dayOffset >= 0 && dayOffset <= 6) {
+        const id = `protected_${record.id}_${segment}`;
+        output.push({
+          id,
+          intentId: `intent_${id}`,
+          label: String(record.title ?? record.name ?? 'Protected commitment').slice(0, 240),
+          day: dayOffset as WpiBlock['day'],
+          startTime: hhmm(localStart),
+          // WPI does not accept 24:00. Exact overlap protection remains in
+          // detectProtectedConflicts; 23:59 is only its calendar display edge.
+          endTime: Temporal.Instant.compare(segmentEnd, nextMidnight) === 0 ? '23:59' : hhmm(localEnd),
+          durationMinutes: Math.max(1, Math.round(segmentEnd.since(cursor).total({ unit: 'minutes' }))),
+          activityType: 'maintenance',
+          energyLevel: 'low',
+          flexibility: 'fixed',
+          mapping: {
+            intentId: `intent_${id}`,
+            status: 'maintenance',
+            confidence: 1,
+            reason: 'Authoritative protected Life Tracker commitment',
+            matchedKeywords: [],
+          },
+          confidence: 1,
+          sourceText: `protected:${record.id}`,
+          isRoutine: false,
+        });
+      }
+      cursor = segmentEnd;
+      segment += 1;
+    }
+    return output;
+  } catch {
+    throw new DomainError('CONFLICT', `Protected time block '${record.id}' has an invalid interval.`);
+  }
+}
+
+function hhmm(value: Temporal.ZonedDateTime): string {
+  return `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`;
+}
+
 function scheduleValues(
   input: ScheduleBlockInput,
   generatedNotes: string | undefined,
 ): Readonly<Record<string, ScalarPatchValue>> {
+  const notes = [input.notes?.trim(), generatedNotes?.trim()]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join('\n\n');
   return {
     title: input.title,
     startTime: input.start,
@@ -378,7 +603,7 @@ function scheduleValues(
     projectId: input.projectId,
     goalId: input.goalId,
     domainId: input.domainId,
-    notes: input.notes ?? generatedNotes ?? null,
+    notes: notes || null,
   };
 }
 
@@ -386,8 +611,21 @@ function hasEntityMapping(input: ScheduleBlockInput): boolean {
   return Boolean(input.taskId || input.projectId || input.goalId);
 }
 
+function preferenceAssumptions(preferences: UserPlanningPreferences): readonly string[] {
+  if (preferences.source === 'persisted') return [];
+  return [preferences.source === 'product_default'
+    ? 'No persisted planning preferences were found; explicit Life Tracker product defaults were used.'
+    : `Invalid or missing persisted planning fields used explicit product defaults: ${preferences.defaultsApplied.join(', ')}.`];
+}
+
 function isProtected(record: EntityRecord): boolean {
-  return record.protected === true || record.status === 'completed' || record.status === 'in_progress';
+  return record.protected === true ||
+    record.locked === true ||
+    record.isLocked === true ||
+    record.fixed === true ||
+    record.flexibility === 'fixed' ||
+    record.status === 'completed' ||
+    record.status === 'in_progress';
 }
 
 function deterministicBlockId(tool: string, input: ScheduleBlockInput): string {

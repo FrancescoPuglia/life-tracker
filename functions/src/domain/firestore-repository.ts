@@ -1,0 +1,1073 @@
+import { randomUUID } from 'node:crypto';
+import {
+  FieldPath,
+  Timestamp,
+  type DocumentData,
+  type DocumentReference,
+  type DocumentSnapshot,
+  type Firestore,
+} from 'firebase-admin/firestore';
+import { capabilityHashMatches } from './capabilities';
+import { DomainError } from './errors';
+import { hashEntityState, hashResultState, hashSnapshotState, verifyStoredPlan } from './integrity';
+import { assertEntityId } from './policy';
+import type {
+  ApplyPlanRequest,
+  AuditableRepository,
+  RollbackExecutionRequest,
+  SavePreviewRequest,
+} from './repository';
+import type {
+  ApprovalRecord,
+  AuditEvent,
+  ChangeSnapshot,
+  EntityCollection,
+  EntityRecord,
+  EntityReference,
+  PlanActionResult,
+  ReadPage,
+  ReadPageRequest,
+  StoredChangePlan,
+  StoredExecution,
+  UserPlanningPreferences,
+} from './types';
+import { SERVER_ONLY_PATHS } from './types';
+
+const UID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
+const MAX_SCAN_PER_PAGE = 500;
+const SCAN_BATCH_SIZE = 100;
+const MAX_AUDIT_RESULTS = 500;
+const EPOCH = new Date(0).toISOString();
+
+const PRODUCT_DEFAULT_PREFERENCES: UserPlanningPreferences = Object.freeze({
+  source: 'product_default',
+  defaultsApplied: Object.freeze([
+    'timezone',
+    'workingHours',
+    'maxDailyPlannedMinutes',
+    'maxWeeklyPlannedMinutes',
+    'minBufferMinutes',
+    'maxConsecutiveHighEnergyBlocks',
+  ]),
+  timezone: 'Europe/Rome',
+  // Reuse the established Weekly Planning Intelligence product constraint.
+  // Keeping it in the returned preference object makes the fallback visible
+  // to the user/model instead of silently applying it inside scheduling.
+  workingHours: Object.freeze({ start: '07:00', end: '22:00' }),
+  maxDailyPlannedMinutes: 600,
+  maxWeeklyPlannedMinutes: 3_000,
+  minBufferMinutes: 15,
+  maxConsecutiveHighEnergyBlocks: 2,
+});
+
+const ENTITY_DATE_FIELDS = new Set([
+  'createdAt',
+  'updatedAt',
+  'startTime',
+  'endTime',
+  'actualStartTime',
+  'actualEndTime',
+  'completedAt',
+  'dueDate',
+  'deadline',
+  'targetDate',
+  'date',
+  'timestamp',
+  'earnedAt',
+]);
+
+interface TransactionResult {
+  readonly result: PlanActionResult;
+  readonly replay: boolean;
+}
+
+/**
+ * Production persistence adapter. Every public method derives document paths
+ * from the verified UID and allowlisted collection type; callers cannot pass
+ * arbitrary Firestore paths or collection names.
+ */
+export class FirestoreRepository implements AuditableRepository {
+  constructor(private readonly firestore: Firestore) {}
+
+  async listEntities(
+    uid: string,
+    collection: EntityCollection,
+    request: ReadPageRequest,
+  ): Promise<ReadPage<EntityRecord>> {
+    assertUid(uid);
+    if (request.limit < 1 || request.limit > 200) {
+      throw new DomainError('LIMIT_EXCEEDED', 'Repository page limit must be between 1 and 200.');
+    }
+
+    const fingerprint = queryFingerprint(collection, request);
+    let lastId = request.cursor ? decodeCursor(request.cursor, fingerprint) : null;
+    let scanned = 0;
+    let exhausted = false;
+    const items: EntityRecord[] = [];
+    const collectionRef = this.firestore.collection(`users/${uid}/${collection}`);
+
+    while (items.length < request.limit && scanned < MAX_SCAN_PER_PAGE && !exhausted) {
+      const remainingScan = MAX_SCAN_PER_PAGE - scanned;
+      const batchSize = Math.min(SCAN_BATCH_SIZE, remainingScan);
+      let query = collectionRef.orderBy(FieldPath.documentId()).limit(batchSize);
+      if (lastId) query = query.startAfter(lastId);
+      const snapshot = await query.get();
+      exhausted = snapshot.size < batchSize;
+      if (snapshot.empty) break;
+
+      for (const document of snapshot.docs) {
+        lastId = document.id;
+        scanned += 1;
+        const record = normalizeEntitySnapshot(uid, document);
+        if (matchesFilter(record, request)) items.push(record);
+        if (items.length >= request.limit || scanned >= MAX_SCAN_PER_PAGE) break;
+      }
+    }
+
+    return {
+      items,
+      nextCursor: exhausted || !lastId ? null : encodeCursor(fingerprint, lastId),
+    };
+  }
+
+  async getEntity(
+    uid: string,
+    collection: EntityCollection,
+    id: string,
+  ): Promise<EntityRecord | null> {
+    assertUid(uid);
+    assertEntityId(id);
+    const snapshot = await this.entityRef(uid, collection, id).get();
+    return snapshot.exists ? normalizeEntitySnapshot(uid, snapshot) : null;
+  }
+
+  async getUserPlanningPreferences(uid: string): Promise<UserPlanningPreferences> {
+    assertUid(uid);
+    const snapshot = await this.firestore.doc(`users/${uid}`).get();
+    if (!snapshot.exists) return clone(PRODUCT_DEFAULT_PREFERENCES);
+    const data = decodeFirestore(snapshot.data() ?? {});
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return clone(PRODUCT_DEFAULT_PREFERENCES);
+    }
+    const record = data as Record<string, unknown>;
+    assertEmbeddedOwnership(uid, record);
+    const preferences = asRecord(record.preferences);
+    if (!preferences) return clone(PRODUCT_DEFAULT_PREFERENCES);
+
+    const defaultsApplied: string[] = [];
+    const timezone = validTimeZone(preferences.timezone)
+      ? preferences.timezone
+      : usePreferenceDefault(
+        'timezone',
+        PRODUCT_DEFAULT_PREFERENCES.timezone,
+        defaultsApplied,
+      );
+    const hours = asRecord(preferences.workingHours);
+    let workingHours: UserPlanningPreferences['workingHours'];
+    if (hours && validClock(hours.start) && validClock(hours.end) && hours.start < hours.end) {
+      workingHours = { start: hours.start, end: hours.end };
+    } else {
+      workingHours = usePreferenceDefault(
+        'workingHours',
+        PRODUCT_DEFAULT_PREFERENCES.workingHours,
+        defaultsApplied,
+      );
+    }
+    const maxDailyPlannedMinutes = preferenceInteger(
+      'maxDailyPlannedMinutes',
+      preferences.maxDailyPlannedMinutes,
+      60,
+      24 * 60,
+      PRODUCT_DEFAULT_PREFERENCES.maxDailyPlannedMinutes,
+      defaultsApplied,
+    );
+    const maxWeeklyPlannedMinutes = preferenceInteger(
+      'maxWeeklyPlannedMinutes',
+      preferences.maxWeeklyPlannedMinutes,
+      60,
+      7 * 24 * 60,
+      PRODUCT_DEFAULT_PREFERENCES.maxWeeklyPlannedMinutes,
+      defaultsApplied,
+    );
+    const minBufferMinutes = preferenceInteger(
+      'minBufferMinutes',
+      preferences.minBufferMinutes,
+      0,
+      240,
+      PRODUCT_DEFAULT_PREFERENCES.minBufferMinutes,
+      defaultsApplied,
+    );
+    const maxConsecutiveHighEnergyBlocks = preferenceInteger(
+      'maxConsecutiveHighEnergyBlocks',
+      preferences.maxConsecutiveHighEnergyBlocks,
+      1,
+      24,
+      PRODUCT_DEFAULT_PREFERENCES.maxConsecutiveHighEnergyBlocks,
+      defaultsApplied,
+    );
+    return {
+      source: defaultsApplied.length ? 'persisted_with_defaults' : 'persisted',
+      defaultsApplied,
+      timezone,
+      workingHours,
+      maxDailyPlannedMinutes,
+      maxWeeklyPlannedMinutes,
+      minBufferMinutes,
+      maxConsecutiveHighEnergyBlocks,
+    };
+  }
+
+  async captureSnapshot(
+    uid: string,
+    planId: string,
+    refs: readonly EntityReference[],
+    createdAt: string,
+  ): Promise<ChangeSnapshot> {
+    assertUid(uid);
+    assertEntityId(planId);
+    if (refs.length < 1 || refs.length > 100) {
+      throw new DomainError('LIMIT_EXCEEDED', 'A snapshot must contain 1-100 entities.');
+    }
+    const references = refs.map(({ collection, id }) => this.entityRef(uid, collection, id));
+    const documents = await this.firestore.getAll(...references);
+    const entries = documents.map((document, index) => {
+      const reference = refs[index];
+      if (!reference) throw new DomainError('INTERNAL', 'Snapshot reference mismatch.');
+      const record = document.exists ? normalizeEntitySnapshot(uid, document) : null;
+      return {
+        collection: reference.collection,
+        id: reference.id,
+        existed: Boolean(record),
+        version: record?._version ?? null,
+        contentHash: record ? hashEntityState(record) : null,
+        value: record,
+      };
+    });
+    return { id: planId, uid, planId, createdAt, entries };
+  }
+
+  async savePreview(request: SavePreviewRequest): Promise<StoredChangePlan> {
+    const { plan, snapshot, approval, audit } = request;
+    assertPreviewRelationships(plan, snapshot, approval, audit);
+    const planRef = this.firestore.doc(SERVER_ONLY_PATHS.changePlan(plan.uid, plan.id));
+    const snapshotRef = this.firestore.doc(SERVER_ONLY_PATHS.snapshot(plan.uid, plan.id));
+    const approvalRef = this.firestore.doc(SERVER_ONLY_PATHS.approval(plan.uid, plan.id));
+    const auditRef = this.auditRef(audit);
+    const stored: StoredChangePlan = { ...clone(plan), status: 'previewed' };
+
+    await this.firestore.runTransaction(async (transaction) => {
+      const existing = await transaction.getAll(planRef, snapshotRef, approvalRef, auditRef);
+      if (existing.some((document) => document.exists)) {
+        throw new DomainError('CONFLICT', 'Plan already exists.');
+      }
+      transaction.create(planRef, encodeServer(stored));
+      transaction.create(snapshotRef, encodeServer(snapshot));
+      transaction.create(approvalRef, encodeServer(approval));
+      transaction.create(auditRef, encodeServer(audit));
+    });
+    return clone(stored);
+  }
+
+  async getPlan(uid: string, planId: string): Promise<StoredChangePlan | null> {
+    assertUid(uid);
+    assertEntityId(planId);
+    const snapshot = await this.firestore.doc(SERVER_ONLY_PATHS.changePlan(uid, planId)).get();
+    return snapshot.exists ? decodeOwnedServerDocument<StoredChangePlan>(snapshot, uid) : null;
+  }
+
+  async applyPlanAtomically(request: ApplyPlanRequest): Promise<PlanActionResult> {
+    assertUid(request.uid);
+    assertEntityId(request.planId);
+    assertEntityId(request.executionId);
+    const transactionResult = await this.firestore.runTransaction(async (transaction): Promise<TransactionResult> => {
+      const idempotencyRef = this.idempotencyRef(request.uid, 'apply', request.idempotencyKeyHash);
+      const idempotencySnapshot = await transaction.get(idempotencyRef);
+      if (idempotencySnapshot.exists) {
+        return replayResult(idempotencySnapshot, request.uid, 'apply', request.planId);
+      }
+
+      const planRef = this.firestore.doc(SERVER_ONLY_PATHS.changePlan(request.uid, request.planId));
+      const snapshotRef = this.firestore.doc(SERVER_ONLY_PATHS.snapshot(request.uid, request.planId));
+      const approvalRef = this.firestore.doc(SERVER_ONLY_PATHS.approval(request.uid, request.planId));
+      const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(request.uid, request.executionId));
+      const auditId = request.executionId;
+      const auditRef = this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${request.uid}_${auditId}`);
+      const [planSnapshot, beforeSnapshot, approvalSnapshot, executionSnapshot, auditSnapshot] =
+        await transaction.getAll(planRef, snapshotRef, approvalRef, executionRef, auditRef);
+      if (!planSnapshot || !beforeSnapshot || !approvalSnapshot || !executionSnapshot || !auditSnapshot) {
+        throw new DomainError('INTERNAL', 'Plan transaction read is incomplete.');
+      }
+      if (!planSnapshot.exists || !beforeSnapshot.exists || !approvalSnapshot.exists) {
+        throw new DomainError('NOT_FOUND', 'Change plan not found.');
+      }
+      if (executionSnapshot.exists || auditSnapshot.exists) {
+        throw new DomainError('CONFLICT', 'Execution identifier already exists.');
+      }
+
+      const plan = decodeOwnedServerDocument<StoredChangePlan>(planSnapshot, request.uid);
+      const snapshot = decodeOwnedServerDocument<ChangeSnapshot>(beforeSnapshot, request.uid);
+      const approval = decodeOwnedServerDocument<ApprovalRecord>(approvalSnapshot, request.uid);
+      validateApply(request, plan, snapshot, approval);
+
+      const entityRefs = plan.operations.map(({ collection, id }) => this.entityRef(request.uid, collection, id));
+      const entitySnapshots = await transaction.getAll(...entityRefs);
+      const currentRecords = entitySnapshots.map((document) =>
+        document.exists ? normalizeEntitySnapshot(request.uid, document) : null,
+      );
+      assertSnapshotCurrent(snapshot, plan.operations, currentRecords);
+
+      const appliedVersions: Record<string, number | null> = {};
+      const appliedStateHashes: Record<string, string | null> = {};
+      for (let index = 0; index < plan.operations.length; index += 1) {
+        const operation = plan.operations[index];
+        const entityRef = entityRefs[index];
+        const current = currentRecords[index] ?? null;
+        if (!operation || !entityRef) throw new DomainError('INTERNAL', 'Plan operation mismatch.');
+        const key = refKey(operation.collection, operation.id);
+        if (operation.op === 'create') {
+          if (current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
+          const created = entityAfterCreate(request.uid, operation.id, operation.values, request.now);
+          transaction.create(entityRef, encodeEntity(created));
+          appliedVersions[key] = created._version;
+          appliedStateHashes[key] = hashEntityState(created);
+        } else if (operation.op === 'update') {
+          if (!current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
+          const updated = entityAfterUpdate(request.uid, current, operation.values, request.now);
+          transaction.set(entityRef, encodeEntity(updated));
+          appliedVersions[key] = updated._version;
+          appliedStateHashes[key] = hashEntityState(updated);
+        } else {
+          if (!current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
+          transaction.delete(entityRef);
+          appliedVersions[key] = null;
+          appliedStateHashes[key] = null;
+        }
+      }
+
+      const updatedPlan: StoredChangePlan = {
+        ...plan,
+        status: 'applied',
+        appliedAt: request.now,
+        appliedVersions,
+        appliedStateHashes,
+      };
+      const affected = plan.operations.map(({ collection, id }) => ({ collection, id }));
+      const result: PlanActionResult = {
+        executionId: request.executionId,
+        planId: plan.id,
+        hash: plan.hash,
+        status: 'applied',
+        idempotentReplay: false,
+        verified: false,
+        affected,
+        receipt: {
+          executionId: request.executionId,
+          planId: plan.id,
+          changesetHash: plan.hash,
+          status: 'applied',
+          verified: false,
+          timestamp: request.now,
+          affected,
+          rollbackAvailable: true,
+          rollbackExpiresAt: request.rollbackExpiresAt,
+        },
+      };
+      const execution: StoredExecution = {
+        id: request.executionId,
+        uid: request.uid,
+        planId: plan.id,
+        requestId: request.requestId,
+        auditId,
+        idempotencyKeyHash: request.idempotencyKeyHash,
+        createdAt: request.now,
+        status: 'applied',
+        verified: false,
+        rollbackCapabilityHash: request.rollbackCapabilityHash,
+        rollbackExpiresAt: request.rollbackExpiresAt,
+        result: withoutReplay(result),
+      };
+      const audit = actionAudit(
+        updatedPlan,
+        request.uid,
+        request.requestId,
+        auditId,
+        'apply',
+        request.now,
+        false,
+        appliedStateHashes,
+      );
+
+      transaction.set(planRef, encodeServer(updatedPlan));
+      transaction.set(approvalRef, encodeServer({
+        ...approval,
+        status: 'consumed',
+        consumedAt: request.now,
+        executionId: request.executionId,
+      } satisfies ApprovalRecord));
+      transaction.create(executionRef, encodeServer(execution));
+      transaction.create(auditRef, encodeServer(audit));
+      transaction.create(idempotencyRef, encodeServer({
+        uid: request.uid,
+        action: 'apply',
+        resourceId: plan.id,
+        executionId: request.executionId,
+        createdAt: request.now,
+        result: withoutRollback(result),
+      }));
+      return { result, replay: false };
+    });
+
+    return this.verifyAndMark(request.uid, transactionResult.result, transactionResult.replay, request.idempotencyKeyHash);
+  }
+
+  async rollbackExecutionAtomically(request: RollbackExecutionRequest): Promise<PlanActionResult> {
+    assertUid(request.uid);
+    assertEntityId(request.executionId);
+    const transactionResult = await this.firestore.runTransaction(async (transaction): Promise<TransactionResult> => {
+      const idempotencyRef = this.idempotencyRef(request.uid, 'rollback', request.idempotencyKeyHash);
+      const idempotencySnapshot = await transaction.get(idempotencyRef);
+      if (idempotencySnapshot.exists) {
+        return replayResult(idempotencySnapshot, request.uid, 'rollback', request.executionId);
+      }
+
+      const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(request.uid, request.executionId));
+      const executionSnapshot = await transaction.get(executionRef);
+      if (!executionSnapshot.exists) throw new DomainError('NOT_FOUND', 'Execution not found.');
+      const execution = decodeOwnedServerDocument<StoredExecution>(executionSnapshot, request.uid);
+      validateRollback(request, execution);
+
+      const planRef = this.firestore.doc(SERVER_ONLY_PATHS.changePlan(request.uid, execution.planId));
+      const snapshotRef = this.firestore.doc(SERVER_ONLY_PATHS.snapshot(request.uid, execution.planId));
+      const auditId = randomUUID();
+      const auditRef = this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${request.uid}_${auditId}`);
+      const [planSnapshot, beforeSnapshot, auditSnapshot] = await transaction.getAll(
+        planRef,
+        snapshotRef,
+        auditRef,
+      );
+      if (!planSnapshot || !beforeSnapshot || !auditSnapshot) {
+        throw new DomainError('INTERNAL', 'Rollback transaction read is incomplete.');
+      }
+      if (!planSnapshot.exists || !beforeSnapshot.exists) throw new DomainError('NOT_FOUND', 'Execution not found.');
+      if (auditSnapshot.exists) throw new DomainError('CONFLICT', 'Audit identifier already exists.');
+      const plan = decodeOwnedServerDocument<StoredChangePlan>(planSnapshot, request.uid);
+      const snapshot = decodeOwnedServerDocument<ChangeSnapshot>(beforeSnapshot, request.uid);
+      verifyStoredPlan(plan);
+      if (plan.status !== 'applied' || !plan.appliedStateHashes) {
+        throw new DomainError('APPROVAL_REPLAYED', 'Execution was already actioned.');
+      }
+
+      const entityRefs = plan.operations.map(({ collection, id }) => this.entityRef(request.uid, collection, id));
+      const entitySnapshots = await transaction.getAll(...entityRefs);
+      const currentRecords = entitySnapshots.map((document) =>
+        document.exists ? normalizeEntitySnapshot(request.uid, document) : null,
+      );
+      assertAppliedStateCurrent(plan, currentRecords);
+
+      const restoredStateHashes: Record<string, string | null> = {};
+      for (let index = 0; index < snapshot.entries.length; index += 1) {
+        const entry = snapshot.entries[index];
+        const entityRef = entityRefs[index];
+        const current = currentRecords[index] ?? null;
+        if (!entry || !entityRef) throw new DomainError('INTERNAL', 'Rollback snapshot mismatch.');
+        const key = refKey(entry.collection, entry.id);
+        if (!entry.existed) {
+          transaction.delete(entityRef);
+          restoredStateHashes[key] = null;
+        } else if (entry.value) {
+          const restored: EntityRecord = {
+            ...clone(entry.value),
+            id: entry.id,
+            userId: request.uid,
+            _version: (current?._version ?? entry.version ?? 0) + 1,
+            updatedAt: request.now,
+          };
+          transaction.set(entityRef, encodeEntity(restored));
+          restoredStateHashes[key] = hashEntityState(restored);
+        } else {
+          throw new DomainError('INTERNAL', 'Rollback snapshot is incomplete.');
+        }
+      }
+
+      const updatedPlan: StoredChangePlan = {
+        ...plan,
+        status: 'rolled_back',
+        rolledBackAt: request.now,
+      };
+      const affected = plan.operations.map(({ collection, id }) => ({ collection, id }));
+      const result: PlanActionResult = {
+        executionId: execution.id,
+        planId: plan.id,
+        hash: plan.hash,
+        status: 'rolled_back',
+        idempotentReplay: false,
+        verified: false,
+        affected,
+        receipt: {
+          executionId: execution.id,
+          planId: plan.id,
+          changesetHash: plan.hash,
+          status: 'rolled_back',
+          verified: false,
+          timestamp: request.now,
+          affected,
+          rollbackAvailable: false,
+          rollbackExpiresAt: null,
+        },
+      };
+      const updatedExecution: StoredExecution = {
+        ...execution,
+        auditId,
+        status: 'rolled_back',
+        verified: false,
+        rollbackConsumedAt: request.now,
+        restoredStateHashes,
+        result: withoutReplay(result),
+      };
+      const audit = actionAudit(
+        updatedPlan,
+        request.uid,
+        request.requestId,
+        auditId,
+        'rollback',
+        request.now,
+        false,
+        restoredStateHashes,
+      );
+
+      transaction.set(planRef, encodeServer(updatedPlan));
+      transaction.set(executionRef, encodeServer(updatedExecution));
+      transaction.create(auditRef, encodeServer(audit));
+      transaction.create(idempotencyRef, encodeServer({
+        uid: request.uid,
+        action: 'rollback',
+        resourceId: request.executionId,
+        executionId: request.executionId,
+        createdAt: request.now,
+        result: withoutRollback(result),
+      }));
+      return { result, replay: false };
+    });
+
+    return this.verifyAndMark(request.uid, transactionResult.result, transactionResult.replay, request.idempotencyKeyHash);
+  }
+
+  async getExecution(uid: string, executionId: string): Promise<StoredExecution | null> {
+    assertUid(uid);
+    assertEntityId(executionId);
+    const snapshot = await this.firestore.doc(SERVER_ONLY_PATHS.execution(uid, executionId)).get();
+    return snapshot.exists ? decodeOwnedServerDocument<StoredExecution>(snapshot, uid) : null;
+  }
+
+  async recordAudit(event: AuditEvent): Promise<void> {
+    assertUid(event.uid);
+    if (event.uid !== event.actorUid) throw new DomainError('FORBIDDEN', 'Audit actor mismatch.');
+    await this.auditRef(event).create(encodeServer(event));
+  }
+
+  async listAuditEventsForUser(uid: string): Promise<readonly AuditEvent[]> {
+    assertUid(uid);
+    const snapshot = await this.firestore
+      .collection(SERVER_ONLY_PATHS.auditCollection)
+      .where('uid', '==', uid)
+      .limit(MAX_AUDIT_RESULTS)
+      .get();
+    return snapshot.docs
+      .map((document) => decodeOwnedServerDocument<AuditEvent>(document, uid))
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  private async verifyAndMark(
+    uid: string,
+    result: PlanActionResult,
+    replay: boolean,
+    idempotencyKeyHash: string,
+  ): Promise<PlanActionResult> {
+    if (result.verified) return { ...result, idempotentReplay: replay || result.idempotentReplay };
+    const execution = await this.getExecution(uid, result.executionId);
+    if (!execution) {
+      throw new DomainError('COMMITTED_UNVERIFIED', 'Execution verification record is unavailable.');
+    }
+    const expected = result.status === 'applied'
+      ? (await this.getPlan(execution.uid, execution.planId))?.appliedStateHashes
+      : execution.restoredStateHashes;
+    if (!expected) {
+      throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state is missing verification metadata.');
+    }
+    try {
+      await this.verifyExpectedHashes(execution.uid, expected);
+      const verified: PlanActionResult = {
+        ...result,
+        idempotentReplay: replay || result.idempotentReplay,
+        verified: true,
+        receipt: { ...result.receipt, verified: true },
+      };
+      const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(execution.uid, execution.id));
+      const idempotencyRef = this.idempotencyRef(
+        execution.uid,
+        result.status === 'applied' ? 'apply' : 'rollback',
+        idempotencyKeyHash,
+      );
+      const auditRef = this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${execution.uid}_${execution.auditId}`);
+      const batch = this.firestore.batch();
+      batch.update(executionRef, {
+        verified: true,
+        result: encodeServer(withoutReplay(verified)),
+      });
+      batch.update(idempotencyRef, { result: encodeServer(withoutRollback(verified)) });
+      batch.update(auditRef, { 'metadata.verified': true });
+      await batch.commit();
+      return verified;
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'COMMITTED_UNVERIFIED') throw error;
+      throw new DomainError('COMMITTED_UNVERIFIED', 'The committed change could not be verified yet.');
+    }
+  }
+
+  private async verifyExpectedHashes(
+    uid: string,
+    expected: Readonly<Record<string, string | null>>,
+  ): Promise<void> {
+    const entries = Object.entries(expected);
+    const references = entries.map(([key]) => {
+      const [collection, id, extra] = key.split('/');
+      if (extra || !collection || !id) throw new DomainError('COMMITTED_UNVERIFIED', 'Invalid verification reference.');
+      return this.entityRef(uid, collection as EntityCollection, id);
+    });
+    const documents = await this.firestore.getAll(...references);
+    for (let index = 0; index < entries.length; index += 1) {
+      const expectedHash = entries[index]?.[1];
+      const document = documents[index];
+      if (!document) throw new DomainError('COMMITTED_UNVERIFIED', 'Verification read is incomplete.');
+      const actualHash = document.exists
+        ? hashEntityState(normalizeEntitySnapshot(uid, document))
+        : null;
+      if (actualHash !== expectedHash) {
+        throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state changed before verification.');
+      }
+    }
+  }
+
+  private entityRef(
+    uid: string,
+    collection: EntityCollection,
+    id: string,
+  ): DocumentReference<DocumentData> {
+    assertUid(uid);
+    assertEntityId(id);
+    return this.firestore.doc(SERVER_ONLY_PATHS.entity(uid, collection, id));
+  }
+
+  private auditRef(event: AuditEvent): DocumentReference<DocumentData> {
+    assertEntityId(event.id);
+    return this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${event.uid}_${event.id}`);
+  }
+
+  private idempotencyRef(
+    uid: string,
+    action: 'apply' | 'rollback',
+    keyHash: string,
+  ): DocumentReference<DocumentData> {
+    if (!/^[a-f0-9]{64}$/.test(keyHash)) throw new DomainError('INVALID_ARGUMENT', 'Invalid idempotency key.');
+    return this.firestore.doc(SERVER_ONLY_PATHS.idempotency(uid, `${action}_${keyHash}`));
+  }
+}
+
+function assertPreviewRelationships(
+  plan: StoredChangePlan | SavePreviewRequest['plan'],
+  snapshot: ChangeSnapshot,
+  approval: ApprovalRecord,
+  audit: AuditEvent,
+): void {
+  assertUid(plan.uid);
+  if (
+    plan.uid !== snapshot.uid ||
+    plan.uid !== approval.uid ||
+    plan.uid !== audit.uid ||
+    plan.uid !== audit.actorUid ||
+    plan.id !== snapshot.planId ||
+    plan.id !== approval.planId ||
+    plan.id !== audit.planId ||
+    plan.hash !== approval.planHash ||
+    plan.baseStateHash !== approval.baseStateHash ||
+    plan.baseStateHash !== hashSnapshotState(snapshot)
+  ) {
+    throw new DomainError('FORBIDDEN', 'Preview ownership or integrity mismatch.');
+  }
+}
+
+function validateApply(
+  request: ApplyPlanRequest,
+  plan: StoredChangePlan,
+  snapshot: ChangeSnapshot,
+  approval: ApprovalRecord,
+): void {
+  verifyStoredPlan(plan);
+  assertPreviewRelationships(plan, snapshot, approval, {
+    id: 'validation-only',
+    uid: request.uid,
+    actorUid: request.uid,
+    requestId: request.requestId,
+    planId: plan.id,
+    tool: plan.tool,
+    action: 'preview',
+    outcome: 'success',
+    timestamp: request.now,
+    entityRefs: [],
+    metadata: {},
+  });
+  if (plan.status !== 'previewed' || approval.status === 'consumed') {
+    throw new DomainError('APPROVAL_REPLAYED', 'Approval was already consumed.');
+  }
+  if (Date.parse(plan.expiresAt) <= Date.parse(request.now) || Date.parse(approval.expiresAt) <= Date.parse(request.now)) {
+    throw new DomainError('EXPIRED', 'Approval expired.');
+  }
+  if (plan.conflicts.length) throw new DomainError('CONFLICT', 'Plan has unresolved conflicts.');
+  if (!capabilityHashMatches(request.approvalCapabilityHash, approval.capabilityHash)) {
+    throw new DomainError('APPROVAL_REQUIRED', 'Approval does not match this plan.');
+  }
+}
+
+function validateRollback(request: RollbackExecutionRequest, execution: StoredExecution): void {
+  if (execution.status !== 'applied' || execution.rollbackConsumedAt) {
+    throw new DomainError('APPROVAL_REPLAYED', 'Rollback capability was already consumed.');
+  }
+  if (Date.parse(execution.rollbackExpiresAt) <= Date.parse(request.now)) {
+    throw new DomainError('EXPIRED', 'Rollback capability expired.');
+  }
+  if (!capabilityHashMatches(request.rollbackCapabilityHash, execution.rollbackCapabilityHash)) {
+    throw new DomainError('APPROVAL_REQUIRED', 'Rollback capability is invalid.');
+  }
+}
+
+function assertSnapshotCurrent(
+  snapshot: ChangeSnapshot,
+  operations: StoredChangePlan['operations'],
+  currentRecords: readonly (EntityRecord | null)[],
+): void {
+  const byReference = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
+  for (let index = 0; index < operations.length; index += 1) {
+    const operation = operations[index];
+    if (!operation) throw new DomainError('INTERNAL', 'Plan operation mismatch.');
+    const entry = byReference.get(refKey(operation.collection, operation.id));
+    const current = currentRecords[index] ?? null;
+    if (
+      !entry ||
+      entry.existed !== Boolean(current) ||
+      entry.version !== (current?._version ?? null) ||
+      entry.contentHash !== (current ? hashEntityState(current) : null)
+    ) {
+      throw new DomainError('STATE_CHANGED', 'The preview is stale.');
+    }
+  }
+}
+
+function assertAppliedStateCurrent(
+  plan: StoredChangePlan,
+  currentRecords: readonly (EntityRecord | null)[],
+): void {
+  for (let index = 0; index < plan.operations.length; index += 1) {
+    const operation = plan.operations[index];
+    if (!operation) throw new DomainError('INTERNAL', 'Plan operation mismatch.');
+    const current = currentRecords[index] ?? null;
+    const key = refKey(operation.collection, operation.id);
+    if (
+      plan.appliedVersions?.[key] !== (current?._version ?? null) ||
+      plan.appliedStateHashes?.[key] !== (current ? hashEntityState(current) : null)
+    ) {
+      throw new DomainError('STATE_CHANGED', 'Rollback refused because state changed after apply.');
+    }
+  }
+}
+
+function replayResult(
+  snapshot: DocumentSnapshot,
+  uid: string,
+  action: 'apply' | 'rollback',
+  resourceId: string,
+): TransactionResult {
+  const data = decodeOwnedServerDocument<Record<string, unknown>>(snapshot, uid);
+  if (data.action !== action || data.resourceId !== resourceId) {
+    throw new DomainError('CONFLICT', 'Idempotency key was already used for another operation.');
+  }
+  const result = asRecord(data.result);
+  if (!result) throw new DomainError('INTERNAL', 'Idempotency receipt is invalid.');
+  return {
+    result: { ...(result as unknown as PlanActionResult), idempotentReplay: true },
+    replay: true,
+  };
+}
+
+function entityAfterCreate(
+  uid: string,
+  id: string,
+  values: Readonly<Record<string, unknown>>,
+  now: string,
+): EntityRecord {
+  return {
+    ...clone(values),
+    id,
+    userId: uid,
+    _version: 1,
+    createdAt: now,
+    updatedAt: now,
+  } as EntityRecord;
+}
+
+function entityAfterUpdate(
+  uid: string,
+  current: EntityRecord,
+  values: Readonly<Record<string, unknown>>,
+  now: string,
+): EntityRecord {
+  return {
+    ...clone(current),
+    ...clone(values),
+    id: current.id,
+    userId: uid,
+    _version: current._version + 1,
+    createdAt: current.createdAt,
+    updatedAt: now,
+  } as EntityRecord;
+}
+
+function actionAudit(
+  plan: StoredChangePlan,
+  uid: string,
+  requestId: string,
+  id: string,
+  action: 'apply' | 'rollback',
+  timestamp: string,
+  verified: boolean,
+  resultStateHashes: Readonly<Record<string, string | null>>,
+): AuditEvent {
+  return {
+    id,
+    uid,
+    actorUid: uid,
+    requestId,
+    planId: plan.id,
+    tool: plan.tool,
+    action,
+    outcome: 'success',
+    timestamp,
+    entityRefs: plan.operations.map(({ collection, id: entityId }) => ({ collection, id: entityId })),
+    metadata: {
+      operationCount: plan.operations.length,
+      changesetHash: plan.hash,
+      baseStateHash: plan.baseStateHash,
+      resultStateHash: hashResultState(resultStateHashes),
+      verified,
+      ...(plan.orchestration
+        ? {
+            model: plan.orchestration.model,
+            promptVersion: plan.orchestration.promptVersion,
+            schemaVersion: plan.orchestration.schemaVersion,
+          }
+        : {}),
+    },
+  };
+}
+
+function normalizeEntitySnapshot(uid: string, snapshot: DocumentSnapshot): EntityRecord {
+  const decoded = decodeFirestore(snapshot.data() ?? {});
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+    throw new DomainError('INTERNAL', 'Entity data is invalid.');
+  }
+  const data = decoded as Record<string, unknown>;
+  assertEmbeddedOwnership(uid, data);
+  if (data.id !== undefined && data.id !== snapshot.id) {
+    throw new DomainError('FORBIDDEN', 'Entity identity is inconsistent.');
+  }
+  const version = typeof data._version === 'number' && Number.isInteger(data._version) && data._version >= 0
+    ? data._version
+    : 0;
+  return {
+    ...data,
+    id: snapshot.id,
+    userId: uid,
+    _version: version,
+    createdAt: typeof data.createdAt === 'string' ? data.createdAt : EPOCH,
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : EPOCH,
+  } as EntityRecord;
+}
+
+function decodeOwnedServerDocument<T>(snapshot: DocumentSnapshot, uid: string): T {
+  const decoded = decodeFirestore(snapshot.data() ?? {});
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+    throw new DomainError('INTERNAL', 'Server record is invalid.');
+  }
+  const record = decoded as Record<string, unknown>;
+  if (record.uid !== uid) throw new DomainError('FORBIDDEN', 'Resource is unavailable.');
+  return clone(record) as T;
+}
+
+function assertEmbeddedOwnership(uid: string, data: Record<string, unknown>): void {
+  for (const field of ['userId', 'uid', 'ownerId', 'ownerUid'] as const) {
+    const owner = data[field];
+    if (owner !== undefined && owner !== uid) {
+      throw new DomainError('FORBIDDEN', 'Resource is unavailable.');
+    }
+  }
+}
+
+function encodeEntity(value: EntityRecord): DocumentData {
+  return encodeEntityValue(value) as DocumentData;
+}
+
+function encodeEntityValue(value: unknown, key?: string): unknown {
+  if (typeof value === 'string' && key && ENTITY_DATE_FIELDS.has(key) && isIsoInstant(value)) {
+    return Timestamp.fromDate(new Date(value));
+  }
+  if (Array.isArray(value)) return value.map((item) => encodeEntityValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([entryKey, item]) => [entryKey, encodeEntityValue(item, entryKey)]),
+    );
+  }
+  return value;
+}
+
+function encodeServer(value: unknown): DocumentData {
+  return stripUndefined(clone(value)) as DocumentData;
+}
+
+function stripUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUndefined);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, stripUndefined(item)]),
+    );
+  }
+  return value;
+}
+
+function decodeFirestore(value: unknown): unknown {
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (Array.isArray(value)) return value.map(decodeFirestore);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, decodeFirestore(item)]),
+    );
+  }
+  return value;
+}
+
+function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean {
+  const { filter } = request;
+  if (filter.status && record.status !== filter.status) return false;
+  for (const field of ['domainId', 'projectId', 'goalId', 'taskId'] as const) {
+    if (filter[field] && record[field] !== filter[field]) return false;
+  }
+  if (filter.query) {
+    const haystack = [record.title, record.name, record.description, record.content]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ')
+      .toLocaleLowerCase('en-US');
+    if (!haystack.includes(filter.query.toLocaleLowerCase('en-US'))) return false;
+  }
+  const timestamp = recordTimestamp(record);
+  if (filter.from && timestamp < Date.parse(filter.from)) return false;
+  if (filter.to && timestamp >= Date.parse(filter.to)) return false;
+  return true;
+}
+
+function recordTimestamp(record: EntityRecord): number {
+  for (const field of ['startTime', 'date', 'updatedAt', 'createdAt'] as const) {
+    if (typeof record[field] === 'string') {
+      const parsed = Date.parse(record[field]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
+}
+
+function queryFingerprint(collection: EntityCollection, request: ReadPageRequest): string {
+  return Buffer.from(JSON.stringify([collection, request.filter])).toString('base64url');
+}
+
+function encodeCursor(fingerprint: string, lastId: string): string {
+  return Buffer.from(JSON.stringify({ fingerprint, lastId })).toString('base64url');
+}
+
+function decodeCursor(cursor: string, fingerprint: string): string {
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
+    const record = asRecord(decoded);
+    if (!record || record.fingerprint !== fingerprint || typeof record.lastId !== 'string') throw new Error('invalid');
+    assertEntityId(record.lastId);
+    return record.lastId;
+  } catch {
+    throw new DomainError('INVALID_ARGUMENT', 'Invalid or stale pagination cursor.');
+  }
+}
+
+function withoutReplay(
+  result: PlanActionResult,
+): Omit<PlanActionResult, 'idempotentReplay' | 'rollback'> {
+  const { idempotentReplay: _replay, rollback: _rollback, ...stored } = result;
+  return clone(stored);
+}
+
+function withoutRollback(result: PlanActionResult): Omit<PlanActionResult, 'rollback'> {
+  const { rollback: _rollback, ...stored } = result;
+  return clone(stored);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function assertUid(uid: string): void {
+  if (!UID_PATTERN.test(uid)) throw new DomainError('UNAUTHENTICATED', 'Verified Firebase identity is invalid.');
+}
+
+function validTimeZone(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 100) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validClock(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function usePreferenceDefault<T>(field: string, fallback: T, defaultsApplied: string[]): T {
+  defaultsApplied.push(field);
+  return fallback;
+}
+
+function preferenceInteger(
+  field: string,
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+  defaultsApplied: string[],
+): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : usePreferenceDefault(field, fallback, defaultsApplied);
+}
+
+function isIsoInstant(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function refKey(collection: EntityCollection, id: string): string {
+  return `${collection}/${id}`;
+}
+
+function clone<T>(value: T): T {
+  return structuredClone(value);
+}

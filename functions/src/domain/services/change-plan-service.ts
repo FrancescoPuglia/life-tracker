@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { CapabilityIssuer, hashCapability } from '../capabilities';
 import { DomainError, isDomainError } from '../errors';
-import { hashIdempotencyKey, hashPlan, verifyStoredPlan } from '../integrity';
+import { hashIdempotencyKey, hashPlan, hashSnapshotState, verifyStoredPlan } from '../integrity';
 import {
   assertAuthenticated,
   normalizePublicOperation,
@@ -9,7 +10,7 @@ import {
 } from '../policy';
 import type { Repository } from '../repository';
 import { sanitizeEntity } from '../sanitize';
-import type { PlanActionArgs, PreviewChangesArgs } from '../schemas';
+import type { PreviewChangesArgs } from '../schemas';
 import type {
   AuditEvent,
   AuthContext,
@@ -30,15 +31,45 @@ export interface ChangePlanServiceOptions {
   readonly clock?: () => Date;
   readonly idFactory?: () => string;
   readonly previewTtlMs?: number;
+  readonly rollbackTtlMs?: number;
+  readonly capabilityIssuer?: CapabilityIssuer;
+}
+
+export interface ApplyPlanInput {
+  readonly planId: string;
+  readonly approvalCapability: string;
+  readonly idempotencyKey: string;
+}
+
+export interface RollbackExecutionInput {
+  readonly executionId: string;
+  readonly rollbackCapability: string;
+  readonly idempotencyKey: string;
+}
+
+export interface PreviewMetadata {
+  readonly reason?: string;
+  readonly assumptions?: readonly string[];
+  readonly expectedImpact?: readonly string[];
 }
 
 const DEFAULT_TTL_MS = 15 * 60_000;
+const DEFAULT_ROLLBACK_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAX_OPERATIONS = 100;
+const MAX_STORED_PLAN_BYTES = 750_000;
+const MAX_STORED_SNAPSHOT_BYTES = 750_000;
+// ToolExecutor permits 256 KiB. Leave envelope headroom so a preview cannot
+// be persisted and then become impossible to return to the authenticated UI.
+const MAX_PUBLIC_PREVIEW_BYTES = 240_000;
+const AI_DELETABLE_COLLECTIONS = new Set<EntityCollection>(['timeBlocks', 'notes']);
+const UNMAPPED_TIMEBLOCK_TYPES = new Set(['break', 'buffer', 'travel', 'admin']);
 
 export class ChangePlanService {
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
   private readonly previewTtlMs: number;
+  private readonly rollbackTtlMs: number;
+  private readonly capabilityIssuer: CapabilityIssuer | undefined;
 
   constructor(
     private readonly repository: Repository,
@@ -47,6 +78,8 @@ export class ChangePlanService {
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
     this.previewTtlMs = options.previewTtlMs ?? DEFAULT_TTL_MS;
+    this.rollbackTtlMs = options.rollbackTtlMs ?? DEFAULT_ROLLBACK_TTL_MS;
+    this.capabilityIssuer = options.capabilityIssuer;
   }
 
   async previewChanges(context: AuthContext, args: PreviewChangesArgs): Promise<PublicChangePlan> {
@@ -56,7 +89,9 @@ export class ChangePlanService {
       id: operation.id,
       values: normalizePublicOperation(operation),
     }));
-    return this.previewOperations(context, 'preview_changes', operations, [], []);
+    return this.previewOperations(context, 'preview_changes', operations, [], [], {
+      reason: args.reason,
+    });
   }
 
   /** Used by scheduling and future Goal Architect adapters after draft creation. */
@@ -66,6 +101,7 @@ export class ChangePlanService {
     operations: readonly ChangeOperation[],
     warnings: readonly string[],
     conflicts: readonly string[],
+    metadata: PreviewMetadata = {},
   ): Promise<PublicChangePlan> {
     assertAuthenticated(context);
     if (!operations.length || operations.length > MAX_OPERATIONS) {
@@ -84,6 +120,7 @@ export class ChangePlanService {
       refs,
       createdAt,
     );
+    const baseStateHash = hashSnapshotState(snapshot);
     const snapshotByRef = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
     const diff = operations.map((operation) => {
       const before = snapshotByRef.get(refKey(operation.collection, operation.id));
@@ -105,43 +142,65 @@ export class ChangePlanService {
       createdAt,
       expiresAt,
       snapshotId: snapshot.id,
+      baseStateHash,
+      orchestration: context.orchestration ? structuredClone(context.orchestration) : null,
       operations: structuredClone(operations),
       diff,
+      reason: normalizeNotice(metadata.reason ?? 'User-requested Life Tracker proposal.', 500),
       warnings: [...warnings],
       conflicts: [...conflicts],
+      assumptions: normalizeNotices(metadata.assumptions ?? []),
+      expectedImpact: normalizeNotices(metadata.expectedImpact ?? []),
+      destructiveOperationCount: operations.filter((operation) => operation.op === 'delete').length,
     };
     const plan: ImmutableChangePlan = {
       ...planWithoutHash,
       hash: hashPlan(planWithoutHash),
     };
+    const approvalCapability = this.issuer().issue('approval', context.uid, plan.id, plan.hash);
+    const previewCandidate: StoredChangePlan = { ...plan, status: 'previewed' };
+    assertSerializedSize(snapshot, MAX_STORED_SNAPSHOT_BYTES, 'Snapshot');
+    assertSerializedSize(previewCandidate, MAX_STORED_PLAN_BYTES, 'Plan');
+    assertSerializedSize(
+      publicPlan(previewCandidate, approvalCapability),
+      MAX_PUBLIC_PREVIEW_BYTES,
+      'Public preview',
+    );
     const stored = await this.repository.savePreview({
       plan,
       snapshot,
+      approval: {
+        uid: context.uid,
+        planId: plan.id,
+        planHash: plan.hash,
+        baseStateHash,
+        capabilityHash: hashCapability(approvalCapability),
+        createdAt,
+        expiresAt,
+        status: 'pending',
+      },
       audit: auditFor(plan, context, 'preview', 'success', createdAt),
     });
-    return publicPlan(stored);
+    return publicPlan(stored, approvalCapability);
   }
 
   async getPlan(context: AuthContext, planId: string): Promise<PublicChangePlan> {
     assertAuthenticated(context);
     const plan = await this.repository.getPlan(context.uid, planId);
     if (!plan) throw new DomainError('NOT_FOUND', 'Change plan not found.');
-    return publicPlan(plan);
+    verifyStoredPlan(plan);
+    if (plan.uid !== context.uid) throw new DomainError('NOT_FOUND', 'Change plan not found.');
+    if (plan.status !== 'previewed') {
+      throw new DomainError('CONFLICT', 'Change plan is no longer awaiting approval.');
+    }
+    if (Date.parse(plan.expiresAt) <= this.clock().getTime()) {
+      throw new DomainError('EXPIRED', 'Change plan has expired.');
+    }
+    const capability = this.issuer().issue('approval', context.uid, plan.id, plan.hash);
+    return publicPlan(plan, capability);
   }
 
-  async applyPlan(context: AuthContext, args: PlanActionArgs): Promise<PlanActionResult> {
-    return this.performAction(context, args, 'apply');
-  }
-
-  async rollbackPlan(context: AuthContext, args: PlanActionArgs): Promise<PlanActionResult> {
-    return this.performAction(context, args, 'rollback');
-  }
-
-  private async performAction(
-    context: AuthContext,
-    args: PlanActionArgs,
-    action: 'apply' | 'rollback',
-  ): Promise<PlanActionResult> {
+  async applyPlan(context: AuthContext, args: ApplyPlanInput): Promise<PlanActionResult> {
     assertAuthenticated(context);
     let plan: StoredChangePlan | null = null;
     try {
@@ -149,39 +208,121 @@ export class ChangePlanService {
       if (!plan) throw new DomainError('NOT_FOUND', 'Change plan not found.');
       verifyStoredPlan(plan);
       if (plan.uid !== context.uid) throw new DomainError('FORBIDDEN', 'Plan ownership mismatch.');
-      if (action === 'apply') {
-        if (plan.conflicts.length) throw new DomainError('CONFLICT', 'Plan has unresolved conflicts.');
-        if (Date.parse(plan.expiresAt) <= this.clock().getTime() && plan.status === 'previewed') {
-          throw new DomainError('EXPIRED', 'Change plan has expired.');
-        }
+      if (plan.conflicts.length) throw new DomainError('CONFLICT', 'Plan has unresolved conflicts.');
+      if (Date.parse(plan.expiresAt) <= this.clock().getTime() && plan.status === 'previewed') {
+        throw new DomainError('EXPIRED', 'Change plan has expired.');
       }
-      const request = {
+      const now = this.clock();
+      const executionId = this.idFactory();
+      const rollbackExpiresAt = new Date(now.getTime() + this.rollbackTtlMs).toISOString();
+      const rollbackCapability = this.issuer().issue('rollback', context.uid, executionId, plan.hash);
+      const result = await this.repository.applyPlanAtomically({
         uid: context.uid,
         planId: plan.id,
-        idempotencyKeyHash: hashIdempotencyKey(context.uid, plan.id, action, args.idempotencyKey),
+        approvalCapabilityHash: hashCapability(args.approvalCapability),
+        idempotencyKeyHash: hashIdempotencyKey(context.uid, plan.id, 'apply', args.idempotencyKey),
         requestId: context.requestId,
-        now: this.clock().toISOString(),
+        now: now.toISOString(),
+        executionId,
+        rollbackCapabilityHash: hashCapability(rollbackCapability),
+        rollbackExpiresAt,
+      });
+      const replayRollbackCapability = this.issuer().issue(
+        'rollback',
+        context.uid,
+        result.executionId,
+        result.hash,
+      );
+      return {
+        ...result,
+        rollback: {
+          capability: replayRollbackCapability,
+          expiresAt: result.receipt.rollbackExpiresAt ?? rollbackExpiresAt,
+        },
       };
-      return action === 'apply'
-        ? await this.repository.applyPlanAtomically(request)
-        : await this.repository.rollbackPlanAtomically(request);
     } catch (error) {
       const now = this.clock().toISOString();
-      await this.repository.recordAudit({
+      await this.recordRejectedAction({
         id: randomUUID(),
         uid: context.uid,
         actorUid: context.uid,
         requestId: context.requestId,
         planId: args.planId,
-        tool: plan?.tool ?? `${action}_plan`,
-        action,
-        outcome: isDomainError(error) && error.code === 'CONFLICT' ? 'conflict' : 'rejected',
+        tool: plan?.tool ?? 'apply_plan',
+        action: 'apply',
+        outcome: isDomainError(error) && (error.code === 'CONFLICT' || error.code === 'STATE_CHANGED')
+          ? 'conflict'
+          : 'rejected',
         timestamp: now,
         entityRefs: plan?.operations.map(({ collection, id }) => ({ collection, id })) ?? [],
         metadata: { errorCode: isDomainError(error) ? error.code : 'INTERNAL' },
       });
       throw error;
     }
+  }
+
+  async rollbackExecution(
+    context: AuthContext,
+    args: RollbackExecutionInput,
+  ): Promise<PlanActionResult> {
+    assertAuthenticated(context);
+    const execution = await this.repository.getExecution(context.uid, args.executionId);
+    if (!execution) throw new DomainError('NOT_FOUND', 'Execution not found.');
+    try {
+      return await this.repository.rollbackExecutionAtomically({
+        uid: context.uid,
+        executionId: args.executionId,
+        rollbackCapabilityHash: hashCapability(args.rollbackCapability),
+        idempotencyKeyHash: hashIdempotencyKey(
+          context.uid,
+          args.executionId,
+          'rollback',
+          args.idempotencyKey,
+        ),
+        requestId: context.requestId,
+        now: this.clock().toISOString(),
+      });
+    } catch (error) {
+      await this.recordRejectedAction({
+        id: randomUUID(),
+        uid: context.uid,
+        actorUid: context.uid,
+        requestId: context.requestId,
+        planId: execution.planId,
+        tool: 'rollback_plan',
+        action: 'rollback',
+        outcome: isDomainError(error) && (error.code === 'CONFLICT' || error.code === 'STATE_CHANGED')
+          ? 'conflict'
+          : 'rejected',
+        timestamp: this.clock().toISOString(),
+        entityRefs: execution.result.affected,
+        metadata: { errorCode: isDomainError(error) ? error.code : 'INTERNAL' },
+      });
+      throw error;
+    }
+  }
+
+  private async recordRejectedAction(event: AuditEvent): Promise<void> {
+    try {
+      await this.repository.recordAudit(event);
+    } catch {
+      // Rejection auditing is best-effort because it occurs after the
+      // authoritative transaction has already refused the mutation. Never
+      // replace the security/domain error with an audit-storage outage, and
+      // never log request bodies, tokens, capabilities, or user content.
+      console.error('Life Tracker rejection audit could not be persisted.', {
+        requestId: event.requestId,
+        action: event.action,
+        code: 'AUDIT_WRITE_FAILED',
+      });
+    }
+  }
+
+  private issuer(): CapabilityIssuer {
+    if (!this.capabilityIssuer) {
+      throw new DomainError('INTERNAL', 'Approval capability service is unavailable.');
+    }
+    return this.capabilityIssuer;
   }
 
   private async validateOperations(uid: string, operations: readonly ChangeOperation[]): Promise<void> {
@@ -193,6 +334,12 @@ export class ChangePlanService {
       refs.add(key);
       for (const [field, value] of Object.entries(operation.values)) {
         validateWritableField(operation.collection, field, value);
+      }
+      if (operation.op === 'delete' && !AI_DELETABLE_COLLECTIONS.has(operation.collection)) {
+        throw new DomainError(
+          'FORBIDDEN',
+          `AI deletion is not supported for ${operation.collection}; use the deterministic product workflow.`,
+        );
       }
       if (operation.op === 'delete' && Object.keys(operation.values).length) {
         throw new DomainError('INVALID_ARGUMENT', 'Delete operations cannot carry values.');
@@ -206,12 +353,12 @@ export class ChangePlanService {
         throw new DomainError('NOT_FOUND', `${operation.collection}/${operation.id} does not exist.`);
       }
       if (
-        operation.op === 'delete' &&
-        operation.collection === 'timeBlocks' &&
-        existing &&
-        (existing.status === 'completed' || existing.protected === true)
+        operation.op !== 'create'
+        && operation.collection === 'timeBlocks'
+        && existing
+        && isProtectedTimeBlock(existing)
       ) {
-        throw new DomainError('FORBIDDEN', 'Completed or protected time blocks cannot be deleted.');
+        throw new DomainError('FORBIDDEN', 'Completed, in-progress, fixed, or locked time blocks cannot be changed by AI.');
       }
       if (operation.op === 'delete') await this.assertNoInboundReferences(uid, operation.collection, operation.id);
     }
@@ -231,7 +378,10 @@ export class ChangePlanService {
             updatedAt: existing?.updatedAt ?? '',
           } as EntityRecord);
       mergedByRef.set(key, merged);
-      if (operation.op === 'create') assertRequiredCreateFields(operation.collection, merged);
+      if (operation.op === 'create') {
+        if (!merged) throw new DomainError('INTERNAL', 'Create validation state is missing.');
+        assertRequiredCreateFields(operation.collection, merged);
+      }
       assertTemporalGeometry(operation.collection, merged);
     }
 
@@ -298,8 +448,10 @@ function assertRequiredCreateFields(collection: EntityCollection, entity: Entity
     tasks: ['title', 'projectId', 'domainId', 'status', 'priority', 'estimatedMinutes'],
     timeBlocks: ['title', 'startTime', 'endTime', 'domainId', 'status', 'type'],
     habits: ['name', 'domainId', 'frequency', 'isActive', 'streakCount', 'bestStreak'],
+    habitLogs: [],
     sessions: [],
     notes: ['title', 'entityType', 'domainId'],
+    goalRoadmaps: [],
   };
   if (collection === 'notes') {
     throw new DomainError('FORBIDDEN', 'Rich-text notes cannot be created through generic AI writes.');
@@ -315,9 +467,27 @@ function assertTemporalGeometry(collection: EntityCollection, current: EntityRec
   if (collection !== 'timeBlocks' || !current) return;
   const start = current.startTime;
   const end = current.endTime;
-  if (typeof start !== 'string' || typeof end !== 'string' || Date.parse(start) >= Date.parse(end)) {
+  const startMs = typeof start === 'string' ? Date.parse(start) : Number.NaN;
+  const endMs = typeof end === 'string' ? Date.parse(end) : Number.NaN;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
     throw new DomainError('INVALID_ARGUMENT', 'A time block must have a valid positive half-open interval.');
   }
+  const mapped = typeof current.taskId === 'string'
+    || typeof current.projectId === 'string'
+    || typeof current.goalId === 'string';
+  if (!mapped && !UNMAPPED_TIMEBLOCK_TYPES.has(String(current.type))) {
+    throw new DomainError('CONFLICT', 'A productive time block requires a Goal, Project, or Task mapping.');
+  }
+}
+
+function isProtectedTimeBlock(record: EntityRecord): boolean {
+  return record.protected === true
+    || record.locked === true
+    || record.isLocked === true
+    || record.fixed === true
+    || record.flexibility === 'fixed'
+    || record.status === 'completed'
+    || record.status === 'in_progress';
 }
 
 type EntityResolver = (collection: EntityCollection, id: string) => Promise<EntityRecord | null>;
@@ -432,32 +602,97 @@ function buildDiff(operation: ChangeOperation, before: EntityRecord | null): Cha
   };
 }
 
-function publicPlan(plan: StoredChangePlan): PublicChangePlan {
+function publicPlan(plan: StoredChangePlan, approvalCapability: string): PublicChangePlan {
   return {
-    planId: plan.id,
+    id: plan.id,
     tool: plan.tool,
     createdAt: plan.createdAt,
     expiresAt: plan.expiresAt,
+    baseStateHash: plan.baseStateHash,
     hash: plan.hash,
     status: plan.status,
+    operations: plan.operations.map((operation, index) => ({
+      action: publicAction(requirePlanDiff(plan, index)),
+      entityType: operation.collection,
+      entityId: operation.id,
+    })),
     diff: plan.diff.map(publicDiff),
+    reason: plan.reason,
     warnings: [...plan.warnings],
     conflicts: [...plan.conflicts],
+    assumptions: [...plan.assumptions],
+    expectedImpact: [...plan.expectedImpact],
+    destructiveOperationCount: plan.destructiveOperationCount,
+    approval: {
+      required: true,
+      capability: approvalCapability,
+      expiresAt: plan.expiresAt,
+    },
   };
+}
+
+function requirePlanDiff(plan: StoredChangePlan, index: number): ChangeDiff {
+  const diff = plan.diff[index];
+  if (!diff) throw new DomainError('INTERNAL', 'Stored plan diff is incomplete.');
+  return diff;
 }
 
 function publicDiff(diff: ChangeDiff): PublicChangeDiff {
   const source = diff.after ?? diff.before;
   const candidate = source?.title ?? source?.name;
+  const title = typeof candidate === 'string' ? candidate.slice(0, 120) : null;
+  const changed = diff.op === 'update'
+    ? changedFields(diff.before, diff.after)
+    : [];
   return {
-    collection: diff.collection,
-    id: diff.id,
-    op: diff.op,
-    changedFields: diff.op === 'update'
-      ? changedFields(diff.before, diff.after)
-      : [],
-    title: typeof candidate === 'string' ? candidate.slice(0, 120) : null,
+    action: publicAction(diff),
+    entityType: diff.collection,
+    entityId: diff.id,
+    summary: humanDiffSummary(diff, title, changed),
+    changedFields: changed,
+    title,
+    before: diff.before,
+    after: diff.after,
   };
+}
+
+function humanDiffSummary(
+  diff: ChangeDiff,
+  title: string | null,
+  changed: readonly string[],
+): string {
+  const subject = title ? `“${title}”` : `${diff.collection}/${diff.id}`;
+  if (diff.op === 'create') return `Create ${subject} in ${diff.collection}.`;
+  if (diff.op === 'delete') return `Delete ${subject} from ${diff.collection}.`;
+  if (publicAction(diff) === 'move') {
+    return `Move ${subject}: ${changed.join(', ')}.`.slice(0, 500);
+  }
+  return changed.length
+    ? `Update ${subject}: ${changed.join(', ')}.`.slice(0, 500)
+    : `Update ${subject}.`;
+}
+
+function publicAction(diff: ChangeDiff): PublicChangeDiff['action'] {
+  if (diff.op !== 'update') return diff.op;
+  if (
+    diff.collection === 'timeBlocks'
+    && changedFields(diff.before, diff.after).some((field) => field === 'startTime' || field === 'endTime')
+  ) {
+    return 'move';
+  }
+  return 'update';
+}
+
+function normalizeNotices(values: readonly string[]): readonly string[] {
+  return values.slice(0, 20).map((value) => normalizeNotice(value, 500));
+}
+
+function normalizeNotice(value: string, maxLength: number): string {
+  const normalized = value
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim();
+  if (!normalized) return 'No additional detail provided.';
+  return normalized.slice(0, maxLength);
 }
 
 function changedFields(
@@ -490,7 +725,19 @@ function auditFor(
     outcome,
     timestamp,
     entityRefs: plan.operations.map(({ collection, id }) => ({ collection, id })),
-    metadata: { operationCount: plan.operations.length, conflictCount: plan.conflicts.length },
+    metadata: {
+      operationCount: plan.operations.length,
+      conflictCount: plan.conflicts.length,
+      baseStateHash: plan.baseStateHash,
+      changesetHash: plan.hash,
+      ...(plan.orchestration
+        ? {
+            model: plan.orchestration.model,
+            promptVersion: plan.orchestration.promptVersion,
+            schemaVersion: plan.orchestration.schemaVersion,
+          }
+        : {}),
+    },
   };
 }
 
@@ -509,4 +756,16 @@ function emptyFilter(): ReadFilter {
     goalId: null,
     taskId: null,
   };
+}
+
+function assertSerializedSize(value: unknown, maxBytes: number, label: string): void {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new DomainError('INVALID_ARGUMENT', `${label} cannot be serialized safely.`);
+  }
+  if (Buffer.byteLength(serialized, 'utf8') > maxBytes) {
+    throw new DomainError('LIMIT_EXCEEDED', `${label} exceeds the safe persistence limit.`);
+  }
 }

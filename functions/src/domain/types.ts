@@ -1,3 +1,8 @@
+import type {
+  LifePlanDiffEntry,
+  LifePlanPreview,
+} from '@life-tracker/ai-contract';
+
 export const ENTITY_COLLECTIONS = [
   'goals',
   'keyResults',
@@ -5,17 +10,31 @@ export const ENTITY_COLLECTIONS = [
   'tasks',
   'timeBlocks',
   'habits',
+  'habitLogs',
   'sessions',
   'notes',
+  'goalRoadmaps',
   'domains',
 ] as const;
 
 export type EntityCollection = (typeof ENTITY_COLLECTIONS)[number];
+export type WritableEntityCollection = Exclude<
+  EntityCollection,
+  'sessions' | 'habitLogs' | 'goalRoadmaps'
+>;
+
+export interface AiOrchestrationMetadata {
+  readonly model: string;
+  readonly promptVersion: string;
+  readonly schemaVersion: string;
+}
 
 export interface AuthContext {
   /** Always derived from a verified Firebase ID token by the transport. */
   readonly uid: string;
   readonly requestId: string;
+  /** Added only inside the server-side Responses tool loop. */
+  readonly orchestration?: AiOrchestrationMetadata;
 }
 
 export interface EntityRecord {
@@ -67,14 +86,14 @@ export interface PublicPatch {
 
 export interface PublicChangeOperation {
   readonly op: 'create' | 'update' | 'delete';
-  readonly collection: Exclude<EntityCollection, 'sessions'>;
+  readonly collection: WritableEntityCollection;
   readonly id: string;
   readonly patch: readonly PublicPatch[];
 }
 
 export interface ChangeOperation {
   readonly op: 'create' | 'update' | 'delete';
-  readonly collection: Exclude<EntityCollection, 'sessions'>;
+  readonly collection: WritableEntityCollection;
   readonly id: string;
   readonly values: Readonly<Record<string, WriteValue>>;
 }
@@ -100,6 +119,21 @@ export interface ChangeSnapshot {
   readonly entries: readonly SnapshotEntry[];
 }
 
+export interface UserPlanningPreferences {
+  readonly source: 'persisted' | 'persisted_with_defaults' | 'product_default';
+  /** Exact fields for which the documented product default was used. */
+  readonly defaultsApplied: readonly string[];
+  readonly timezone: string;
+  readonly workingHours: Readonly<{
+    readonly start: string;
+    readonly end: string;
+  }> | null;
+  readonly maxDailyPlannedMinutes: number;
+  readonly maxWeeklyPlannedMinutes: number;
+  readonly minBufferMinutes: number;
+  readonly maxConsecutiveHighEnergyBlocks: number;
+}
+
 export interface ChangeDiff {
   readonly collection: EntityCollection;
   readonly id: string;
@@ -116,10 +150,17 @@ export interface ImmutableChangePlan {
   readonly createdAt: string;
   readonly expiresAt: string;
   readonly snapshotId: string;
+  readonly baseStateHash: string;
+  /** Safe configuration metadata; never contains prompts, tokens, or content. */
+  readonly orchestration: AiOrchestrationMetadata | null;
   readonly operations: readonly ChangeOperation[];
   readonly diff: readonly ChangeDiff[];
+  readonly reason: string;
   readonly warnings: readonly string[];
   readonly conflicts: readonly string[];
+  readonly assumptions: readonly string[];
+  readonly expectedImpact: readonly string[];
+  readonly destructiveOperationCount: number;
   readonly hash: string;
 }
 
@@ -134,32 +175,66 @@ export interface StoredChangePlan extends ImmutableChangePlan {
   readonly appliedStateHashes?: Readonly<Record<string, string | null>>;
 }
 
-export interface PublicChangeDiff {
-  readonly collection: EntityCollection;
-  readonly id: string;
-  readonly op: ChangeOperation['op'];
-  readonly changedFields: readonly string[];
-  readonly title: string | null;
-}
+/** Canonical browser-safe contract owned by packages/ai-contract. */
+export type PublicChangeDiff = LifePlanDiffEntry;
+/** Canonical browser-safe contract owned by packages/ai-contract. */
+export type PublicChangePlan = LifePlanPreview;
 
-export interface PublicChangePlan {
+export interface ApprovalRecord {
+  readonly uid: string;
   readonly planId: string;
-  readonly tool: string;
+  readonly planHash: string;
+  readonly baseStateHash: string;
+  readonly capabilityHash: string;
   readonly createdAt: string;
   readonly expiresAt: string;
-  readonly hash: string;
-  readonly status: PlanStatus;
-  readonly diff: readonly PublicChangeDiff[];
-  readonly warnings: readonly string[];
-  readonly conflicts: readonly string[];
+  readonly status: 'pending' | 'consumed';
+  readonly consumedAt?: string;
+  readonly executionId?: string;
+}
+
+export interface ExecutionReceipt {
+  readonly executionId: string;
+  readonly planId: string;
+  readonly changesetHash: string;
+  readonly status: 'applied' | 'rolled_back';
+  readonly verified: boolean;
+  readonly timestamp: string;
+  readonly affected: readonly EntityReference[];
+  readonly rollbackAvailable: boolean;
+  readonly rollbackExpiresAt: string | null;
 }
 
 export interface PlanActionResult {
+  readonly executionId: string;
   readonly planId: string;
   readonly hash: string;
   readonly status: 'applied' | 'rolled_back';
   readonly idempotentReplay: boolean;
+  readonly verified: boolean;
   readonly affected: readonly EntityReference[];
+  readonly receipt: ExecutionReceipt;
+  readonly rollback?: Readonly<{
+    readonly capability: string;
+    readonly expiresAt: string;
+  }>;
+}
+
+export interface StoredExecution {
+  readonly id: string;
+  readonly uid: string;
+  readonly planId: string;
+  readonly requestId: string;
+  readonly auditId: string;
+  readonly idempotencyKeyHash: string;
+  readonly createdAt: string;
+  readonly status: 'applied' | 'rolled_back';
+  readonly verified: boolean;
+  readonly rollbackCapabilityHash: string;
+  readonly rollbackExpiresAt: string;
+  readonly rollbackConsumedAt?: string;
+  readonly restoredStateHashes?: Readonly<Record<string, string | null>>;
+  readonly result: Omit<PlanActionResult, 'idempotentReplay' | 'rollback'>;
 }
 
 export interface AuditEvent {
@@ -180,6 +255,8 @@ export interface AuditEvent {
 export const SERVER_ONLY_PATHS = Object.freeze({
   changePlan: (uid: string, planId: string) => `aiChangePlans/${uid}_${planId}`,
   snapshot: (uid: string, planId: string) => `aiSnapshots/${uid}_${planId}`,
+  approval: (uid: string, planId: string) => `aiApprovals/${uid}_${planId}`,
+  execution: (uid: string, executionId: string) => `aiExecutions/${uid}_${executionId}`,
   auditCollection: 'aiAuditLogs',
   idempotency: (uid: string, keyHash: string) => `aiIdempotency/${uid}_${keyHash}`,
   rateLimit: (uid: string) => `aiRateLimits/${uid}`,

@@ -4,6 +4,11 @@ const idSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9
 const nullableIdSchema = idSchema.nullable();
 const isoDateTimeSchema = z.string().datetime({ offset: true });
 const nullableIsoDateTimeSchema = isoDateTimeSchema.nullable();
+const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, 'Invalid calendar date');
+const calendarOrInstantSchema = z.union([calendarDateSchema, isoDateTimeSchema]);
 
 export const readFilterSchema = z
   .object({
@@ -36,6 +41,28 @@ export const readArgsSchema = z
   .strict();
 
 export type ReadArgs = z.infer<typeof readArgsSchema>;
+
+export const stateArgsSchema = z.object({
+  scope: z.enum(['today', 'week', '30_days', 'range']),
+  from: nullableIsoDateTimeSchema,
+  to: nullableIsoDateTimeSchema,
+  perCollectionLimit: z.number().int().min(1).max(25),
+  includeNotes: z.boolean(),
+}).strict().superRefine((value, context) => {
+  if (value.scope === 'range' && (!value.from || !value.to)) {
+    context.addIssue({ code: 'custom', message: 'range scope requires from and to' });
+  }
+  if (value.scope !== 'range' && (value.from || value.to)) {
+    context.addIssue({ code: 'custom', message: 'from and to are only valid for range scope' });
+  }
+  if (value.from && value.to) {
+    const range = Date.parse(value.to) - Date.parse(value.from);
+    if (range <= 0) context.addIssue({ code: 'custom', message: 'from must be before to' });
+    if (range > 366 * 86_400_000) {
+      context.addIssue({ code: 'custom', message: 'State range cannot exceed 366 days' });
+    }
+  }
+});
 
 export const analyticsArgsSchema = z
   .object({
@@ -82,23 +109,16 @@ export const previewChangesArgsSchema = z
   })
   .strict();
 
-export const planActionArgsSchema = z
-  .object({
-    planId: idSchema,
-    idempotencyKey: z.string().trim().min(16).max(200),
-  })
-  .strict();
-
 const draftPrioritySchema = z.enum(['critical', 'high', 'medium', 'low']);
 const nullableDescriptionSchema = z.string().max(20_000).nullable();
-const nullableCalendarOrInstantSchema = z.string().max(64).nullable();
+const nullableCalendarOrInstantSchema = calendarOrInstantSchema.nullable();
 
 const goalArchitectGoalSchema = z.object({
   id: idSchema,
   title: z.string().trim().min(1).max(240),
   description: nullableDescriptionSchema,
   targetHours: z.number().min(0.25).max(1_000_000),
-  dueDateISO: z.string().max(64),
+  dueDateISO: calendarOrInstantSchema,
   priority: draftPrioritySchema,
   timeAllocationTarget: z.number().min(0).max(168),
   category: z.enum(['urgent_important', 'important_not_urgent', 'urgent_not_important', 'neither']),
@@ -177,16 +197,30 @@ export type ScheduleBlockInput = z.infer<typeof scheduleBlockSchema>;
 
 export const replaceDayScheduleArgsSchema = z
   .object({
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    date: calendarDateSchema,
     timezone: z.string().trim().min(1).max(100),
     blocks: z.array(scheduleBlockSchema).max(96),
     reason: z.string().trim().min(1).max(500),
   })
   .strict();
 
+export const previewTimeBlockChangeArgsSchema = z
+  .object({
+    action: z.enum(['create', 'update', 'move']),
+    timezone: z.string().trim().min(1).max(100),
+    block: scheduleBlockSchema,
+    reason: z.string().trim().min(1).max(500),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.action !== 'create' && value.block.id === null) {
+      context.addIssue({ code: 'custom', message: 'Updating or moving a time block requires its id' });
+    }
+  });
+
 export const replaceWeekScheduleArgsSchema = z
   .object({
-    weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    weekStart: calendarDateSchema,
     timezone: z.string().trim().min(1).max(100),
     blocks: z.array(scheduleBlockSchema).max(100),
     reason: z.string().trim().min(1).max(500),
@@ -194,7 +228,8 @@ export const replaceWeekScheduleArgsSchema = z
   .strict();
 
 export type PreviewChangesArgs = z.infer<typeof previewChangesArgsSchema>;
-export type PlanActionArgs = z.infer<typeof planActionArgsSchema>;
+export type StateArgs = z.infer<typeof stateArgsSchema>;
 export type PreviewGoalArchitectureArgs = z.infer<typeof previewGoalArchitectureArgsSchema>;
 export type ReplaceDayScheduleArgs = z.infer<typeof replaceDayScheduleArgsSchema>;
 export type ReplaceWeekScheduleArgs = z.infer<typeof replaceWeekScheduleArgsSchema>;
+export type PreviewTimeBlockChangeArgs = z.infer<typeof previewTimeBlockChangeArgsSchema>;

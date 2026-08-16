@@ -31,15 +31,14 @@ export interface GoalArchitectureDraftLike {
   readonly confidence: Readonly<Record<string, unknown>>;
 }
 
-const validationModule = require('../../../../src/lib/goalArchitect/validation') as Pick<
-  GoalArchitectModules,
-  'validateGoalArchitectureDraft'
->;
-const idsModule = require('../../../../src/lib/goalArchitect/ids') as Pick<
-  GoalArchitectModules,
-  'normalizeForId'
->;
-const commitModule = require('../../../../src/lib/goalArchitect/commitGoalArchitectureDraft') as GoalArchitectCommitModule;
+const sharedValidators = require('../../../.generated/shared-validators.cjs') as {
+  readonly goalArchitectValidation: Pick<GoalArchitectModules, 'validateGoalArchitectureDraft'>;
+  readonly goalArchitectIds: Pick<GoalArchitectModules, 'normalizeForId'>;
+  readonly goalArchitectCommit: GoalArchitectCommitModule;
+};
+const validationModule = sharedValidators.goalArchitectValidation;
+const idsModule = sharedValidators.goalArchitectIds;
+const commitModule = sharedValidators.goalArchitectCommit;
 
 export interface GoalArchitectValidationResult {
   readonly conflicts: readonly string[];

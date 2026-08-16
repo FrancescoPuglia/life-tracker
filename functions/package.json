@@ -1,5 +1,5 @@
 {
-  "name": "life-tracker-functions-core",
+  "name": "life-tracker-functions",
   "version": "1.0.0",
   "private": true,
   "main": "lib/index.js",
@@ -7,20 +7,28 @@
     "node": "22"
   },
   "scripts": {
-    "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=lib/index.js --external:openai",
+    "build": "npm run build:shared && npm run typecheck && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=lib/index.js --sourcemap",
+    "build:shared": "esbuild build/shared-validators-entry.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=.generated/shared-validators.cjs --sourcemap",
+    "pretest": "npm run build:shared",
+    "pretest:run": "npm run build:shared",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run"
   },
   "dependencies": {
     "@js-temporal/polyfill": "^0.5.1",
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2",
     "openai": "^6.15.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.0",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

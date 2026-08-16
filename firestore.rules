@@ -17,7 +17,7 @@ service cloud.firestore {
       return request.resource.data.userId == uid
         && (!('uid' in request.resource.data) || request.resource.data.uid == uid)
         && (!('id' in request.resource.data) || request.resource.data.id == documentId)
-        && request.resource.data.keys().hasNone([
+        && !request.resource.data.keys().hasAny([
           'ownerId',
           'ownerUid',
           'actorUid',
@@ -40,8 +40,8 @@ service cloud.firestore {
     }
 
     function keepsProtectedFieldsImmutable() {
-      return request.resource.data.diff(resource.data).affectedKeys()
-        .hasNone([
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny([
           'userId',
           'uid',
           'ownerId',
@@ -173,9 +173,17 @@ service cloud.firestore {
       allow read, write: if false;
 
       match /{collectionName}/{documentId} {
-        allow read: if isClientCollection(collectionName)
+        allow get: if isClientCollection(collectionName)
           && ownsPath(uid)
           && existingOwnershipMatchesPath(uid);
+
+        // Firestore list rules are query constraints, not row filters. Require
+        // the client query to constrain the embedded owner as well as the
+        // owner-scoped path so a corrupt/misplaced document cannot leak from a
+        // collection read.
+        allow list: if isClientCollection(collectionName)
+          && ownsPath(uid)
+          && resource.data.userId == uid;
 
         allow create: if isClientCollection(collectionName)
           && ownsPath(uid)
@@ -198,7 +206,7 @@ service cloud.firestore {
       // The login streak has exactly one document per user. Keeping it out of
       // the generic allowlist prevents a client from minting extra streak docs.
       match /login_streaks/{documentId} {
-        allow read: if ownsPath(uid)
+        allow get: if ownsPath(uid)
           && documentId == uid
           && existingOwnershipMatchesPath(uid);
 
@@ -226,6 +234,12 @@ service cloud.firestore {
       match /aiSnapshots/{document=**} {
         allow read, write: if false;
       }
+      match /aiApprovals/{document=**} {
+        allow read, write: if false;
+      }
+      match /aiExecutions/{document=**} {
+        allow read, write: if false;
+      }
       match /aiAuditLogs/{document=**} {
         allow read, write: if false;
       }
@@ -241,6 +255,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /aiSnapshots/{document=**} {
+      allow read, write: if false;
+    }
+    match /aiApprovals/{document=**} {
+      allow read, write: if false;
+    }
+    match /aiExecutions/{document=**} {
       allow read, write: if false;
     }
     match /aiAuditLogs/{document=**} {

@@ -1,4 +1,10 @@
 import { auth } from '@/lib/firebase';
+import {
+  parseLifePlanActionResponse,
+  parseLifePlanPreview,
+  type LifePlanActionResponse,
+  type LifePlanPreview,
+} from '@life-tracker/ai-contract';
 
 export const AI_CHAT_MODES = ['ask', 'plan', 'analyze', 'coach'] as const;
 
@@ -9,24 +15,8 @@ export interface AIConversationMessage {
   content: string;
 }
 
-export interface AIPlanPreview {
-  id: string;
-  hash: string;
-  expiresAt: string;
-  operationCount: number;
-  diff: AIPlanDiffEntry[];
-  warnings: string[];
-  conflicts: string[];
-  status: string;
-}
-
-export interface AIPlanDiffEntry {
-  action: 'create' | 'update' | 'delete' | 'replace';
-  entityType: string;
-  entityId?: string;
-  summary: string;
-  changedFields: string[];
-}
+export type AIPlanPreview = LifePlanPreview;
+export type AIPlanActionResult = LifePlanActionResponse;
 
 export interface AIChatResult {
   message: string;
@@ -40,6 +30,10 @@ export type AIClientErrorCode =
   | 'forbidden'
   | 'rate_limited'
   | 'conflict'
+  | 'state_changed'
+  | 'approval_expired'
+  | 'approval_replayed'
+  | 'committed_unverified'
   | 'invalid_request'
   | 'invalid_response'
   | 'unavailable';
@@ -49,12 +43,7 @@ const MAX_MESSAGE_LENGTH = 4_000;
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_MESSAGE_LENGTH = 4_000;
 const MAX_RESPONSE_MESSAGE_LENGTH = 20_000;
-const MAX_PLAN_NOTICE_LENGTH = 500;
-const MAX_PLAN_OPERATIONS = 50;
 const PLAN_ID_PATTERN = /^[A-Za-z0-9_-]{1,160}$/;
-const ENTITY_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-const FIELD_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/;
-const PLAN_ACTIONS = ['create', 'update', 'delete', 'replace'] as const;
 
 const SAFE_ERROR_MESSAGES: Record<AIClientErrorCode, string> = {
   not_configured: 'Il backend AI non è configurato per questa installazione.',
@@ -63,6 +52,10 @@ const SAFE_ERROR_MESSAGES: Record<AIClientErrorCode, string> = {
   forbidden: 'Non sei autorizzato a eseguire questa operazione.',
   rate_limited: 'Hai raggiunto il limite di richieste. Attendi un momento e riprova.',
   conflict: 'Il piano è in conflitto con modifiche più recenti. Genera una nuova anteprima.',
+  state_changed: 'L’anteprima non è più aggiornata. Genera un nuovo piano prima di applicarlo.',
+  approval_expired: 'L’approvazione è scaduta. Genera una nuova anteprima.',
+  approval_replayed: 'Questa approvazione è già stata usata. Le modifiche non sono state applicate di nuovo.',
+  committed_unverified: 'Le modifiche potrebbero essere state salvate, ma la verifica non è riuscita. Riprova con la stessa richiesta.',
   invalid_request: 'La richiesta non è valida. Controlla il testo e riprova.',
   invalid_response: 'Il backend AI ha restituito una risposta non valida.',
   unavailable: 'Il servizio AI non è raggiungibile in questo momento. Riprova più tardi.',
@@ -136,17 +129,27 @@ export async function requestAIChat(input: {
 }
 
 export async function applyAIPlan(
-  planId: string,
+  plan: AIPlanPreview,
   idempotencyKey: string,
-): Promise<AIChatResult> {
-  return requestPlanAction(planId, 'apply', idempotencyKey);
+): Promise<AIPlanActionResult> {
+  return requestPlanAction(
+    `/v1/plans/${encodeURIComponent(plan.id)}/apply`,
+    {
+      approvalCapability: plan.approval.capability,
+      idempotencyKey,
+    },
+  );
 }
 
-export async function rollbackAIPlan(
-  planId: string,
+export async function rollbackAIExecution(
+  executionId: string,
+  rollbackCapability: string,
   idempotencyKey: string,
-): Promise<AIChatResult> {
-  return requestPlanAction(planId, 'rollback', idempotencyKey);
+): Promise<AIPlanActionResult> {
+  return requestPlanAction(
+    `/v1/executions/${encodeURIComponent(executionId)}/rollback`,
+    { rollbackCapability, idempotencyKey },
+  );
 }
 
 export function createIdempotencyKey(): string {
@@ -166,21 +169,25 @@ export function createIdempotencyKey(): string {
 }
 
 async function requestPlanAction(
-  planId: string,
-  action: 'apply' | 'rollback',
-  idempotencyKey: string,
-): Promise<AIChatResult> {
-  if (!PLAN_ID_PATTERN.test(planId) || !isValidIdempotencyKey(idempotencyKey)) {
+  path: string,
+  body: Readonly<Record<string, string>>,
+): Promise<AIPlanActionResult> {
+  const resourceId = path.split('/')[3] ?? '';
+  const capability = body.approvalCapability ?? body.rollbackCapability ?? '';
+  if (
+    !PLAN_ID_PATTERN.test(resourceId)
+    || !isValidIdempotencyKey(body.idempotencyKey ?? '')
+    || !isValidCapability(capability)
+  ) {
     throw new AIClientError('invalid_request', 400);
   }
 
-  const data = await authenticatedRequest(`/v1/plans/${encodeURIComponent(planId)}/${action}`, {
-    body: { idempotencyKey },
-  });
-
-  return normalizeChatResult(data, action === 'apply'
-    ? 'Piano applicato in modo sicuro.'
-    : 'Rollback completato.');
+  const data = await authenticatedRequest(path, { body: { ...body } });
+  try {
+    return parseLifePlanActionResponse(data);
+  } catch {
+    throw new AIClientError('invalid_response');
+  }
 }
 
 async function authenticatedRequest(
@@ -217,7 +224,7 @@ async function authenticatedRequest(
       );
     }
 
-    if (!response.ok) throw mapHttpError(response.status);
+    if (!response.ok) throw await mapHttpError(response);
 
     try {
       return await response.json();
@@ -250,11 +257,19 @@ function sendRequest(
   });
 }
 
-function mapHttpError(status: number): AIClientError {
+async function mapHttpError(response: Response): Promise<AIClientError> {
+  const status = response.status;
+  const serverCode = await readServerErrorCode(response);
   if (status === 401) return new AIClientError('session_expired', status);
   if (status === 403) return new AIClientError('forbidden', status);
+  if (status === 409 && serverCode === 'STATE_CHANGED') return new AIClientError('state_changed', status);
+  if (status === 409 && serverCode === 'EXPIRED') return new AIClientError('approval_expired', status);
+  if (status === 409 && serverCode === 'APPROVAL_REPLAYED') return new AIClientError('approval_replayed', status);
   if (status === 409) return new AIClientError('conflict', status);
   if (status === 429) return new AIClientError('rate_limited', status);
+  if (status === 503 && serverCode === 'COMMITTED_UNVERIFIED') {
+    return new AIClientError('committed_unverified', status);
+  }
   if (status === 400 || status === 404 || status === 413 || status === 422) {
     return new AIClientError('invalid_request', status);
   }
@@ -286,78 +301,11 @@ function normalizeChatResult(
 
 function normalizePlan(value: unknown): AIPlanPreview | undefined {
   if (value === undefined || value === null) return undefined;
-  const plan = asRecord(value);
-  if (!plan) throw new AIClientError('invalid_response');
-
-  if (
-    typeof plan.id !== 'string'
-    || !PLAN_ID_PATTERN.test(plan.id)
-    || typeof plan.hash !== 'string'
-    || plan.hash.length < 8
-    || plan.hash.length > 256
-    || typeof plan.expiresAt !== 'string'
-    || Number.isNaN(Date.parse(plan.expiresAt))
-    || !Array.isArray(plan.operations)
-    || plan.operations.length > MAX_PLAN_OPERATIONS
-    || !Array.isArray(plan.diff)
-    || plan.diff.length !== plan.operations.length
-    || !Array.isArray(plan.warnings)
-    || !Array.isArray(plan.conflicts)
-    || typeof plan.status !== 'string'
-  ) {
+  try {
+    return parseLifePlanPreview(value);
+  } catch {
     throw new AIClientError('invalid_response');
   }
-
-  return {
-    id: plan.id,
-    hash: plan.hash,
-    expiresAt: plan.expiresAt,
-    operationCount: plan.operations.length,
-    diff: normalizePlanDiff(plan.diff),
-    warnings: normalizeNotices(plan.warnings),
-    conflicts: normalizeNotices(plan.conflicts),
-    status: normalizeResponseText(plan.status, 64),
-  };
-}
-
-function normalizePlanDiff(values: unknown[]): AIPlanDiffEntry[] {
-  return values.map((value) => {
-    const entry = asRecord(value);
-    if (
-      !entry
-      || typeof entry.action !== 'string'
-      || !PLAN_ACTIONS.includes(entry.action as AIPlanDiffEntry['action'])
-      || typeof entry.entityType !== 'string'
-      || !ENTITY_NAME_PATTERN.test(entry.entityType)
-      || (entry.entityId !== undefined && (
-        typeof entry.entityId !== 'string'
-        || !PLAN_ID_PATTERN.test(entry.entityId)
-      ))
-      || typeof entry.summary !== 'string'
-      || !Array.isArray(entry.changedFields)
-      || entry.changedFields.length > 30
-      || !entry.changedFields.every((field) => (
-        typeof field === 'string' && FIELD_NAME_PATTERN.test(field)
-      ))
-    ) {
-      throw new AIClientError('invalid_response');
-    }
-
-    return {
-      action: entry.action as AIPlanDiffEntry['action'],
-      entityType: entry.entityType,
-      ...(entry.entityId ? { entityId: entry.entityId as string } : {}),
-      summary: normalizeResponseText(entry.summary, MAX_PLAN_NOTICE_LENGTH),
-      changedFields: [...entry.changedFields] as string[],
-    };
-  });
-}
-
-function normalizeNotices(values: unknown[]): string[] {
-  return values
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .slice(0, 20)
-    .map((value) => normalizeResponseText(value, MAX_PLAN_NOTICE_LENGTH));
 }
 
 function normalizeRequiredText(value: string, maxLength: number): string {
@@ -389,6 +337,20 @@ function stripControlCharacters(value: string): string {
 
 function isValidIdempotencyKey(value: string): boolean {
   return /^[A-Za-z0-9_-]{16,160}$/.test(value);
+}
+
+function isValidCapability(value: string): boolean {
+  return /^[A-Za-z0-9_-]{32,512}$/.test(value);
+}
+
+async function readServerErrorCode(response: Response): Promise<string | null> {
+  try {
+    const envelope = asRecord(await response.json());
+    const error = asRecord(envelope?.error);
+    return typeof error?.code === 'string' ? error.code : null;
+  } catch {
+    return null;
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

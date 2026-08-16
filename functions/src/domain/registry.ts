@@ -21,11 +21,15 @@ export class ToolRegistry {
     return this.tools.get(name) ?? null;
   }
 
-  definitions(): readonly OpenAIFunctionTool[] {
-    return [...this.tools.values()].map(({ contract }) => toOpenAITool(contract));
+  definitions(kinds: ReadonlySet<ToolContract['kind']> = new Set(['read', 'proposal'])): readonly OpenAIFunctionTool[] {
+    return [...this.tools.values()]
+      .filter(({ contract }) => kinds.has(contract.kind))
+      .map(({ contract }) => toOpenAITool(contract));
   }
 
-  names(): readonly string[] {
-    return [...this.tools.keys()];
+  names(kinds: ReadonlySet<ToolContract['kind']> = new Set(['read', 'proposal'])): readonly string[] {
+    return [...this.tools.values()]
+      .filter(({ contract }) => kinds.has(contract.kind))
+      .map(({ contract }) => contract.name);
   }
 }

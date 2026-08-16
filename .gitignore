@@ -42,9 +42,10 @@ firebase-debug.log
 firestore-debug.log
 firebase-export/
 functions/lib/
+functions/.generated/
 functions/.secret.local
-functions/.env.local
-functions/.env.*.local
+functions/.env*
+!functions/.env.example
 
 # Environment variables (NEVER COMMIT THESE!)
 .env

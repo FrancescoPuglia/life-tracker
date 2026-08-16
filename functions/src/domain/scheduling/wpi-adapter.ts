@@ -1,9 +1,4 @@
-/*
- * Adapter around the existing Weekly Planning Intelligence pure core.
- * `require` is intentional: esbuild follows these literal paths and bundles
- * the proven WPI invariants into the Functions artifact without deploying the
- * whole Next.js application or coupling this layer to React/DataProvider.
- */
+/* Adapter around the existing Weekly Planning Intelligence pure core. */
 
 interface WpiBlock {
   id: string;
@@ -39,7 +34,7 @@ interface WpiModule {
   detectConflicts(
     blocks: readonly WpiBlock[],
     intents: readonly Readonly<Record<string, unknown>>[],
-    constraints: Readonly<Record<string, unknown>>,
+    constraints: WpiPlanningConstraints,
   ): {
     conflicts: readonly Readonly<Record<string, unknown>>[];
     warnings: readonly Readonly<Record<string, unknown>>[];
@@ -61,17 +56,21 @@ interface WpiCommitModule {
   ): Readonly<Record<string, unknown>>;
 }
 
-const conflictsModule = require('../../../../src/lib/weeklyPlanner/conflicts') as WpiModule;
-const commitModule = require('../../../../src/lib/weeklyPlanner/commitDraft') as WpiCommitModule;
+export interface WpiPlanningConstraints {
+  readonly earliestHour: string;
+  readonly latestHour: string;
+  readonly maxDailyPlannedMinutes: number;
+  readonly maxWeeklyPlannedMinutes: number;
+  readonly minBufferMinutes: number;
+  readonly maxConsecutiveHighEnergyBlocks: number;
+}
 
-const DEFAULT_CONSTRAINTS = Object.freeze({
-  earliestHour: '00:00',
-  latestHour: '24:00',
-  maxDailyPlannedMinutes: 24 * 60,
-  maxWeeklyPlannedMinutes: 7 * 24 * 60,
-  minBufferMinutes: 0,
-  maxConsecutiveHighEnergyBlocks: 24,
-});
+const sharedValidators = require('../../../.generated/shared-validators.cjs') as {
+  readonly wpiConflicts: WpiModule;
+  readonly wpiCommit: WpiCommitModule;
+};
+const conflictsModule = sharedValidators.wpiConflicts;
+const commitModule = sharedValidators.wpiCommit;
 
 export interface WpiValidationResult {
   readonly conflicts: readonly string[];
@@ -81,11 +80,12 @@ export interface WpiValidationResult {
 
 export function validateWithWeeklyPlanningIntelligence(
   draft: WpiDraft,
+  constraints: WpiPlanningConstraints,
 ): WpiValidationResult {
   const detected = conflictsModule.detectConflicts(
     draft.blocks,
     draft.parsedIntents,
-    DEFAULT_CONSTRAINTS,
+    constraints,
   );
   const completeDraft: WpiDraft = {
     ...draft,

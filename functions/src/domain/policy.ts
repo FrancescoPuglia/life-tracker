@@ -5,6 +5,7 @@ import type {
   EntityCollection,
   PublicChangeOperation,
   ScalarPatchValue,
+  WritableEntityCollection,
   WriteValue,
 } from './types';
 
@@ -32,7 +33,7 @@ const shortText = z.string().trim().min(1).max(240);
 const longText = z.string().max(20_000);
 
 const FIELD_SCHEMAS: Readonly<
-  Record<Exclude<EntityCollection, 'sessions'>, Readonly<Record<string, z.ZodType>>>
+  Record<WritableEntityCollection, Readonly<Record<string, z.ZodType>>>
 > = {
   goals: {
     title: shortText,
@@ -138,7 +139,7 @@ const FORBIDDEN_FIELDS = new Set([
 ]);
 
 export function validateWritableField(
-  collection: Exclude<EntityCollection, 'sessions'>,
+  collection: WritableEntityCollection,
   field: string,
   value: WriteValue,
 ): WriteValue {
@@ -165,7 +166,11 @@ export function normalizePublicOperation(
     if (Object.prototype.hasOwnProperty.call(values, entry.field)) {
       throw new DomainError('INVALID_ARGUMENT', `Duplicate patch field '${entry.field}'.`);
     }
-    values[entry.field] = validateWritableField(operation.collection, entry.field, entry.value);
+    values[entry.field] = validateWritableField(
+      operation.collection,
+      entry.field,
+      entry.value,
+    ) as ScalarPatchValue;
   }
   if (operation.op === 'delete' && operation.patch.length !== 0) {
     throw new DomainError('INVALID_ARGUMENT', 'Delete operations cannot contain a patch.');

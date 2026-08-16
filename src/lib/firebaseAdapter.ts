@@ -302,7 +302,8 @@ export class FirebaseAdapter implements DatabaseAdapter {
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
-      const querySnapshot = await getDocs(collectionRef);
+      const ownedQuery = query(collectionRef, where('userId', '==', this.userId));
+      const querySnapshot = await getDocs(ownedQuery);
       const results: T[] = [];
       querySnapshot.forEach(doc => {
         const data = { id: doc.id, ...doc.data() };
@@ -331,7 +332,16 @@ export class FirebaseAdapter implements DatabaseAdapter {
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
-      const q = query(collectionRef, where(field, '==', value));
+      if (field === 'userId' && value !== this.userId) {
+        return [];
+      }
+      const q = field === 'userId'
+        ? query(collectionRef, where('userId', '==', this.userId))
+        : query(
+          collectionRef,
+          where('userId', '==', this.userId),
+          where(field, '==', value),
+        );
       const querySnapshot = await getDocs(q);
       
       const results: T[] = [];
@@ -363,12 +373,18 @@ export class FirebaseAdapter implements DatabaseAdapter {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
       
-      const queryConstraints: any[] = [];
-      
+      const queryConstraints: any[] = [where('userId', '==', this.userId)];
+
       constraints.forEach(constraint => {
         switch (constraint.type) {
           case 'where':
             if (constraint.field && constraint.operator && constraint.value !== undefined) {
+              if (constraint.field === 'userId') {
+                if (constraint.operator !== '==' || constraint.value !== this.userId) {
+                  throw new Error('A Firebase query cannot select another user namespace.');
+                }
+                break;
+              }
               queryConstraints.push(where(constraint.field, constraint.operator, constraint.value));
             }
             break;
@@ -415,8 +431,9 @@ export class FirebaseAdapter implements DatabaseAdapter {
     try {
       const collectionPath = this.getUserCollection(collectionName);
       const collectionRef = collection(firestore, collectionPath);
-      
-      const unsubscribe = onSnapshot(collectionRef, (querySnapshot) => {
+      const ownedQuery = query(collectionRef, where('userId', '==', this.userId));
+
+      const unsubscribe = onSnapshot(ownedQuery, (querySnapshot) => {
         const results: T[] = [];
         querySnapshot.forEach(doc => {
           const data = { id: doc.id, ...doc.data() };

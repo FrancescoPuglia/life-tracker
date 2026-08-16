@@ -1,5 +1,11 @@
 # Discovery Report — Life Tracker Weekly Planning Intelligence
 
+> **Historical snapshot (2026-05-28):** file paths, test counts, and AI-route
+> observations below describe the repository at `ce80e21`, not the current
+> architecture. The legacy Next.js AI route has since been removed. See
+> [`SECURE_AI_INTEGRATION.md`](SECURE_AI_INTEGRATION.md) for the authenticated
+> Firebase Functions boundary.
+
 > **Scope**: Prompt 1/5. **Read-only**. No application code modified, no
 > dependencies added, no migrations, no AI introduced.
 > Repo HEAD: `ce80e21` on `main`.

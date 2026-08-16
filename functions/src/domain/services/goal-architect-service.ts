@@ -51,6 +51,12 @@ export class GoalArchitectService {
       operations,
       validation.warnings,
       conflicts,
+      {
+        reason: args.reason,
+        expectedImpact: [
+          `Create one Goal, ${args.projects.length} Project(s), ${args.tasks.length} Task(s), and ${args.keyResults.length} Key Result(s) as one validated hierarchy.`,
+        ],
+      },
     );
   }
 
@@ -76,6 +82,7 @@ export class GoalArchitectService {
   ): Promise<readonly EntityRecord[]> {
     const output: EntityRecord[] = [];
     let cursor: string | null = null;
+    let pages = 0;
     const filter: ReadFilter = {
       query: null,
       from: null,
@@ -91,6 +98,10 @@ export class GoalArchitectService {
       output.push(...page.items);
       if (output.length > 2_000) throw new DomainError('LIMIT_EXCEEDED', 'Goal Architect duplicate-check limit exceeded.');
       cursor = page.nextCursor;
+      pages += 1;
+      if (cursor && pages >= 10) {
+        throw new DomainError('LIMIT_EXCEEDED', 'Goal Architect duplicate-check scan limit exceeded.');
+      }
     } while (cursor);
     return output;
   }
@@ -188,7 +199,7 @@ function buildOperations(
       domainId: args.domainId,
       status: 'active',
       priority: args.goal.priority,
-      targetDate: args.goal.dueDateISO,
+      targetDate: normalizeGoalArchitectDate(args.goal.dueDateISO),
       targetHours: args.goal.targetHours,
       timeAllocationTarget: args.goal.timeAllocationTarget,
       category: args.goal.category,
@@ -209,7 +220,7 @@ function buildOperations(
         domainId: args.domainId,
         status: 'active',
         priority: project.priority,
-        dueDate: project.dueDateISO,
+        dueDate: normalizeNullableGoalArchitectDate(project.dueDateISO),
         totalHoursTarget: project.targetHours,
       },
     });
@@ -228,7 +239,7 @@ function buildOperations(
         status: 'pending',
         priority: task.priority,
         estimatedMinutes: Math.max(1, Math.round(task.estimatedHours * 60)),
-        dueDate: task.dueDateISO,
+        dueDate: normalizeNullableGoalArchitectDate(task.dueDateISO),
       },
     });
   }
@@ -251,6 +262,22 @@ function buildOperations(
     });
   }
   return operations;
+}
+
+/**
+ * The established Goal Architect parser treats YYYY-MM-DD as a valid
+ * calendar date and its browser commit pipeline converts it with `new Date`.
+ * Preserve that deterministic UTC-midnight representation so the backend
+ * validator and Firestore Timestamp writer accept the same draft contract.
+ */
+function normalizeGoalArchitectDate(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? `${value}T00:00:00.000Z`
+    : value;
+}
+
+function normalizeNullableGoalArchitectDate(value: string | null): string | null {
+  return value === null ? null : normalizeGoalArchitectDate(value);
 }
 
 function detectExistingDuplicates(

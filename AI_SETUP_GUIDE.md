@@ -1,157 +1,144 @@
-# 🧠 Guida Setup AI Vera - ChatGPT Integration
+# Secure AI setup (Firebase Functions + OpenAI Responses API)
 
-## 🎯 STATO ATTUALE
+Life Tracker keeps its GitHub Pages frontend static. The browser authenticates
+with Firebase, sends a refreshed Firebase ID token to the HTTPS Function, and
+never receives an OpenAI credential. Do not restore the removed Next.js
+`/api/ai/chat` route.
 
-✅ **IMPLEMENTAZIONE COMPLETATA:**
-- AIInputBarV2 integrato in MainApp.tsx 
-- Struttura completa OpenAI con Function Calling
-- 4 modalità AI: Ask, Plan, Analyze, Coach
-- Sistema robusto di proposte modifiche
+## Architecture
 
-⚠️ **MODALITÀ PREVIEW ATTIVA:**
-L'AI attualmente mostra una preview dei dati senza chiamare OpenAI. Per attivare l'AI vera segui i passi sotto.
-
----
-
-## 🚀 ATTIVAZIONE AI VERA
-
-### **Step 1: Configurazione API Key**
-
-1. Ottieni una API key da [OpenAI](https://platform.openai.com/api-keys)
-2. Modifica `.env.local`:
-```env
-# Sostituisci con la tua vera API key
-OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
+```text
+Static browser -> Firebase Auth -> HTTPS Function -> UID-scoped domain layer
+              -> OpenAI Responses API (read/proposal tools only)
+              -> preview -> explicit Apply -> Firestore transaction
+              -> verification -> audit receipt -> optional safe rollback
 ```
 
-### **Step 2: Abilitare API Routes**
+OpenAI proposes and explains. The backend validates ownership and deterministic
+Life Tracker rules. Apply and rollback are authenticated user actions and are
+not model-callable tools.
 
-Il progetto attualmente usa `output: export` che non supporta API routes.
+## Frontend configuration
 
-**Opzione A - Per Development e Server Deploy:**
-```javascript
-// next.config.js - Commenta output export
-const nextConfig = {
-  // COMMENTED FOR AI: ...(process.env.NODE_ENV === 'production' && {
-  //   output: 'export',
-  //   trailingSlash: true,
-  // }),
-  // ... resto config
-}
+Copy `.env.local.example` to the ignored `.env.local` file and configure the
+public Firebase Web SDK values. Set only the external backend URL for AI:
+
+```dotenv
+NEXT_PUBLIC_AI_API_BASE_URL=http://127.0.0.1:5001/PROJECT_ID/europe-west1/lifeTrackerAiApi
 ```
 
-**Opzione B - Per Static Deploy (Vercel/Netlify):**
-Usa Edge Functions o serverless functions invece delle API routes Next.js
+For a GitHub Pages build, this value must be the deployed HTTPS Function URL,
+for example `https://europe-west1-PROJECT_ID.cloudfunctions.net/lifeTrackerAiApi`.
+It is public routing configuration, not a credential.
 
-### **Step 3: Ripristinare API Route**
+Never add `OPENAI_API_KEY`, an OpenAI public-key variable, a Firebase Admin
+service account, or an approval secret to the root environment or GitHub Pages
+workflow.
+
+## Backend secrets and parameters
+
+The Function binds two secrets with Firebase `defineSecret`:
+
+- `OPENAI_API_KEY`: a rotated backend-only OpenAI project key;
+- `AI_CAPABILITY_SIGNING_SECRET`: at least 32 random bytes for approval and
+  rollback capabilities.
+
+After selecting the intended non-production/staging Firebase project, a human
+operator sets them interactively:
 
 ```bash
-mkdir -p src/app/api/ai/chat
+firebase functions:secrets:set OPENAI_API_KEY
+firebase functions:secrets:set AI_CAPABILITY_SIGNING_SECRET
 ```
 
-Copia `route.ts` dalla cartella downloads alla destinazione:
+Do not paste secret values into a command argument, tracked file, issue, log, or
+chat. Local emulation may use the ignored `functions/.secret.local` file.
+
+The non-secret `defineString` parameters are:
+
+- `OPENAI_MODEL` (backend-configurable model);
+- `OPENAI_REASONING_EFFORT`;
+- `AI_ALLOWED_ORIGINS` (comma-separated exact HTTPS origins plus explicit
+  loopback development origins).
+
+The defaults are defined in `functions/src/index.ts`. Any project-specific
+Firebase parameter file remains local and must be reviewed before deployment.
+
+## Install, build, and test
+
+Use Node.js 22 and the checked-in npm lockfiles:
+
 ```bash
-cp /mnt/c/Users/Franc/Downloads/route.ts src/app/api/ai/chat/
+npm ci
+npm --prefix functions ci
+npm run typecheck
+npm run test:run
+npm --prefix functions run typecheck
+npm --prefix functions run test:run
+npm --prefix functions run build
 ```
 
-### **Step 4: Aggiornare AIInputBarV2**
+Run emulator-backed authorization and transaction tests from the repository
+root:
 
-Sostituisci il mock nella funzione `sendMessage()`:
-```typescript
-// RIMUOVI QUESTO MOCK:
-const mockData = { ... };
-
-// RIPRISTINA QUESTO:
-const response = await fetch('/api/ai/chat', {
-  method: 'POST', 
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    message: modePrefix + text,
-    context,
-    history,
-    userId,
-  }),
-});
+```bash
+npm run test:rules
+npm run test:functions:emulator
+npm run test:auth:emulator
 ```
 
----
+Start local Firebase services only against a demo/development project:
 
-## 🎮 FUNZIONALITÀ AI
+```bash
+firebase emulators:start --only auth,firestore,functions --project PROJECT_ID
+```
 
-### **Ask Mode** 
-- "Com'è andata oggi?"
-- "Quali task sono a rischio?"
-- Analisi dello stato attuale
+Automated tests inject a deterministic fake Responses transport and make no
+live OpenAI calls.
 
-### **Plan Mode**
-- "Ottimizza la mia giornata" 
-- "Aggiungi 2h di deep work"
-- Modifiche concrete ai time blocks
+## Static frontend verification
 
-### **Analyze Mode**
-- "Dove sto andando bene?"
-- "Analisi settimanale"
-- Pattern e insights sui dati
+```bash
+GITHUB_PAGES=true \
+NEXT_PUBLIC_AI_API_BASE_URL=https://europe-west1-PROJECT_ID.cloudfunctions.net/lifeTrackerAiApi \
+npm run build
+npm run check:static-security -- --include-output
+```
 
-### **Coach Mode**
-- "Perché fallisco questa abitudine?"
-- "Weekly review"
-- Consigli personalizzati if-then
+The security check rejects legacy local AI routes, provider-key names, direct
+OpenAI calls, and an OpenAI SDK dependency in browser code.
 
----
+## Deployment (documentation only)
 
-## 💰 COSTI PREVISTI
+Deployment is a separate, human-approved action. After review, secret rotation,
+staging verification, and explicit project selection, the narrow Functions
+command is:
 
-**GPT-4o-mini (RACCOMANDATO):**
-- ~€0.50-2/mese per uso moderato
-- Ottima qualità/prezzo
+```bash
+firebase deploy --project PROJECT_ID --only functions:lifeTrackerAiApi
+```
 
-**GPT-4o (PREMIUM):**
-- ~€3-10/mese
-- Analisi più profonde
+Firestore Rules are a separate high-impact deployment:
 
----
+```bash
+firebase deploy --project PROJECT_ID --only firestore:rules
+```
 
-## ⚡ COSA VEDRAI
+Do not combine these commands implicitly and do not deploy from an unreviewed
+working tree.
 
-L'AI avrà accesso COMPLETO a:
-- ✅ Tutti i tuoi goals con progresso
-- ✅ Tasks con priorità e deadline  
-- ✅ Time blocks pianificati vs tempo reale
-- ✅ Abitudini con streak counters
-- ✅ KPIs calcolati in tempo reale
+## Current MCP boundary
 
-E potrà **MODIFICARE** concretamente:
-- ✅ Creare/spostare/eliminare time blocks
-- ✅ Aggiornare priorità dei task
-- ✅ Ottimizzare la giornata
-- ✅ Suggerire if-then plans per abitudini
+`ReadOnlyMcpDomainAdapter` reuses the same authenticated domain registry but is
+disabled by default and has no remote transport in this branch. It exposes only
+bounded read tools when explicitly enabled. Proposal, apply, rollback, and raw
+database operations remain unavailable. A future remote MCP server must add a
+reviewed authentication transport without creating a second business-logic or
+write-authority path.
 
----
+## Incident note
 
-## 🔧 TROUBLESHOOTING
-
-**"API key not found"**
-→ Verifica .env.local con OPENAI_API_KEY
-
-**"Failed to fetch /api/ai/chat"**  
-→ Disabilita `output: export` in next.config.js
-
-**"Rate limit exceeded"**
-→ Stai facendo troppe richieste, aspetta
-
-**L'AI non propone modifiche**
-→ Usa modalità "Plan" e chiedi modifiche specifiche
-
----
-
-## 🎯 PROSSIMI STEP
-
-1. **Implementa Sessions nel DataProvider** per dati tempo reale più accurati
-2. **Aggiungi Domains** per contestualizzazione goal/progetti  
-3. **Streaming responses** per UX real-time
-4. **Custom tools** per funzioni specifiche della tua app
-
----
-
-**🧠 L'AI è pronta - basta attivarla! 🚀**
+A historical OpenAI key was exposed in an earlier revision of this guide. The
+current tree contains no usable value. Redaction does not revoke a credential:
+the owner must revoke/rotate the historical key before any live OpenAI test or
+deployment.

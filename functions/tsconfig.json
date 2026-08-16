@@ -3,6 +3,10 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
+    "baseUrl": ".",
+    "paths": {
+      "@life-tracker/ai-contract": ["../packages/ai-contract/index.d.ts"]
+    },
     "lib": ["ES2023"],
     "strict": true,
     "noUncheckedIndexedAccess": true,

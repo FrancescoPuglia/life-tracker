@@ -28,8 +28,9 @@ import {
   createIdempotencyKey,
   isAIBackendConfigured,
   requestAIChat,
-  rollbackAIPlan,
+  rollbackAIExecution,
   type AIChatMode,
+  type AIPlanActionResult,
   type AIPlanPreview,
 } from '@/lib/ai/client';
 import { getVoiceService } from '@/lib/voice/voiceService';
@@ -43,9 +44,12 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   plan?: AIPlanPreview;
+  execution?: AIPlanActionResult;
   isStreaming?: boolean;
   actionStatus?: 'applying' | 'rolling_back';
   actionNotice?: string;
+  planRejected?: boolean;
+  planStale?: boolean;
 }
 
 type AIStatus =
@@ -276,9 +280,8 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       )));
       setRequestStatus(null);
 
-      // Keep the static client self-contained: premium/cloud TTS still uses
-      // legacy same-origin routes, so AI replies are spoken only by the local
-      // browser provider.
+      // Keep the static client self-contained: cloud TTS routes were removed,
+      // so AI replies are spoken only by the local browser provider.
       const voiceService = getVoiceService();
       if (voiceService?.getSettings().provider === 'browser') {
         voiceService.speakAIResponse(result.message);
@@ -300,8 +303,11 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
     messageId: string,
     plan: AIPlanPreview,
     action: 'apply' | 'rollback',
+    execution?: AIPlanActionResult,
   ) => {
-    const mapKey = `${action}:${plan.id}`;
+    const actionId = action === 'apply' ? plan.id : execution?.executionId;
+    if (!actionId || (action === 'rollback' && !execution?.rollback)) return;
+    const mapKey = `${action}:${actionId}`;
     let idempotencyKey = planActionKeysRef.current.get(mapKey);
     if (!idempotencyKey) {
       idempotencyKey = createIdempotencyKey();
@@ -320,9 +326,13 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
 
     try {
       const result = action === 'apply'
-        ? await applyAIPlan(plan.id, idempotencyKey)
-        : await rollbackAIPlan(plan.id, idempotencyKey);
-      const nextPlan = result.plan ?? {
+        ? await applyAIPlan(plan, idempotencyKey)
+        : await rollbackAIExecution(
+          execution!.executionId,
+          execution!.rollback!.capability,
+          idempotencyKey,
+        );
+      const nextPlan: AIPlanPreview = {
         ...plan,
         status: action === 'apply' ? 'applied' : 'rolled_back',
       };
@@ -331,6 +341,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           ? {
             ...message,
             plan: nextPlan,
+            execution: result,
             actionStatus: undefined,
             actionNotice: result.message,
           }
@@ -340,16 +351,32 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       setRequestStatus(null);
     } catch (error) {
       setRequestStatus(getRequestStatus(error));
+      const planStale = error instanceof AIClientError
+        && (error.code === 'state_changed' || error.code === 'approval_expired');
       setMessages((previous) => previous.map((message) => (
         message.id === messageId
           ? {
             ...message,
             actionStatus: undefined,
             actionNotice: getSafeClientMessage(error),
+            planStale: message.planStale || planStale,
           }
           : message
       )));
     }
+  };
+
+  const rejectPlan = (messageId: string) => {
+    setMessages((previous) => previous.map((message) => (
+      message.id === messageId
+        ? {
+          ...message,
+          planRejected: true,
+          actionNotice: 'Piano rifiutato. Nessuna modifica è stata applicata.',
+        }
+        : message
+    )));
+    inputRef.current?.focus();
   };
 
   const toggleVoice = () => {
@@ -379,6 +406,19 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       >
         {statusConfig.icon}
         <span>{statusConfig.label}</span>
+        {(status === 'offline' || status === 'rate_limited') && (
+          <button
+            type="button"
+            aria-label="Riprova connessione AI"
+            onClick={() => {
+              setRequestStatus(null);
+              inputRef.current?.focus();
+            }}
+            className="ml-auto rounded border border-current/40 px-2 py-0.5 font-medium hover:bg-white/10"
+          >
+            Riprova
+          </button>
+        )}
       </div>
 
       {showChat && messages.length > 0 && (
@@ -403,9 +443,13 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
                   <PlanPreviewCard
                     messageId={message.id}
                     plan={message.plan}
+                    execution={message.execution}
                     actionStatus={message.actionStatus}
                     actionNotice={message.actionNotice}
+                    rejected={message.planRejected}
+                    stale={message.planStale}
                     onAction={runPlanAction}
+                    onReject={rejectPlan}
                   />
                 )}
               </div>
@@ -566,25 +610,37 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
 function PlanPreviewCard({
   messageId,
   plan,
+  execution,
   actionStatus,
   actionNotice,
+  rejected,
+  stale,
   onAction,
+  onReject,
 }: {
   messageId: string;
   plan: AIPlanPreview;
+  execution?: AIPlanActionResult;
   actionStatus?: Message['actionStatus'];
   actionNotice?: string;
+  rejected?: boolean;
+  stale?: boolean;
   onAction: (
     messageId: string,
     plan: AIPlanPreview,
     action: 'apply' | 'rollback',
+    execution?: AIPlanActionResult,
   ) => Promise<void>;
+  onReject: (messageId: string) => void;
 }) {
   const expired = Date.parse(plan.expiresAt) <= Date.now();
   const applied = plan.status === 'applied';
   const rolledBack = plan.status === 'rolled_back';
   const hasConflicts = plan.conflicts.length > 0;
   const busy = Boolean(actionStatus);
+  const rollbackAvailable = applied
+    && execution?.receipt.rollbackAvailable === true
+    && Boolean(execution.rollback);
 
   return (
     <div
@@ -596,7 +652,7 @@ function PlanPreviewCard({
         <span className="rounded bg-gray-900/60 px-2 py-0.5 text-gray-300">{plan.status}</span>
       </div>
       <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-gray-300">
-        <dt>Operazioni</dt><dd className="text-right">{plan.operationCount}</dd>
+        <dt>Operazioni</dt><dd className="text-right">{plan.operations.length}</dd>
         <dt>Versione</dt><dd className="text-right font-mono">{plan.hash.slice(0, 12)}</dd>
         <dt>Scadenza</dt>
         <dd className="text-right">{new Date(plan.expiresAt).toLocaleString('it-IT')}</dd>
@@ -604,32 +660,61 @@ function PlanPreviewCard({
 
       <div className="mt-3">
         <p className="font-semibold text-gray-200">Diff da approvare</p>
-        <ol className="mt-1 space-y-1.5">
-          {plan.diff.map((entry, index) => (
-            <li
-              key={`${entry.entityType}:${entry.entityId ?? index}:${entry.action}`}
-              className="rounded-lg border border-gray-700/70 bg-gray-900/40 px-2.5 py-2"
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="rounded bg-cyan-900/60 px-1.5 py-0.5 font-mono text-[10px] uppercase text-cyan-200">
-                  {entry.action}
-                </span>
-                <span className="font-medium text-gray-200">{entry.entityType}</span>
-                {entry.entityId && (
-                  <span className="font-mono text-[10px] text-gray-500">
-                    {entry.entityId}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-gray-300">{entry.summary}</p>
-              {entry.changedFields.length > 0 && (
-                <p className="mt-1 text-[10px] text-gray-500">
-                  Campi: {entry.changedFields.join(', ')}
-                </p>
-              )}
-            </li>
-          ))}
-        </ol>
+        <div className="mt-1 space-y-2">
+          {(['create', 'update', 'move', 'delete'] as const).map((action) => {
+            const entries = plan.diff.filter((entry) => entry.action === action);
+            if (!entries.length) return null;
+            return (
+              <section key={action} aria-label={`Modifiche ${diffActionLabel(action)}`}>
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wide text-cyan-300">
+                  {diffActionLabel(action)} ({entries.length})
+                </h4>
+                <ol className="space-y-1.5">
+                  {entries.map((entry, index) => {
+                    const detailFields = previewDetailFields(entry);
+                    return (
+                      <li
+                        key={`${entry.entityType}:${entry.entityId ?? index}:${entry.action}`}
+                        className="rounded-lg border border-gray-700/70 bg-gray-900/40 px-2.5 py-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded bg-cyan-900/60 px-1.5 py-0.5 font-mono text-[10px] uppercase text-cyan-200">
+                            {entry.action}
+                          </span>
+                          <span className="font-medium text-gray-200">{entry.entityType}</span>
+                          {entry.entityId && (
+                            <span className="font-mono text-[10px] text-gray-500">
+                              {entry.entityId}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-gray-300">{entry.summary}</p>
+                        {detailFields.length > 0 && (
+                          <dl className="mt-2 space-y-1 border-t border-gray-700/60 pt-1.5 text-[10px]">
+                            {detailFields.map((field) => (
+                              <div key={field} className="grid grid-cols-[minmax(4rem,0.5fr)_1fr] gap-x-2">
+                                <dt className="font-medium text-gray-400">{field}</dt>
+                                <dd className="min-w-0 break-words text-gray-300">
+                                  <span aria-label={`Valore precedente ${field}`}>
+                                    {formatPreviewValue(entry.before?.[field])}
+                                  </span>
+                                  <span aria-hidden="true" className="mx-1 text-gray-500">→</span>
+                                  <span aria-label={`Valore proposto ${field}`}>
+                                    {formatPreviewValue(entry.after?.[field])}
+                                  </span>
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            );
+          })}
+        </div>
       </div>
 
       {plan.warnings.length > 0 && (
@@ -648,8 +733,40 @@ function PlanPreviewCard({
           </ul>
         </div>
       )}
+      {plan.assumptions.length > 0 && (
+        <div className="mt-2 text-blue-100">
+          <p className="font-semibold">Assunzioni</p>
+          <ul className="mt-1 list-disc pl-4">
+            {plan.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}
+          </ul>
+        </div>
+      )}
+      {plan.expectedImpact.length > 0 && (
+        <div className="mt-2 text-green-100">
+          <p className="font-semibold">Impatto atteso</p>
+          <ul className="mt-1 list-disc pl-4">
+            {plan.expectedImpact.map((impact) => <li key={impact}>{impact}</li>)}
+          </ul>
+        </div>
+      )}
       {expired && !applied && !rolledBack && (
         <p className="mt-2 text-amber-200">Anteprima scaduta: richiedi un nuovo piano.</p>
+      )}
+      {stale && (
+        <p className="mt-2 text-amber-200" role="alert">
+          Lo stato è cambiato: questa anteprima non può più essere applicata. Richiedine una nuova.
+        </p>
+      )}
+      {rejected && (
+        <p className="mt-2 text-gray-300">Piano rifiutato senza modificare i dati.</p>
+      )}
+      {execution && (
+        <dl className="mt-2 rounded bg-gray-900/50 px-2 py-1.5 text-gray-300">
+          <dt className="inline font-semibold">Ricevuta: </dt>
+          <dd className="inline font-mono">{execution.executionId}</dd>
+          <dt className="ml-2 inline font-semibold">Verifica: </dt>
+          <dd className="inline">{execution.verified ? 'completata' : 'in sospeso'}</dd>
+        </dl>
       )}
       {actionNotice && (
         <p className="mt-2 rounded bg-gray-900/50 px-2 py-1.5 text-gray-200" role="status">
@@ -658,11 +775,11 @@ function PlanPreviewCard({
       )}
 
       <div className="mt-3 flex gap-2">
-        {!applied && !rolledBack && (
+        {!applied && !rolledBack && !rejected && (
           <button
             type="button"
             onClick={() => onAction(messageId, plan, 'apply')}
-            disabled={busy || expired || hasConflicts}
+            disabled={busy || expired || hasConflicts || stale}
             className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-gray-700"
           >
             {actionStatus === 'applying'
@@ -671,18 +788,31 @@ function PlanPreviewCard({
             Applica piano
           </button>
         )}
-        {applied && (
+        {!applied && !rolledBack && !rejected && (
           <button
             type="button"
-            onClick={() => onAction(messageId, plan, 'rollback')}
+            onClick={() => onReject(messageId)}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-600 px-3 py-1.5 font-medium text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Rifiuta
+          </button>
+        )}
+        {rollbackAvailable && (
+          <button
+            type="button"
+            onClick={() => onAction(messageId, plan, 'rollback', execution)}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:bg-gray-700"
           >
             {actionStatus === 'rolling_back'
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
               : <RotateCcw className="w-3.5 h-3.5" />}
-            Rollback
+            Annulla modifiche
           </button>
+        )}
+        {applied && !rollbackAvailable && (
+          <span className="text-gray-400">Rollback non disponibile</span>
         )}
         {rolledBack && (
           <span className="inline-flex items-center gap-1.5 text-gray-300">
@@ -694,17 +824,68 @@ function PlanPreviewCard({
   );
 }
 
+function diffActionLabel(action: AIPlanPreview['diff'][number]['action']): string {
+  const labels = {
+    create: 'Creazioni',
+    update: 'Aggiornamenti',
+    move: 'Spostamenti',
+    delete: 'Eliminazioni',
+  } as const;
+  return labels[action];
+}
+
+function previewDetailFields(entry: AIPlanPreview['diff'][number]): readonly string[] {
+  if (entry.changedFields.length) return entry.changedFields.slice(0, 30);
+  const visible = [
+    'title',
+    'name',
+    'startTime',
+    'endTime',
+    'dueDate',
+    'targetDate',
+    'status',
+    'taskId',
+    'projectId',
+    'goalId',
+    'domainId',
+  ];
+  return visible
+    .filter((field) => entry.before?.[field] !== undefined || entry.after?.[field] !== undefined)
+    .slice(0, 8);
+}
+
+function formatPreviewValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '—';
+  if (typeof value === 'string') {
+    const normalized = value.slice(0, 500);
+    if (/^\d{4}-\d{2}-\d{2}T/.test(normalized) && Number.isFinite(Date.parse(normalized))) {
+      return `${new Date(normalized).toLocaleString('it-IT')} (${normalized})`;
+    }
+    return normalized;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value).slice(0, 500);
+  } catch {
+    return '[valore non visualizzabile]';
+  }
+}
+
 function getSafeClientMessage(error: unknown): string {
   return error instanceof AIClientError
     ? error.message
     : 'Il servizio AI non è raggiungibile in questo momento. Riprova più tardi.';
 }
 
-function getRequestStatus(error: unknown): AIStatus {
+function getRequestStatus(error: unknown): AIStatus | null {
   if (!(error instanceof AIClientError)) return 'offline';
   if (error.code === 'rate_limited') return 'rate_limited';
   if (error.code === 'forbidden') return 'forbidden';
   if (error.code === 'not_configured') return 'not_configured';
   if (error.code === 'auth_required' || error.code === 'session_expired') return 'signed_out';
-  return 'offline';
+  if (error.code === 'unavailable') return 'offline';
+  // A rejected domain action (for example STATE_CHANGED) does not make the
+  // authenticated backend unavailable. Keep the global status ready while
+  // the plan card renders the action-specific recovery message.
+  return null;
 }

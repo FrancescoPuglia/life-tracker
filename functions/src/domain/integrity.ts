@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { DomainError } from './errors';
-import type { EntityRecord, ImmutableChangePlan, StoredChangePlan } from './types';
+import type { ChangeSnapshot, EntityRecord, ImmutableChangePlan, StoredChangePlan } from './types';
 
 export function hashPlan(plan: Omit<ImmutableChangePlan, 'hash'>): string {
   return createHash('sha256').update(canonicalJson(plan)).digest('hex');
@@ -23,6 +23,26 @@ export function verifyStoredPlan(plan: StoredChangePlan): void {
 
 export function hashEntityState(record: EntityRecord): string {
   return createHash('sha256').update(canonicalJson(record)).digest('hex');
+}
+
+export function hashSnapshotState(snapshot: Pick<ChangeSnapshot, 'entries'>): string {
+  return createHash('sha256').update(canonicalJson(
+    [...snapshot.entries]
+      .map(({ collection, id, existed, version, contentHash }) => ({
+        collection,
+        id,
+        existed,
+        version,
+        contentHash,
+      }))
+      .sort((a, b) => `${a.collection}/${a.id}`.localeCompare(`${b.collection}/${b.id}`)),
+  )).digest('hex');
+}
+
+export function hashResultState(
+  stateHashes: Readonly<Record<string, string | null>>,
+): string {
+  return createHash('sha256').update(canonicalJson(stateHashes)).digest('hex');
 }
 
 export function hashIdempotencyKey(

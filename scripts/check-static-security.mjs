@@ -8,7 +8,7 @@ const findings = [];
 const browserSourcePatterns = [
   {
     label: 'legacy same-origin AI route',
-    pattern: /\/api\/ai\/chat\b/,
+    pattern: /\/api\/ai(?:\/|\b)/,
   },
   {
     label: 'legacy same-origin cloud voice route',
@@ -25,6 +25,14 @@ const browserSourcePatterns = [
   {
     label: 'provider key-shaped literal',
     pattern: /\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b/,
+  },
+  {
+    label: 'OpenAI SDK runtime in browser source',
+    pattern: /(?:\bfrom\s+['"]openai['"]|\brequire\(['"]openai['"]\)|\bnew\s+OpenAI\s*\()/,
+  },
+  {
+    label: 'direct OpenAI API use in browser source',
+    pattern: /(?:\bchat\.completions\b|\bresponses\.create\b|api\.openai\.com)/,
   },
 ];
 
@@ -66,6 +74,8 @@ if (existsSync(legacyVoiceRoutePath) && listFiles(legacyVoiceRoutePath).length >
     label: 'unauthenticated cloud voice route remains in the static frontend',
   });
 }
+
+validateRootDependencies();
 
 validateConfiguredBackend();
 
@@ -118,6 +128,17 @@ function validateConfiguredBackend() {
     findings.push({
       file: 'NEXT_PUBLIC_AI_API_BASE_URL',
       label: 'backend URL must be an absolute HTTP(S) URL without credentials, query, or fragment',
+    });
+  }
+}
+
+function validateRootDependencies() {
+  const packagePath = join(root, 'package.json');
+  const manifest = JSON.parse(readFileSync(packagePath, 'utf8'));
+  if (manifest.dependencies?.openai || manifest.devDependencies?.openai) {
+    findings.push({
+      file: 'package.json',
+      label: 'OpenAI SDK belongs in the backend Functions package, not the static frontend package',
     });
   }
 }

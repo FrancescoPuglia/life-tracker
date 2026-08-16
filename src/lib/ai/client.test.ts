@@ -5,7 +5,8 @@ import {
   applyAIPlan,
   getAIBackendBaseUrl,
   requestAIChat,
-  rollbackAIPlan,
+  rollbackAIExecution,
+  type AIPlanPreview,
 } from './client';
 
 const API_BASE_URL = 'https://ai.example.test/life-tracker';
@@ -115,6 +116,23 @@ describe('authenticated AI client', () => {
     expect(second?.headers).toMatchObject({ Authorization: 'Bearer fresh-token' });
   });
 
+  it('stops after one token refresh when the backend still returns 401', async () => {
+    const getIdToken = vi.fn()
+      .mockResolvedValueOnce('stale-token')
+      .mockResolvedValueOnce('refreshed-but-invalid-token');
+    setCurrentUser(getIdToken);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'UNAUTHENTICATED' } }, 401))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'UNAUTHENTICATED' } }, 401));
+
+    await expect(requestAIChat({ message: 'Ciao', mode: 'ask' })).rejects.toMatchObject({
+      code: 'session_expired',
+      status: 401,
+    });
+    expect(getIdToken).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     [403, 'forbidden'],
     [409, 'conflict'],
@@ -139,74 +157,140 @@ describe('authenticated AI client', () => {
     expect(error.message).not.toContain('provider details');
   });
 
-  it('normalizes a canonical immutable plan preview without exposing operations', async () => {
+  it('validates the canonical immutable plan preview shared with the backend', async () => {
+    const plan = validPlan();
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({
       message: 'Controlla il piano',
-      plan: {
-        id: 'plan_123',
-        hash: '0123456789abcdef',
-        expiresAt: '2030-01-01T10:00:00.000Z',
-        operations: [{ collection: 'tasks', before: { private: true } }],
-        diff: [{
-          action: 'update',
-          entityType: 'task',
-          entityId: 'task_123',
-          summary: 'Sposta la scadenza al giorno successivo',
-          changedFields: ['dueDate'],
-          before: { private: 'must not be copied' },
-        }],
-        warnings: ['Un blocco protetto sarà preservato'],
-        conflicts: [],
-        status: 'preview',
-      },
+      plan,
     }));
 
     await expect(requestAIChat({ message: 'Pianifica', mode: 'plan' })).resolves.toEqual({
       message: 'Controlla il piano',
-      plan: {
-        id: 'plan_123',
-        hash: '0123456789abcdef',
-        expiresAt: '2030-01-01T10:00:00.000Z',
-        operationCount: 1,
-        diff: [{
-          action: 'update',
-          entityType: 'task',
-          entityId: 'task_123',
-          summary: 'Sposta la scadenza al giorno successivo',
-          changedFields: ['dueDate'],
-        }],
-        warnings: ['Un blocco protetto sarà preservato'],
-        conflicts: [],
-        status: 'preview',
-      },
+      plan,
     });
   });
 
-  it('uses authenticated plan endpoints and keeps the idempotency key in the body', async () => {
+  it('binds apply to the exact approval and rollback to its execution capability', async () => {
+    const plan = validPlan();
+    const applyResult = validActionResult();
+    const rollbackResult = validActionResult({ status: 'rolled_back', rollback: false });
     vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse({ message: 'Piano applicato' }))
-      .mockResolvedValueOnce(jsonResponse({ message: 'Rollback completato' }));
+      .mockResolvedValueOnce(jsonResponse(applyResult))
+      .mockResolvedValueOnce(jsonResponse(rollbackResult));
     const idempotencyKey = 'idem_1234567890123456';
 
-    await applyAIPlan('plan_123', idempotencyKey);
-    await rollbackAIPlan('plan_123', idempotencyKey);
+    await applyAIPlan(plan, idempotencyKey);
+    await rollbackAIExecution(
+      applyResult.executionId,
+      applyResult.rollback!.capability,
+      idempotencyKey,
+    );
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       `${API_BASE_URL}/v1/plans/plan_123/apply`,
-      expect.objectContaining({ body: JSON.stringify({ idempotencyKey }) }),
+      expect.objectContaining({
+        body: JSON.stringify({
+          approvalCapability: plan.approval.capability,
+          idempotencyKey,
+        }),
+      }),
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      `${API_BASE_URL}/v1/plans/plan_123/rollback`,
-      expect.objectContaining({ body: JSON.stringify({ idempotencyKey }) }),
+      `${API_BASE_URL}/v1/executions/execution_123/rollback`,
+      expect.objectContaining({
+        body: JSON.stringify({
+          rollbackCapability: applyResult.rollback!.capability,
+          idempotencyKey,
+        }),
+      }),
     );
   });
 
   it('rejects invalid plan identifiers before network access', async () => {
-    await expect(applyAIPlan('../cross-user', 'idem_1234567890123456')).rejects.toMatchObject({
+    await expect(applyAIPlan({ ...validPlan(), id: '../cross-user' }, 'idem_1234567890123456')).rejects.toMatchObject({
       code: 'invalid_request',
     });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it('maps stale state from the typed backend code and requires a fresh preview', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({
+      error: { code: 'STATE_CHANGED', message: 'safe message' },
+      requestId: 'request_123',
+    }, 409));
+
+    await expect(applyAIPlan(validPlan(), 'idem_1234567890123456')).rejects.toMatchObject({
+      code: 'state_changed',
+      status: 409,
+    });
+  });
 });
+
+function validPlan(): AIPlanPreview {
+  return {
+    id: 'plan_123',
+    tool: 'preview_changes',
+    createdAt: '2029-12-31T10:00:00.000Z',
+    expiresAt: '2030-01-01T10:00:00.000Z',
+    baseStateHash: 'a'.repeat(64),
+    hash: 'b'.repeat(64),
+    status: 'previewed',
+    operations: [{ action: 'update', entityType: 'tasks', entityId: 'task_123' }],
+    diff: [{
+      action: 'update',
+      entityType: 'tasks',
+      entityId: 'task_123',
+      summary: 'Sposta la scadenza al giorno successivo.',
+      title: 'Task importante',
+      changedFields: ['dueDate'],
+      before: { dueDate: '2029-12-31' },
+      after: { dueDate: '2030-01-01' },
+    }],
+    reason: 'Pianificazione richiesta dall’utente.',
+    warnings: ['Un blocco protetto sarà preservato'],
+    conflicts: [],
+    assumptions: [],
+    expectedImpact: ['Una scadenza viene aggiornata.'],
+    destructiveOperationCount: 0,
+    approval: {
+      required: true,
+      capability: 'a'.repeat(43),
+      expiresAt: '2030-01-01T10:00:00.000Z',
+    },
+  };
+}
+
+function validActionResult(options: {
+  status?: 'applied' | 'rolled_back';
+  rollback?: boolean;
+} = {}) {
+  const status = options.status ?? 'applied';
+  const rollback = options.rollback ?? true;
+  return {
+    message: status === 'applied' ? 'Piano applicato' : 'Rollback completato',
+    executionId: 'execution_123',
+    planId: 'plan_123',
+    hash: 'b'.repeat(64),
+    status,
+    idempotentReplay: false,
+    verified: true,
+    receipt: {
+      executionId: 'execution_123',
+      planId: 'plan_123',
+      changesetHash: 'b'.repeat(64),
+      status,
+      verified: true,
+      timestamp: '2030-01-01T10:00:01.000Z',
+      affected: [{ collection: 'tasks', id: 'task_123' }],
+      rollbackAvailable: status === 'applied' && rollback,
+      rollbackExpiresAt: status === 'applied' && rollback
+        ? '2030-01-08T10:00:01.000Z'
+        : null,
+    },
+    ...(status === 'applied' && rollback
+      ? { rollback: { capability: 'r'.repeat(43), expiresAt: '2030-01-08T10:00:01.000Z' } }
+      : {}),
+  };
+}
