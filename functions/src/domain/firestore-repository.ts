@@ -119,7 +119,7 @@ export class FirestoreRepository implements AuditableRepository {
         lastId = document.id;
         scanned += 1;
         const record = normalizeEntitySnapshot(uid, document);
-        if (matchesFilter(record, request)) items.push(record);
+        if (!isSoftDeleted(record) && matchesFilter(record, request)) items.push(record);
         if (items.length >= request.limit || scanned >= MAX_SCAN_PER_PAGE) break;
       }
     }
@@ -138,7 +138,9 @@ export class FirestoreRepository implements AuditableRepository {
     assertUid(uid);
     assertEntityId(id);
     const snapshot = await this.entityRef(uid, collection, id).get();
-    return snapshot.exists ? normalizeEntitySnapshot(uid, snapshot) : null;
+    if (!snapshot.exists) return null;
+    const record = normalizeEntitySnapshot(uid, snapshot);
+    return isSoftDeleted(record) ? null : record;
   }
 
   async getUserPlanningPreferences(uid: string): Promise<UserPlanningPreferences> {
@@ -970,10 +972,21 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
       .toLocaleLowerCase('en-US');
     if (!haystack.includes(filter.query.toLocaleLowerCase('en-US'))) return false;
   }
-  const timestamp = recordTimestamp(record);
-  if (filter.from && timestamp < Date.parse(filter.from)) return false;
-  if (filter.to && timestamp >= Date.parse(filter.to)) return false;
+  const start = typeof record.startTime === 'string'
+    ? Date.parse(record.startTime)
+    : recordTimestamp(record);
+  const end = typeof record.endTime === 'string'
+    ? Date.parse(record.endTime)
+    : start;
+  // TimeBlocks and Sessions are half-open intervals. Select every record that
+  // overlaps [from,to), including commitments that started before the range.
+  if (filter.from && end <= Date.parse(filter.from)) return false;
+  if (filter.to && start >= Date.parse(filter.to)) return false;
   return true;
+}
+
+function isSoftDeleted(record: EntityRecord): boolean {
+  return record.deleted === true;
 }
 
 function recordTimestamp(record: EntityRecord): number {

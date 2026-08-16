@@ -15,6 +15,10 @@ const browserSourcePatterns = [
     pattern: /\/api\/voice\//,
   },
   {
+    label: 'same-origin server route used by static browser source',
+    pattern: /(?:fetch\s*\(\s*|["'`])\/?api\//,
+  },
+  {
     label: 'server provider secret name in browser source',
     pattern: /\b(?:OPENAI|ELEVENLABS)_API_KEY\b/,
   },
@@ -48,6 +52,18 @@ scanTree(join(root, 'src'), browserSourcePatterns, {
   exclude: (path) => path.includes(`${join('src', 'app', 'api')}`),
   extensions: new Set(['.js', '.jsx', '.ts', '.tsx']),
 });
+
+const nextApiRoot = join(root, 'src', 'app', 'api');
+if (existsSync(nextApiRoot)) {
+  for (const path of listFiles(nextApiRoot)) {
+    if (/\/route\.(?:js|jsx|ts|tsx)$/.test(path.replaceAll('\\', '/'))) {
+      findings.push({
+        file: relative(root, path),
+        label: 'Next.js route handler remains in the static frontend',
+      });
+    }
+  }
+}
 
 const workflowPath = join(root, '.github', 'workflows', 'deploy.yml');
 if (existsSync(workflowPath)) {

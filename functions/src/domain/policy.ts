@@ -97,6 +97,7 @@ const FIELD_SCHEMAS: Readonly<
     goalId: nullableId,
     domainId: nullableId.unwrap(),
     notes: longText.nullable(),
+    flexibility: z.enum(['fixed', 'flexible']),
   },
   habits: {
     name: shortText,

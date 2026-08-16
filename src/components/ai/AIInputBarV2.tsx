@@ -657,6 +657,10 @@ function PlanPreviewCard({
         <dt>Scadenza</dt>
         <dd className="text-right">{new Date(plan.expiresAt).toLocaleString('it-IT')}</dd>
       </dl>
+      <div className="mt-2 rounded border border-gray-700/60 bg-gray-900/30 px-2.5 py-2 text-gray-300">
+        <span className="font-semibold text-gray-200">Motivo: </span>
+        <span>{plan.reason}</span>
+      </div>
 
       <div className="mt-3">
         <p className="font-semibold text-gray-200">Diff da approvare</p>
@@ -835,29 +839,20 @@ function diffActionLabel(action: AIPlanPreview['diff'][number]['action']): strin
 }
 
 function previewDetailFields(entry: AIPlanPreview['diff'][number]): readonly string[] {
-  if (entry.changedFields.length) return entry.changedFields.slice(0, 30);
-  const visible = [
-    'title',
-    'name',
-    'startTime',
-    'endTime',
-    'dueDate',
-    'targetDate',
-    'status',
-    'taskId',
-    'projectId',
-    'goalId',
-    'domainId',
-  ];
-  return visible
-    .filter((field) => entry.before?.[field] !== undefined || entry.after?.[field] !== undefined)
-    .slice(0, 8);
+  const fields = new Set([
+    ...entry.changedFields,
+    ...Object.keys(entry.before ?? {}),
+    ...Object.keys(entry.after ?? {}),
+  ]);
+  return [...fields]
+    .filter((field) => !['id', 'createdAt', 'updatedAt'].includes(field))
+    .sort();
 }
 
 function formatPreviewValue(value: unknown): string {
   if (value === undefined || value === null || value === '') return '—';
   if (typeof value === 'string') {
-    const normalized = value.slice(0, 500);
+    const normalized = value;
     if (/^\d{4}-\d{2}-\d{2}T/.test(normalized) && Number.isFinite(Date.parse(normalized))) {
       return `${new Date(normalized).toLocaleString('it-IT')} (${normalized})`;
     }
@@ -865,7 +860,7 @@ function formatPreviewValue(value: unknown): string {
   }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   try {
-    return JSON.stringify(value).slice(0, 500);
+    return JSON.stringify(value);
   } catch {
     return '[valore non visualizzabile]';
   }

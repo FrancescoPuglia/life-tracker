@@ -28,7 +28,10 @@ export async function buildAuthenticatedAiContext(
     from: null,
     to: null,
     perCollectionLimit: limit,
-    includeNotes: true,
+    // Notes can contain highly sensitive or hostile user-authored text. Keep
+    // them out of the ambient prompt; the model can request a bounded page
+    // through get_notes when the user explicitly needs note-grounded work.
+    includeNotes: false,
   });
 
   return {

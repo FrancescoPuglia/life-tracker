@@ -641,9 +641,10 @@ function publicDiff(diff: ChangeDiff): PublicChangeDiff {
   const source = diff.after ?? diff.before;
   const candidate = source?.title ?? source?.name;
   const title = typeof candidate === 'string' ? candidate.slice(0, 120) : null;
-  const changed = diff.op === 'update'
-    ? changedFields(diff.before, diff.after)
-    : [];
+  // Creates and deletes must expose the same complete browser-safe field set
+  // that is covered by the approved changeset hash. An empty list caused the
+  // UI to fall back to a small whitelist and hide material fields.
+  const changed = changedFields(diff.before, diff.after);
   return {
     action: publicAction(diff),
     entityType: diff.collection,

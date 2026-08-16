@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PublicChangeOperation } from './types';
 
 const idSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const nullableIdSchema = idSchema.nullable();
@@ -96,7 +97,8 @@ export const publicPatchSchema = z
 export const publicChangeOperationSchema = z
   .object({
     op: z.enum(['create', 'update', 'delete']),
-    collection: z.enum(['goals', 'keyResults', 'projects', 'tasks', 'timeBlocks', 'habits', 'notes', 'domains']),
+    // Hierarchy and calendar mutations have dedicated deterministic tools.
+    collection: z.enum(['habits', 'notes', 'domains']),
     id: idSchema,
     patch: z.array(publicPatchSchema).max(30),
   })
@@ -142,6 +144,21 @@ const goalArchitectTaskSchema = z.object({
   dueDateISO: nullableCalendarOrInstantSchema,
   priority: draftPrioritySchema,
   parentProjectId: idSchema,
+}).strict();
+
+export const previewTaskChangeArgsSchema = z.object({
+  action: z.enum(['create', 'update']),
+  id: idSchema,
+  title: z.string().trim().min(1).max(240),
+  description: nullableDescriptionSchema,
+  status: z.enum(['pending', 'todo', 'in_progress', 'completed', 'blocked', 'cancelled']),
+  priority: draftPrioritySchema,
+  projectId: idSchema,
+  goalId: idSchema,
+  domainId: idSchema,
+  dueDate: nullableCalendarOrInstantSchema,
+  estimatedMinutes: z.number().int().min(1).max(1440),
+  reason: z.string().trim().min(1).max(500),
 }).strict();
 
 const goalArchitectKeyResultSchema = z.object({
@@ -227,9 +244,18 @@ export const replaceWeekScheduleArgsSchema = z
   })
   .strict();
 
-export type PreviewChangesArgs = z.infer<typeof previewChangesArgsSchema>;
+/**
+ * Internal service input remains collection-complete for deterministic tests
+ * and non-model adapters. The model-facing Zod/JSON schema above is narrower
+ * and cannot select hierarchy or calendar collections.
+ */
+export interface PreviewChangesArgs {
+  readonly operations: readonly PublicChangeOperation[];
+  readonly reason: string;
+}
 export type StateArgs = z.infer<typeof stateArgsSchema>;
 export type PreviewGoalArchitectureArgs = z.infer<typeof previewGoalArchitectureArgsSchema>;
 export type ReplaceDayScheduleArgs = z.infer<typeof replaceDayScheduleArgsSchema>;
 export type ReplaceWeekScheduleArgs = z.infer<typeof replaceWeekScheduleArgsSchema>;
 export type PreviewTimeBlockChangeArgs = z.infer<typeof previewTimeBlockChangeArgsSchema>;
+export type PreviewTaskChangeArgs = z.infer<typeof previewTaskChangeArgsSchema>;

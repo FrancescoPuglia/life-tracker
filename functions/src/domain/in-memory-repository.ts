@@ -89,7 +89,7 @@ export class InMemoryRepository implements AuditableRepository {
     const fingerprint = queryFingerprint(collection, request);
     const offset = request.cursor ? decodeCursor(request.cursor, fingerprint) : 0;
     const values = [...this.collection(uid, collection).values()]
-      .filter((record) => matchesFilter(record, request))
+      .filter((record) => !isSoftDeleted(record) && matchesFilter(record, request))
       .sort((a, b) => compareRecords(a, b));
     const items = values.slice(offset, offset + request.limit).map(clone);
     const nextOffset = offset + items.length;
@@ -105,7 +105,7 @@ export class InMemoryRepository implements AuditableRepository {
     id: string,
   ): Promise<EntityRecord | null> {
     const record = this.collection(uid, collection).get(id);
-    return record ? clone(record) : null;
+    return record && !isSoftDeleted(record) ? clone(record) : null;
   }
 
   async getUserPlanningPreferences(uid: string): Promise<UserPlanningPreferences> {
@@ -511,12 +511,17 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
       .toLocaleLowerCase('en-US');
     if (!haystack.includes(filter.query.toLocaleLowerCase('en-US'))) return false;
   }
-  const timestamp = typeof record.startTime === 'string'
+  const start = typeof record.startTime === 'string'
     ? Date.parse(record.startTime)
     : Date.parse(record.updatedAt);
-  if (filter.from && timestamp < Date.parse(filter.from)) return false;
-  if (filter.to && timestamp >= Date.parse(filter.to)) return false;
+  const end = typeof record.endTime === 'string' ? Date.parse(record.endTime) : start;
+  if (filter.from && end <= Date.parse(filter.from)) return false;
+  if (filter.to && start >= Date.parse(filter.to)) return false;
   return true;
+}
+
+function isSoftDeleted(record: EntityRecord): boolean {
+  return record.deleted === true;
 }
 
 function compareRecords(a: EntityRecord, b: EntityRecord): number {

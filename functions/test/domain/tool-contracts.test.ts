@@ -47,11 +47,25 @@ const validByName: Readonly<Record<string, unknown>> = {
   preview_changes: {
     operations: [{
       op: 'update',
-      collection: 'tasks',
-      id: 'task-1',
-      patch: [{ field: 'title', value: 'A safe title' }],
+      collection: 'domains',
+      id: 'domain-1',
+      patch: [{ field: 'name', value: 'A safe domain name' }],
     }],
     reason: 'User requested this change.',
+  },
+  preview_task_change: {
+    action: 'create',
+    id: 'task-new',
+    title: 'A concrete action',
+    description: null,
+    status: 'pending',
+    priority: 'high',
+    projectId: 'project-1',
+    goalId: 'goal-1',
+    domainId: 'domain-1',
+    dueDate: null,
+    estimatedMinutes: 60,
+    reason: 'Create one validated task.',
   },
   preview_timeblock_change: {
     action: 'move',
@@ -161,6 +175,7 @@ describe('strict domain tool contracts', () => {
       'goal_alignment',
       'detect_schedule_conflicts',
       'preview_timeblock_change',
+      'preview_task_change',
     ]));
     expect(names).not.toEqual(expect.arrayContaining([
       'apply_plan',
@@ -173,6 +188,21 @@ describe('strict domain tool contracts', () => {
     ]));
     expect(new Set(names).size).toBe(names.length);
     expect(TOOL_CONTRACTS.every((contract) => contract.kind === 'read' || contract.kind === 'proposal')).toBe(true);
+  });
+
+  it('keeps hierarchy and calendar mutations off the generic proposal surface', () => {
+    const generic = TOOL_CONTRACTS.find((contract) => contract.name === 'preview_changes');
+    for (const collection of ['goals', 'keyResults', 'projects', 'tasks', 'timeBlocks']) {
+      expect(generic?.schema.safeParse({
+        operations: [{
+          op: 'update',
+          collection,
+          id: 'entity-1',
+          patch: [{ field: 'title', value: 'Bypass' }],
+        }],
+        reason: 'Attempt deterministic-validator bypass.',
+      }).success).toBe(false);
+    }
   });
 
   it.each(TOOL_CONTRACTS)('$name accepts a valid fixture and rejects unknown identity fields', (contract) => {

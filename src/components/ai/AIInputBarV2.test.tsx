@@ -297,6 +297,48 @@ describe('AIInputBarV2 secure client flow', () => {
       '2098-12-31T12:00:00.000Z',
     );
   });
+
+  it('renders every browser-safe create field, the reason, and long values without silent truncation', async () => {
+    const plan = minimalPlan();
+    const longDescription = `Complete detail ${'x'.repeat(700)}`;
+    mocks.requestAIChat.mockResolvedValueOnce({
+      message: 'Anteprima completa',
+      plan: {
+        ...plan,
+        tool: 'preview_goal_architecture',
+        operations: [{ action: 'create', entityType: 'tasks', entityId: 'task-created' }],
+        diff: [{
+          action: 'create',
+          entityType: 'tasks',
+          entityId: 'task-created',
+          summary: 'Crea un task validato.',
+          title: 'Task completo',
+          changedFields: ['description', 'domainId', 'estimatedMinutes', 'priority', 'projectId', 'title'],
+          before: null,
+          after: {
+            title: 'Task completo',
+            description: longDescription,
+            priority: 'high',
+            estimatedMinutes: 90,
+            projectId: 'project-1',
+            domainId: 'domain-1',
+          },
+        }],
+        reason: 'Motivo esatto coperto dal changeset.',
+      },
+    });
+    render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Crea il task' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+
+    expect(await screen.findByText(/Motivo esatto coperto dal changeset/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Valore proposto priority')).toHaveTextContent('high');
+    expect(screen.getByLabelText('Valore proposto estimatedMinutes')).toHaveTextContent('90');
+    expect(screen.getByLabelText('Valore proposto description')).toHaveTextContent(longDescription);
+  });
 });
 
 function minimalPlan() {

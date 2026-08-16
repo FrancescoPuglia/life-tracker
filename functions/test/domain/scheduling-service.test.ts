@@ -74,6 +74,68 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect((await repository.getEntity(UID, 'timeBlocks', 'locked-block'))?.startTime).toBe('2026-08-17T08:00:00.000Z');
   });
 
+  it('persists an approved fixed proposal as a protected commitment for later replanning', async () => {
+    const { repository, domain } = harness(['plan-fixed-create', 'execution-fixed-create', 'plan-replan']);
+    const first = await domain.scheduling.replaceDaySchedule(context(UID, 'fixed-create'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'fixed-created',
+        start: '2026-08-17T08:00:00.000Z',
+        end: '2026-08-17T09:00:00.000Z',
+        flexibility: 'fixed',
+      })],
+      reason: 'Create one fixed commitment.',
+    });
+    await domain.changePlans.applyPlan(context(UID, 'fixed-apply'), {
+      planId: first.id,
+      approvalCapability: first.approval.capability,
+      idempotencyKey: 'fixed-roundtrip-apply-key-01',
+    });
+    expect(await repository.getEntity(UID, 'timeBlocks', 'fixed-created')).toMatchObject({
+      flexibility: 'fixed',
+    });
+
+    const replan = await domain.scheduling.replaceDaySchedule(context(UID, 'fixed-replan'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'later-flexible',
+        start: '2026-08-17T10:00:00.000Z',
+        end: '2026-08-17T11:00:00.000Z',
+      })],
+      reason: 'Replan without moving the fixed commitment.',
+    });
+    expect(replan.operations.some((operation) => operation.entityId === 'fixed-created')).toBe(false);
+    expect(replan.warnings.some((warning) => /Preserved 1/i.test(warning))).toBe(true);
+  });
+
+  it('detects a protected interval that begins before the calendar range', async () => {
+    const { repository, domain } = harness();
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'cross-midnight-locked',
+      title: 'Overnight commitment',
+      domainId: 'domain-1',
+      startTime: '2026-08-16T21:30:00.000Z',
+      endTime: '2026-08-16T22:30:00.000Z',
+      status: 'planned',
+      type: 'meeting',
+      locked: true,
+    }]);
+    const preview = await domain.scheduling.replaceDaySchedule(context(UID, 'boundary-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'boundary-overlap',
+        start: '2026-08-16T22:15:00.000Z',
+        end: '2026-08-16T23:00:00.000Z',
+      })],
+      reason: 'The overnight lock must remain visible.',
+    });
+    expect(preview.conflicts.some((conflict) => /protected block/i.test(conflict))).toBe(true);
+    expect(preview.operations.some((operation) => operation.entityId === 'cross-midnight-locked')).toBe(false);
+  });
+
   it('surfaces overlap and persisted capacity constraints from the authoritative WPI engine', async () => {
     const { repository, domain } = harness();
     repository.setPlanningPreferencesForTest(UID, {

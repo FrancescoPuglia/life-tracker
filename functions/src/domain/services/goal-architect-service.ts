@@ -6,7 +6,7 @@ import {
   type GoalArchitectureDraftLike,
 } from '../goal-architect/adapter';
 import type { Repository } from '../repository';
-import type { PreviewGoalArchitectureArgs } from '../schemas';
+import type { PreviewGoalArchitectureArgs, PreviewTaskChangeArgs } from '../schemas';
 import type {
   AuthContext,
   ChangeOperation,
@@ -56,6 +56,72 @@ export class GoalArchitectService {
         expectedImpact: [
           `Create one Goal, ${args.projects.length} Project(s), ${args.tasks.length} Task(s), and ${args.keyResults.length} Key Result(s) as one validated hierarchy.`,
         ],
+      },
+    );
+  }
+
+  async previewTaskChange(
+    context: AuthContext,
+    args: PreviewTaskChangeArgs,
+  ): Promise<PublicChangePlan> {
+    const [domain, goal, project, current] = await Promise.all([
+      this.repository.getEntity(context.uid, 'domains', args.domainId),
+      this.repository.getEntity(context.uid, 'goals', args.goalId),
+      this.repository.getEntity(context.uid, 'projects', args.projectId),
+      this.repository.getEntity(context.uid, 'tasks', args.id),
+    ]);
+    if (!domain || !goal || !project) {
+      throw new DomainError('FORBIDDEN', 'Task hierarchy is unavailable for this user.');
+    }
+    if (goal.domainId !== args.domainId || project.domainId !== args.domainId || project.goalId !== args.goalId) {
+      throw new DomainError('CONFLICT', 'Task Goal, Project, and Domain hierarchy is inconsistent.');
+    }
+    if (args.action === 'create' && current) {
+      throw new DomainError('CONFLICT', 'Task already exists; request an update instead.');
+    }
+    if (args.action === 'update' && !current) {
+      throw new DomainError('NOT_FOUND', 'Task is unavailable for this user.');
+    }
+
+    const existing = await this.readAll(context.uid, 'tasks', args.domainId);
+    const normalizedTitle = normalizeGoalArchitectTitle(args.title);
+    if (existing.some((task) => task.id !== args.id
+      && normalizeGoalArchitectTitle(String(task.title ?? '')) === normalizedTitle)) {
+      throw new DomainError('CONFLICT', `Duplicate tasks title '${args.title}' already exists in this domain.`);
+    }
+
+    const marker = `GAI_KEY: task:${createHash('sha256')
+      .update(JSON.stringify([args.domainId, args.goalId, args.projectId, normalizedTitle]))
+      .digest('hex')
+      .slice(0, 24)}`;
+    const description = args.action === 'create'
+      ? [args.description?.trim(), marker].filter(Boolean).join('\n\n')
+      : args.description;
+    const operation: ChangeOperation = {
+      op: args.action,
+      collection: 'tasks',
+      id: args.id,
+      values: {
+        title: args.title,
+        description,
+        status: args.status,
+        priority: args.priority,
+        projectId: args.projectId,
+        goalId: args.goalId,
+        domainId: args.domainId,
+        dueDate: normalizeNullableGoalArchitectDate(args.dueDate),
+        estimatedMinutes: args.estimatedMinutes,
+      },
+    };
+    return this.changePlans.previewOperations(
+      context,
+      'preview_task_change',
+      [operation],
+      [],
+      [],
+      {
+        reason: args.reason,
+        expectedImpact: [`${args.action === 'create' ? 'Create' : 'Update'} Task '${args.title}' in its validated Goal Architect hierarchy.`],
       },
     );
   }

@@ -7,6 +7,7 @@ import {
   analyticsArgsSchema,
   previewChangesArgsSchema,
   previewGoalArchitectureArgsSchema,
+  previewTaskChangeArgsSchema,
   previewTimeBlockChangeArgsSchema,
   readArgsSchema,
   replaceDayScheduleArgsSchema,
@@ -71,16 +72,19 @@ export function createLifeTrackerDomain(
   register('detect_schedule_conflicts', async (args, context) => read.detectScheduleConflicts(context, analyticsArgsSchema.parse(args)));
   register('preview_changes', async (args, context) => {
     const parsed = previewChangesArgsSchema.parse(args);
-    if (parsed.operations.some((operation) => operation.collection === 'timeBlocks' && operation.op !== 'delete')) {
+    const genericCollections = new Set<string>(['habits', 'notes', 'domains']);
+    if (parsed.operations.some((operation) => !genericCollections.has(String(operation.collection)))) {
       throw new DomainError(
         'FORBIDDEN',
-        'TimeBlock create, update, and move proposals must use the deterministic scheduling tool.',
+        'Hierarchy and TimeBlock proposals must use their deterministic domain tool.',
       );
     }
     return changePlans.previewChanges(context, parsed);
   });
   register('preview_timeblock_change', async (args, context) =>
     scheduling.previewTimeBlockChange(context, previewTimeBlockChangeArgsSchema.parse(args)));
+  register('preview_task_change', async (args, context) =>
+    goalArchitect.previewTaskChange(context, previewTaskChangeArgsSchema.parse(args)));
   register('preview_goal_architecture', async (args, context) => goalArchitect.preview(context, previewGoalArchitectureArgsSchema.parse(args)));
   register('replace_day_schedule', async (args, context) => scheduling.replaceDaySchedule(context, replaceDayScheduleArgsSchema.parse(args)));
   register('replace_week_schedule', async (args, context) => scheduling.replaceWeekSchedule(context, replaceWeekScheduleArgsSchema.parse(args)));

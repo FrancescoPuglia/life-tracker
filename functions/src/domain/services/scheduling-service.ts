@@ -604,6 +604,7 @@ function scheduleValues(
     goalId: input.goalId,
     domainId: input.domainId,
     notes: notes || null,
+    flexibility: input.flexibility,
   };
 }
 

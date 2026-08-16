@@ -11,6 +11,28 @@ const RANGE = {
 };
 
 describe('bounded canonical Life Tracker state', () => {
+  it('excludes soft-deleted entities from reads and reference truth', async () => {
+    const repository = seededRepository();
+    repository.seed(UID, 'tasks', [{
+      id: 'deleted-task',
+      title: 'Deleted task',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+      domainId: 'domain-1',
+      deleted: true,
+    }]);
+    const service = new ReadService(repository, () => new Date('2026-08-19T12:00:00.000Z'));
+    const page = await service.list(context(), 'tasks', {
+      filter: {
+        query: null, from: null, to: null, status: null,
+        domainId: null, projectId: null, goalId: null, taskId: null,
+      },
+      cursor: null,
+      limit: 50,
+    });
+    expect(page.items.some((item) => item.id === 'deleted-task')).toBe(false);
+    expect(await repository.getEntity(UID, 'tasks', 'deleted-task')).toBeNull();
+  });
   it('grounds every supported entity, real Sessions, explicit preferences provenance, and untrusted Notes', async () => {
     const repository = seededRepository();
     const service = new ReadService(repository, () => new Date('2026-08-19T12:00:00.000Z'));
@@ -92,6 +114,10 @@ describe('bounded canonical Life Tracker state', () => {
       perCollectionLimit: 25,
     });
     expect(Buffer.byteLength(JSON.stringify(contextValue.data), 'utf8')).toBeLessThan(180_000);
+    expect((contextValue.data.authoritative as Record<string, unknown>).notes).toEqual({
+      items: [],
+      truncated: false,
+    });
   });
 
   it('fails closed instead of scanning an unbounded filtered collection', async () => {

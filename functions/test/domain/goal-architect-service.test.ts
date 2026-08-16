@@ -112,6 +112,41 @@ describe('Goal Architect deterministic backend adapter', () => {
       domainId: 'private-domain',
     })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
+
+  it('routes focused task creation through Goal Architect hierarchy and duplicate checks', async () => {
+    const { repository, domain } = harness(['plan-task', 'execution-task']);
+    repository.seed(UID, 'goals', [{
+      id: 'goal-existing', title: 'Existing goal', domainId: 'domain-1', status: 'active', priority: 'high',
+    }]);
+    repository.seed(UID, 'projects', [{
+      id: 'project-existing', name: 'Existing project', goalId: 'goal-existing', domainId: 'domain-1', status: 'active', priority: 'high',
+    }]);
+    const preview = await domain.goalArchitect.previewTaskChange(context(UID, 'task-preview'), {
+      action: 'create',
+      id: 'task-focused',
+      title: 'Concrete focused action',
+      description: null,
+      status: 'pending',
+      priority: 'high',
+      projectId: 'project-existing',
+      goalId: 'goal-existing',
+      domainId: 'domain-1',
+      dueDate: null,
+      estimatedMinutes: 45,
+      reason: 'Create a focused task.',
+    });
+    await domain.changePlans.applyPlan(context(UID, 'task-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'focused-task-apply-key-001',
+    });
+    expect(await repository.getEntity(UID, 'tasks', 'task-focused')).toMatchObject({
+      projectId: 'project-existing',
+      goalId: 'goal-existing',
+      domainId: 'domain-1',
+      description: expect.stringContaining('GAI_KEY: task:'),
+    });
+  });
 });
 
 function harness(ids: readonly string[] = ['plan-default', 'execution-default']) {

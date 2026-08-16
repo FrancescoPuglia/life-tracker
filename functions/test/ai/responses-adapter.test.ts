@@ -148,7 +148,34 @@ describe('bounded OpenAI Responses orchestration', () => {
       message: 'Change my calendar',
       mode: 'plan',
       authenticatedContext: CONTEXT,
-    })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+
+  it('refuses the generic proposal path as a bypass around Goal Architect', async () => {
+    const { adapter } = setup([{
+      id: 'response-hierarchy-bypass',
+      output: [{
+        type: 'function_call',
+        call_id: 'hierarchy-bypass',
+        name: 'preview_changes',
+        arguments: JSON.stringify({
+          operations: [{
+            op: 'create',
+            collection: 'tasks',
+            id: 'orphan-task',
+            patch: [{ field: 'title', value: 'Bypass attempt' }],
+          }],
+          reason: 'Attempt a generic hierarchy mutation.',
+        }),
+      }],
+    }]);
+
+    await expect(adapter.run({
+      auth: AUTH,
+      message: 'Create a task without Goal Architect',
+      mode: 'plan',
+      authenticatedContext: CONTEXT,
+    })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
   });
 
   it('rejects unknown tools and malformed JSON arguments with typed errors', async () => {
