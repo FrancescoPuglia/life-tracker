@@ -550,19 +550,6 @@ export default function MainApp({ buildId }: MainAppProps) {
                       </div>
                       
                       <AIInputBarV2
-                        userId={data.userId}
-                        goals={data.goals}
-                        projects={data.projects}
-                        tasks={data.tasks}
-                        timeBlocks={data.timeBlocks}
-                        sessions={[]}
-                        habits={data.habits}
-                        habitLogs={data.habitLogs}
-                        domains={[]}
-                        onCreateTimeBlock={data.createTimeBlock}
-                        onUpdateTimeBlock={data.updateTimeBlock}
-                        onDeleteTimeBlock={data.deleteTimeBlock}
-                        onUpdateTask={data.updateTask}
                         className="w-full"
                       />
                     </div>
@@ -690,19 +677,6 @@ export default function MainApp({ buildId }: MainAppProps) {
       <AskAIDrawer open={aiDrawerOpen} onClose={() => setAiDrawerOpen(false)}>
         <Suspense fallback={<div className="text-sm text-gray-500">Loading AI…</div>}>
           <AIInputBarV2
-            userId={data.userId}
-            goals={data.goals}
-            projects={data.projects}
-            tasks={data.tasks}
-            timeBlocks={data.timeBlocks}
-            sessions={[]}
-            habits={data.habits}
-            habitLogs={data.habitLogs}
-            domains={[]}
-            onCreateTimeBlock={handleCreateTimeBlock}
-            onUpdateTimeBlock={data.updateTimeBlock}
-            onDeleteTimeBlock={data.deleteTimeBlock}
-            onUpdateTask={data.updateTask}
             className="w-full"
           />
         </Suspense>

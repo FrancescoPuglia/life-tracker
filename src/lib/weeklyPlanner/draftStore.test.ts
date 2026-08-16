@@ -136,8 +136,13 @@ describe('robustness', () => {
   });
 
   it('refuses to save a falsy draft', () => {
-    // @ts-expect-error — testing runtime guard, not type system.
-    expect(saveWeeklyPlanDraft({ userIdOrLocal: 'u1', weekStartISO: '2026-01-05', draft: null })).toBe(false);
+    // Force an invalid runtime value through the type boundary so the guard
+    // remains covered even when strictNullChecks is disabled by the app.
+    expect(saveWeeklyPlanDraft({
+      userIdOrLocal: 'u1',
+      weekStartISO: '2026-01-05',
+      draft: null as unknown as WeeklyPlanDraft,
+    })).toBe(false);
   });
 });
 

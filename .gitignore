@@ -40,6 +40,11 @@ yarn-error.log*
 .firebase/
 firebase-debug.log
 firestore-debug.log
+firebase-export/
+functions/lib/
+functions/.secret.local
+functions/.env.local
+functions/.env.*.local
 
 # Environment variables (NEVER COMMIT THESE!)
 .env

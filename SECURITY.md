@@ -1,93 +1,58 @@
-# Security Policy
+# Security policy
 
-## 🚨 CRITICAL: Exposed API Key Detected
+## Reporting a vulnerability
 
-**If you cloned this repository before 2026-01-11**, your `.env.local` may contain an **exposed OpenAI API key**.
+Please use GitHub's private **Security advisory** flow for this repository. Do
+not include credentials, Firebase exports, user records, ID tokens, prompts, or
+API responses in a public issue.
 
-### Immediate Actions Required:
+Include the affected revision, impact, a minimal reproduction with synthetic
+data, and any mitigation already attempted.
 
-1. **Revoke the key**:
-   - Go to https://platform.openai.com/api-keys
-   - Find key starting with `sk-proj-fHChBCV...`
-   - Click "Revoke"
+## Secrets
 
-2. **Generate new key**:
-   - Create new secret key
-   - Copy to `.env.local` (NEVER commit)
-   - Set spending limits
+- Browser-visible Firebase configuration and `NEXT_PUBLIC_AI_API_BASE_URL` are
+  public configuration, not credentials.
+- OpenAI credentials are bound only to the Firebase HTTPS Function through
+  Google Secret Manager. They must never be added to a root `.env*` file used
+  by Next.js, a GitHub Pages build, client source, logs, or test fixtures.
+- Firebase Admin uses Application Default Credentials in the managed Functions
+  runtime. Service-account JSON files must not be stored in this repository.
+- Local Functions emulation may use an ignored `functions/.secret.local` file.
+  Never commit that file or paste its contents into test output.
 
-3. **Verify `.gitignore`**:
-   ```bash
-   # Ensure .env.local is ignored
-   grep ".env.local" .gitignore
-   ```
+The repository intentionally contains no secret value or identifying key
+prefix. If a credential was ever exposed, revoke it at the provider; deleting
+it from the current tree is not sufficient.
 
-4. **Remove from Git history** (if committed):
-   ```bash
-   # WARNING: Rewrites history, coordinate with team
-   git filter-branch --force --index-filter \
-     "git rm --cached --ignore-unmatch .env.local" \
-     --prune-empty --tag-name-filter cat -- --all
+## Rotation procedure
 
-   git push --force --all
-   git push --force --tags
-   ```
+1. Revoke or disable the old provider credential.
+2. Create a replacement with the minimum required project permissions and a
+   spending limit.
+3. Store a new secret version with `firebase functions:secrets:set` without
+   echoing it into shell history or CI logs.
+4. Redeploy only the backend function that binds the secret. Do not deploy from
+   an unreviewed working tree.
+5. Verify authentication, rate limiting, audit records, and provider usage.
+6. Prune unused secret versions only after the new version is confirmed.
 
-## Supported Versions
+## Data and authorization boundaries
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+- Firestore client access is deny-by-default and scoped to
+  `/users/{authenticatedUid}/...`.
+- The backend derives `uid` only from a verified Firebase ID token. A `uid` or
+  `userId` supplied in a request or model tool call is never authoritative.
+- Change plans, snapshots, idempotency records, rate-limit state, and audit logs
+  are server-only collections. Firebase Admin writes them; clients are denied.
+- Destructive and multi-entity changes require preview, explicit apply with an
+  idempotency key, a consistent snapshot, and conflict-aware rollback.
+- Audit entries contain identifiers and outcomes, not prompts, secrets, note
+  bodies, or full entity payloads.
 
-## Reporting a Vulnerability
+## Safe operations
 
-**DO NOT** open a public GitHub issue for security vulnerabilities.
-
-Instead:
-1. Email: **security@yourapp.com** (replace with actual email)
-2. Include:
-   - Description of vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (optional)
-
-We will respond within 48 hours.
-
-## Security Best Practices
-
-### Environment Variables
-
-- ✅ **DO**: Use `.env.local` for secrets (gitignored)
-- ✅ **DO**: Prefix client-safe vars with `NEXT_PUBLIC_`
-- ❌ **DON'T**: Commit `.env.local` to Git
-- ❌ **DON'T**: Log secrets to console
-
-### API Routes
-
-- ✅ **DO**: Implement rate limiting (10 req/min)
-- ✅ **DO**: Validate all inputs
-- ✅ **DO**: Use server-side API keys only
-- ❌ **DON'T**: Trust client input without validation
-
-### Firebase
-
-- ✅ **DO**: Deploy Firestore rules (`npm run firebase:rules`)
-- ✅ **DO**: Use user-scoped paths: `/users/{userId}/...`
-- ❌ **DON'T**: Allow public read/write access
-
-### Dependencies
-
-- ✅ **DO**: Run `npm audit` regularly
-- ✅ **DO**: Update dependencies quarterly
-- ❌ **DON'T**: Ignore security warnings
-
-## Secrets Rotation Schedule
-
-| Secret | Rotation Frequency | Last Rotated |
-|--------|-------------------|--------------|
-| OpenAI API Key | 90 days | 2026-01-11 |
-| Firebase Service Account | 180 days | TBD |
-
-## Contact
-
-For questions: security@yourapp.com
+Run the local test suites and emulators against a Firebase demo project ID.
+Never point automated tests at a production project and never import a real
+Firestore export into CI. Production deployment and data migration are manual,
+separately reviewed operations.

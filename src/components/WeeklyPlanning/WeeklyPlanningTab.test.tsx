@@ -228,7 +228,7 @@ describe('WeeklyPlanningView — approve & commit', () => {
   });
 
   it('Approve is enabled with at least one mapped block and calls createTimeBlock', async () => {
-    const onCommitBlock = vi.fn(async () => undefined);
+    const onCommitBlock = vi.fn(async (_block: CommitTimeBlockInput) => undefined);
     renderView({
       onCommitBlock,
       goals: GOALS,
@@ -328,7 +328,7 @@ describe('WeeklyPlanningView — approve & commit', () => {
 describe('WeeklyPlanningView — duplicate prevention against existing TimeBlocks', () => {
   it('does NOT call createTimeBlock when an existing block already carries the WPI_KEY', async () => {
     // First render: commit once, capture the produced WPI_KEY notes.
-    const firstCall = vi.fn(async () => undefined);
+    const firstCall = vi.fn(async (_block: CommitTimeBlockInput) => undefined);
     const { unmount } = render(
       <WeeklyPlanningView
         goals={GOALS}

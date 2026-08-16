@@ -21,7 +21,7 @@ L'AI attualmente mostra una preview dei dati senza chiamare OpenAI. Per attivare
 2. Modifica `.env.local`:
 ```env
 # Sostituisci con la tua vera API key
-OPENAI_API_KEY=sk-proj-tuachiavevera12345
+OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
 ```
 
 ### **Step 2: Abilitare API Routes**

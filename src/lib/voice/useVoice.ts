@@ -2,20 +2,14 @@
 // React hook for voice system integration
 
 import { useState, useEffect, useCallback } from 'react';
-import { getVoiceService, type ProvidersStatus } from './voiceService';
-import type { VoiceSettings, VoiceRole, VoiceProvider } from './voiceConfig';
+import { getVoiceService } from './voiceService';
+import type { VoiceSettings, VoiceRole } from './voiceConfig';
 import { DEFAULT_VOICE_SETTINGS } from './voiceConfig';
 
 export function useVoice() {
   const [settings, setSettings] = useState<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isAvailable, setIsAvailable] = useState(false);
-  const [providerStatus, setProviderStatus] = useState<ProvidersStatus>({
-    openai: { status: 'unknown' },
-    elevenlabs: { status: 'unknown' },
-    browser: { status: 'available' },
-  });
-  const [statusLoading, setStatusLoading] = useState(false);
 
   // Load settings and voices on mount
   useEffect(() => {
@@ -54,27 +48,6 @@ export function useVoice() {
     setVoices(langVoices);
   }, [settings.language]);
 
-  // Fetch provider status on mount
-  useEffect(() => {
-    const svc = getVoiceService();
-    if (!svc) return;
-
-    setStatusLoading(true);
-    svc.fetchProviderStatus().then(status => {
-      setProviderStatus(status);
-      setStatusLoading(false);
-    });
-  }, []);
-
-  const refreshProviderStatus = useCallback(async () => {
-    const svc = getVoiceService();
-    if (!svc) return;
-    setStatusLoading(true);
-    const status = await svc.refreshProviderStatus();
-    setProviderStatus(status);
-    setStatusLoading(false);
-  }, []);
-
   const updateSettings = useCallback((updates: Partial<VoiceSettings>) => {
     const svc = getVoiceService();
     if (!svc) return;
@@ -110,10 +83,6 @@ export function useVoice() {
     getVoiceService()?.previewRole(role);
   }, []);
 
-  const previewPremiumVoice = useCallback(async (provider: VoiceProvider, voiceId: string, role: VoiceRole = 'system') => {
-    return getVoiceService()?.previewPremiumVoice(provider, voiceId, role);
-  }, []);
-
   const stopSpeech = useCallback(() => {
     getVoiceService()?.stopSpeech();
   }, []);
@@ -135,9 +104,6 @@ export function useVoice() {
     updateSettings,
     voices,
     isAvailable,
-    providerStatus,
-    statusLoading,
-    refreshProviderStatus,
     speakText,
     speakCoach,
     speakRitual,
@@ -145,7 +111,6 @@ export function useVoice() {
     speakHero,
     previewVoice,
     previewRole,
-    previewPremiumVoice,
     stopSpeech,
     speakConfirmation,
     speakHeroQuote,

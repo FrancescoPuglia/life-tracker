@@ -5,7 +5,6 @@
 import {
   VoiceLanguage,
   VoiceRole,
-  VoiceProvider,
   VoiceSettings,
   DEFAULT_VOICE_SETTINGS,
   VOICE_SETTINGS_KEY,
@@ -13,20 +12,7 @@ import {
   COUNTDOWN_TEXTS,
   SYSTEM_TEXTS,
   PREVIEW_TEXTS,
-  OPENAI_ROLE_DEFAULTS,
-  ELEVENLABS_ROLE_DEFAULTS,
-  type ProviderStatusType,
 } from './voiceConfig';
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-export interface ProvidersStatus {
-  openai: { status: ProviderStatusType; error?: string };
-  elevenlabs: { status: ProviderStatusType; error?: string };
-  browser: { status: ProviderStatusType };
-}
 
 // ============================================================================
 // VOICE SERVICE SINGLETON
@@ -38,14 +24,6 @@ class VoiceService {
   private cachedVoices: SpeechSynthesisVoice[] = [];
   private voicesLoaded = false;
   private speaking = false;
-  private queue: Array<{ text: string; role: VoiceRole; priority: number }> = [];
-  private currentAudio: HTMLAudioElement | null = null;
-  private providersStatus: ProvidersStatus = {
-    openai: { status: 'unknown' },
-    elevenlabs: { status: 'unknown' },
-    browser: { status: 'available' },
-  };
-  private statusFetched = false;
 
   private constructor() {
     this.settings = this.loadSettings();
@@ -69,7 +47,16 @@ class VoiceService {
       const stored = localStorage.getItem(VOICE_SETTINGS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        return { ...DEFAULT_VOICE_SETTINGS, ...parsed };
+        // Cloud voice providers previously stored in this object are no
+        // longer callable from the static client. Preserve unknown legacy
+        // fields for compatibility, but force the safe browser provider.
+        const migrated = {
+          ...DEFAULT_VOICE_SETTINGS,
+          ...parsed,
+          provider: 'browser',
+        } as VoiceSettings;
+        localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify(migrated));
+        return migrated;
       }
     } catch { /* ignore */ }
     return { ...DEFAULT_VOICE_SETTINGS };
@@ -87,56 +74,8 @@ class VoiceService {
   }
 
   updateSettings(updates: Partial<VoiceSettings>): void {
-    this.settings = { ...this.settings, ...updates };
+    this.settings = { ...this.settings, ...updates, provider: 'browser' };
     this.saveSettings();
-  }
-
-  // ============================================================================
-  // PROVIDER STATUS
-  // ============================================================================
-
-  /**
-   * Fetch provider availability from backend API.
-   * Results are cached — call refreshProviderStatus() to force re-check.
-   */
-  async fetchProviderStatus(): Promise<ProvidersStatus> {
-    if (this.statusFetched) return this.providersStatus;
-
-    try {
-      this.providersStatus.openai = { status: 'checking' };
-      this.providersStatus.elevenlabs = { status: 'checking' };
-
-      const res = await fetch('/api/voice/status', { method: 'POST' });
-      if (!res.ok) throw new Error(`Status API returned ${res.status}`);
-
-      const data = await res.json();
-
-      this.providersStatus = {
-        openai: data.openai || { status: 'unknown' },
-        elevenlabs: data.elevenlabs || { status: 'unknown' },
-        browser: { status: this.isBrowserAvailable() ? 'available' : 'error' },
-      };
-      this.statusFetched = true;
-    } catch {
-      // API not reachable (e.g. static export on GitHub Pages)
-      this.providersStatus = {
-        openai: { status: 'error', error: 'API not reachable (local dev only)' },
-        elevenlabs: { status: 'error', error: 'API not reachable (local dev only)' },
-        browser: { status: this.isBrowserAvailable() ? 'available' : 'error' },
-      };
-      this.statusFetched = true;
-    }
-
-    return this.providersStatus;
-  }
-
-  async refreshProviderStatus(): Promise<ProvidersStatus> {
-    this.statusFetched = false;
-    return this.fetchProviderStatus();
-  }
-
-  getProvidersStatus(): ProvidersStatus {
-    return { ...this.providersStatus };
   }
 
   // ============================================================================
@@ -199,14 +138,7 @@ class VoiceService {
    * Check if voice output is operational (master enabled + provider works).
    */
   isOperational(): boolean {
-    if (!this.settings.enabled) return false;
-    if (this.settings.provider === 'browser') {
-      return this.isBrowserAvailable();
-    }
-    // For premium providers, check cached status
-    const providerKey = this.settings.provider as 'openai' | 'elevenlabs';
-    const status = this.providersStatus[providerKey]?.status;
-    return status === 'available';
+    return this.settings.enabled && this.isBrowserAvailable();
   }
 
   // ============================================================================
@@ -228,13 +160,7 @@ class VoiceService {
     // Check role-specific toggles
     if (!this.isRoleEnabled(role) && !options?.force) return;
 
-    // Route to the correct provider
-    if (this.settings.provider === 'browser') {
-      this.speakBrowser(text, role, options);
-    } else {
-      // Premium provider — async, with browser fallback on failure
-      this.speakPremium(text, role, options);
-    }
+    this.speakBrowser(text, role, options);
   }
 
   private isRoleEnabled(role: VoiceRole): boolean {
@@ -295,148 +221,6 @@ class VoiceService {
       window.speechSynthesis.speak(utterance);
     } catch {
       this.speaking = false;
-    }
-  }
-
-  // ============================================================================
-  // PREMIUM TTS (OpenAI / ElevenLabs)
-  // ============================================================================
-
-  /**
-   * Speak via premium provider. Calls backend API, receives audio, plays it.
-   * Falls back to browser on failure with console warning.
-   */
-  private async speakPremium(text: string, role: VoiceRole, options?: {
-    force?: boolean;
-    rateOverride?: number;
-    pitchOverride?: number;
-    onEnd?: () => void;
-  }): Promise<void> {
-    const provider = this.settings.provider;
-    const voice = this.getVoiceIdForRole(role, provider);
-    const model = provider === 'openai' ? this.settings.openaiModel : 'eleven_multilingual_v2';
-
-    try {
-      this.speaking = true;
-
-      // Stop any currently playing premium audio
-      this.stopPremiumAudio();
-
-      const res = await fetch('/api/voice/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, provider, voice, model }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(errData.error || `TTS failed: ${res.status}`);
-      }
-
-      // Get audio blob and play it
-      const audioBlob = await res.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-
-      await this.playAudioBlob(audioUrl, options?.onEnd);
-    } catch (err) {
-      console.warn(`[VoiceService] Premium TTS failed (${provider}), falling back to browser:`, err);
-      this.speaking = false;
-
-      // Explicit fallback to browser
-      if (this.isBrowserAvailable()) {
-        this.speakBrowser(text, role, options);
-      } else {
-        options?.onEnd?.();
-      }
-    }
-  }
-
-  /**
-   * Get the voice ID for a given role and provider.
-   */
-  private getVoiceIdForRole(role: VoiceRole, provider: VoiceProvider): string {
-    if (provider === 'openai') {
-      return this.settings.openaiVoices[role] || OPENAI_ROLE_DEFAULTS[role];
-    }
-    if (provider === 'elevenlabs') {
-      return this.settings.elevenlabsVoices[role] || ELEVENLABS_ROLE_DEFAULTS[role];
-    }
-    return '';
-  }
-
-  /**
-   * Play an audio blob URL via HTMLAudioElement.
-   */
-  private playAudioBlob(url: string, onEnd?: () => void): Promise<void> {
-    return new Promise((resolve) => {
-      const audio = new Audio(url);
-      this.currentAudio = audio;
-
-      audio.onended = () => {
-        this.speaking = false;
-        this.currentAudio = null;
-        URL.revokeObjectURL(url);
-        onEnd?.();
-        resolve();
-      };
-
-      audio.onerror = () => {
-        this.speaking = false;
-        this.currentAudio = null;
-        URL.revokeObjectURL(url);
-        onEnd?.();
-        resolve();
-      };
-
-      audio.play().catch(() => {
-        this.speaking = false;
-        this.currentAudio = null;
-        URL.revokeObjectURL(url);
-        onEnd?.();
-        resolve();
-      });
-    });
-  }
-
-  /**
-   * Stop premium audio playback if active.
-   */
-  private stopPremiumAudio(): void {
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio.src = '';
-      this.currentAudio = null;
-    }
-  }
-
-  /**
-   * Preview a premium voice via backend API.
-   */
-  async previewPremiumVoice(provider: VoiceProvider, voiceId: string, role: VoiceRole = 'system'): Promise<void> {
-    const text = PREVIEW_TEXTS[this.settings.language][role];
-    const model = provider === 'openai' ? this.settings.openaiModel : 'eleven_multilingual_v2';
-
-    try {
-      this.stopPremiumAudio();
-      this.stopSpeech();
-
-      const res = await fetch('/api/voice/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, provider, voice: voiceId, model }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(errData.error || `Preview failed: ${res.status}`);
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      await this.playAudioBlob(url);
-    } catch (err) {
-      console.warn('[VoiceService] Premium preview failed:', err);
-      throw err; // Let UI handle the error
     }
   }
 
@@ -543,18 +327,13 @@ class VoiceService {
   // ============================================================================
 
   stopSpeech(): void {
-    // Stop browser speech
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
-    // Stop premium audio
-    this.stopPremiumAudio();
     this.speaking = false;
-    this.queue = [];
   }
 
   isSpeaking(): boolean {
-    if (this.currentAudio && !this.currentAudio.paused) return true;
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       return window.speechSynthesis.speaking;
     }

@@ -11,59 +11,27 @@
 //   "Ask AI" button in the top bar.
 //
 // Static-export awareness:
-//   AI features rely on the Next.js `/api/ai/chat` route handler. When the
-//   app is exported statically (e.g. GitHub Pages), API routes don't run
-//   and the request will 404. The drawer detects this and shows a clear
-//   message explaining the situation instead of letting the user wait on
-//   a request that will never resolve.
+//   GitHub Pages can use AI when an external authenticated backend is
+//   configured at build time. The browser never receives provider secrets.
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { isAIBackendConfigured } from '@/lib/ai/client';
 
 export interface AskAIDrawerProps {
   open: boolean;
   onClose: () => void;
-  /**
-   * Force the drawer into "static deployment" mode (useful for tests and
-   * for an explicit visual override). When unset, the drawer falls back to
-   * `isStaticDeployment()` which is best-effort.
-   */
-  isStatic?: boolean;
+  /** Override configuration detection in focused component tests. */
+  backendConfigured?: boolean;
   children?: ReactNode;
-}
-
-/**
- * Detect static deployment. The bundled Next.js config uses
- * `output: 'export'` for the GitHub Pages target, which means API routes
- * are not available at runtime. We expose this through a public env var so
- * the drawer can render an honest fallback instead of looking broken.
- *
- * Detection order (cheap, no network):
- *   1. `NEXT_PUBLIC_STATIC_EXPORT === '1'` (set in CI for GH Pages builds).
- *   2. Hostname ends with `github.io`.
- *   3. Default: false (assume server / dev).
- */
-export function isStaticDeployment(): boolean {
-  if (
-    typeof process !== 'undefined' &&
-    process.env &&
-    process.env.NEXT_PUBLIC_STATIC_EXPORT === '1'
-  ) {
-    return true;
-  }
-  if (typeof window !== 'undefined') {
-    const host = window.location?.hostname ?? '';
-    if (host.endsWith('github.io')) return true;
-  }
-  return false;
 }
 
 export default function AskAIDrawer({
   open,
   onClose,
-  isStatic,
+  backendConfigured,
   children,
 }: AskAIDrawerProps) {
-  const staticMode = isStatic ?? isStaticDeployment();
+  const configured = backendConfigured ?? isAIBackendConfigured();
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // Close on Escape — common drawer convention.
@@ -126,33 +94,33 @@ export default function AskAIDrawer({
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-5">
-          {staticMode ? <StaticDeploymentNotice /> : children ?? <NoChildrenFallback />}
+          {configured ? children ?? <NoChildrenFallback /> : <BackendConfigurationNotice />}
         </div>
 
         <footer className="px-5 py-3 border-t border-gray-100 text-[10px] text-gray-400">
-          AI never reads or writes secrets in this client. All processing
-          happens on the server.
+          Firebase authentication is verified by the backend. Provider
+          secrets never enter this client.
         </footer>
       </aside>
     </div>
   );
 }
 
-function StaticDeploymentNotice() {
+function BackendConfigurationNotice() {
   return (
     <div
-      data-testid="ai-drawer-static-notice"
+      data-testid="ai-drawer-configuration-notice"
       className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900"
     >
-      <p className="font-semibold">AI is unavailable on this deployment.</p>
+      <p className="font-semibold">AI backend is not configured.</p>
       <p className="mt-1 text-amber-800">
-        AI works in local and server deployments. GitHub Pages serves a
-        static export, which cannot run Next.js API routes.
+        This static app needs the URL of a separate authenticated backend.
+        No request will be sent until it is configured.
       </p>
       <ul className="mt-2 list-disc pl-5 text-xs leading-relaxed text-amber-800">
-        <li>Run <code className="font-mono">npm run dev</code> locally to use AI features.</li>
-        <li>Deploy on Vercel / Fly / a Node host to enable the API route.</li>
-        <li>This is a deployment limitation — no secrets are ever placed in the client.</li>
+        <li>Set <code className="font-mono">NEXT_PUBLIC_AI_API_BASE_URL</code> during the frontend build.</li>
+        <li>Allow this frontend origin in the backend CORS allowlist.</li>
+        <li>Keep all provider keys and administrative credentials server-side.</li>
       </ul>
     </div>
   );

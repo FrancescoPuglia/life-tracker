@@ -1,35 +1,40 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Send, Sparkles, Calendar, Brain, Loader2, X, Check,
-  AlertCircle, ChevronDown, MessageSquare, Wand2,
-  Target, Clock, TrendingUp, Lightbulb, Mic, MicOff,
-  Wifi, WifiOff
+  AlertCircle,
+  Brain,
+  Calendar,
+  ChevronDown,
+  Clock,
+  Lightbulb,
+  Loader2,
+  MessageSquare,
+  Mic,
+  MicOff,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+  Target,
+  TrendingUp,
+  Wand2,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
-import { Goal, Task, TimeBlock, Habit, Session, Project, Domain } from '@/types';
-import { UserContext, ProposedChange } from '@/lib/ai/openai-integration';
+import { useAuthContext } from '@/providers/AuthProvider';
+import {
+  AIClientError,
+  applyAIPlan,
+  createIdempotencyKey,
+  isAIBackendConfigured,
+  requestAIChat,
+  rollbackAIPlan,
+  type AIChatMode,
+  type AIPlanPreview,
+} from '@/lib/ai/client';
 import { getVoiceService } from '@/lib/voice/voiceService';
 
-// ============================================================================
-// TYPES
-// ============================================================================
-
 interface AIInputBarV2Props {
-  userId: string;
-  goals: Goal[];
-  projects: Project[];
-  tasks: Task[];
-  timeBlocks: TimeBlock[];
-  sessions: Session[];
-  habits: Habit[];
-  habitLogs: { habitId: string; date: Date; completed: boolean }[];
-  domains: Domain[];
-  onApplyChanges?: (changes: ProposedChange[]) => Promise<void>;
-  onCreateTimeBlock?: (block: Partial<TimeBlock>) => Promise<void>;
-  onUpdateTimeBlock?: (id: string, updates: Partial<TimeBlock>) => Promise<void>;
-  onDeleteTimeBlock?: (id: string) => Promise<void>;
-  onUpdateTask?: (id: string, updates: Partial<Task>) => Promise<void>;
   className?: string;
 }
 
@@ -37,478 +42,389 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: Date;
-  proposedChanges?: ProposedChange[];
+  plan?: AIPlanPreview;
   isStreaming?: boolean;
+  actionStatus?: 'applying' | 'rolling_back';
+  actionNotice?: string;
 }
 
-type AIMode = 'ask' | 'plan' | 'analyze' | 'coach';
-type AIStatus = 'checking' | 'connected' | 'unavailable' | 'offline' | 'model_missing';
+type AIStatus =
+  | 'checking'
+  | 'ready'
+  | 'not_configured'
+  | 'signed_out'
+  | 'offline'
+  | 'forbidden'
+  | 'rate_limited';
 
-// ============================================================================
-// QUICK PROMPTS
-// ============================================================================
-
-const QUICK_PROMPTS: Record<AIMode, { text: string; icon: React.ReactNode }[]> = {
+const QUICK_PROMPTS: Record<AIChatMode, { text: string; icon: React.ReactNode }[]> = {
   ask: [
     { text: "Com'e' andata oggi?", icon: <Clock className="w-3 h-3" /> },
-    { text: "Quali task sono a rischio?", icon: <AlertCircle className="w-3 h-3" /> },
+    { text: 'Quali task sono a rischio?', icon: <AlertCircle className="w-3 h-3" /> },
     { text: "Qual e' il mio prossimo passo?", icon: <Target className="w-3 h-3" /> },
   ],
   plan: [
-    { text: "Ottimizza la mia giornata", icon: <Wand2 className="w-3 h-3" /> },
-    { text: "Aggiungi 2h di deep work", icon: <Brain className="w-3 h-3" /> },
-    { text: "Ripianifica domani", icon: <Calendar className="w-3 h-3" /> },
+    { text: 'Ottimizza la mia giornata', icon: <Wand2 className="w-3 h-3" /> },
+    { text: 'Aggiungi 2h di deep work', icon: <Brain className="w-3 h-3" /> },
+    { text: 'Ripianifica domani', icon: <Calendar className="w-3 h-3" /> },
   ],
   analyze: [
-    { text: "Dove sto andando bene?", icon: <TrendingUp className="w-3 h-3" /> },
-    { text: "Dove sto perdendo tempo?", icon: <Clock className="w-3 h-3" /> },
-    { text: "Analisi settimanale", icon: <Target className="w-3 h-3" /> },
+    { text: 'Dove sto andando bene?', icon: <TrendingUp className="w-3 h-3" /> },
+    { text: 'Dove sto perdendo tempo?', icon: <Clock className="w-3 h-3" /> },
+    { text: 'Analisi settimanale', icon: <Target className="w-3 h-3" /> },
   ],
   coach: [
     { text: "Perche' fallisco questa abitudine?", icon: <AlertCircle className="w-3 h-3" /> },
-    { text: "Suggeriscimi un if-then plan", icon: <Lightbulb className="w-3 h-3" /> },
-    { text: "Weekly review", icon: <Calendar className="w-3 h-3" /> },
+    { text: 'Suggeriscimi un if-then plan', icon: <Lightbulb className="w-3 h-3" /> },
+    { text: 'Weekly review', icon: <Calendar className="w-3 h-3" /> },
   ],
 };
 
-const MODE_CONFIG: Record<AIMode, { label: string; icon: React.ReactNode; color: string; description: string }> = {
-  ask: { label: 'Ask', icon: <MessageSquare className="w-4 h-4" />, color: 'text-blue-400', description: 'Domande e informazioni' },
-  plan: { label: 'Plan', icon: <Calendar className="w-4 h-4" />, color: 'text-green-400', description: 'Pianifica e modifica' },
-  analyze: { label: 'Analyze', icon: <TrendingUp className="w-4 h-4" />, color: 'text-yellow-400', description: 'Analisi produttivita' },
-  coach: { label: 'Coach', icon: <Brain className="w-4 h-4" />, color: 'text-purple-400', description: 'Coaching e abitudini' },
+const MODE_CONFIG: Record<AIChatMode, {
+  label: string;
+  icon: React.ReactNode;
+  color: string;
+  description: string;
+}> = {
+  ask: {
+    label: 'Ask',
+    icon: <MessageSquare className="w-4 h-4" />,
+    color: 'text-blue-400',
+    description: 'Domande e informazioni',
+  },
+  plan: {
+    label: 'Plan',
+    icon: <Calendar className="w-4 h-4" />,
+    color: 'text-green-400',
+    description: 'Pianifica con anteprima',
+  },
+  analyze: {
+    label: 'Analyze',
+    icon: <TrendingUp className="w-4 h-4" />,
+    color: 'text-yellow-400',
+    description: 'Analisi produttivita',
+  },
+  coach: {
+    label: 'Coach',
+    icon: <Brain className="w-4 h-4" />,
+    color: 'text-purple-400',
+    description: 'Coaching e abitudini',
+  },
 };
 
-// ============================================================================
-// COMPONENT
-// ============================================================================
+const STATUS_CONFIG: Record<AIStatus, {
+  color: string;
+  label: string;
+  icon: React.ReactNode;
+}> = {
+  checking: {
+    color: 'text-gray-500',
+    label: 'Verifica autenticazione...',
+    icon: <Loader2 className="w-3 h-3 animate-spin" />,
+  },
+  ready: {
+    color: 'text-green-400',
+    label: 'Backend AI autenticato',
+    icon: <Wifi className="w-3 h-3" />,
+  },
+  not_configured: {
+    color: 'text-amber-400',
+    label: 'Backend AI non configurato',
+    icon: <WifiOff className="w-3 h-3" />,
+  },
+  signed_out: {
+    color: 'text-amber-400',
+    label: 'Accedi per usare l’AI cloud',
+    icon: <ShieldCheck className="w-3 h-3" />,
+  },
+  offline: {
+    color: 'text-red-400',
+    label: 'Backend AI non raggiungibile',
+    icon: <WifiOff className="w-3 h-3" />,
+  },
+  forbidden: {
+    color: 'text-red-400',
+    label: 'Operazione non autorizzata',
+    icon: <AlertCircle className="w-3 h-3" />,
+  },
+  rate_limited: {
+    color: 'text-amber-400',
+    label: 'Limite richieste raggiunto',
+    icon: <Clock className="w-3 h-3" />,
+  },
+};
 
-export default function AIInputBarV2({
-  userId, goals, projects, tasks, timeBlocks, sessions, habits, habitLogs, domains,
-  onApplyChanges, onCreateTimeBlock, onUpdateTimeBlock, onDeleteTimeBlock, onUpdateTask,
-  className = ''
-}: AIInputBarV2Props) {
+export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
+  const { user, status: authStatus } = useAuthContext();
+  const configured = isAIBackendConfigured();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [mode, setMode] = useState<AIMode>('ask');
+  const [mode, setMode] = useState<AIChatMode>('ask');
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [pendingChanges, setPendingChanges] = useState<ProposedChange[]>([]);
-  const [aiStatus, setAiStatus] = useState<AIStatus>('checking');
-
-  // Voice state
+  const [requestStatus, setRequestStatus] = useState<AIStatus | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
-
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const planActionKeysRef = useRef(new Map<string, string>());
 
-  // ============================================================================
-  // AI STATUS CHECK
-  // ============================================================================
-
-  useEffect(() => {
-    const checkAI = async () => {
-      try {
-        const res = await fetch('/api/ai/chat', { method: 'GET' });
-        const data = await res.json();
-        if (data.status === 'available') {
-          setAiStatus('connected');
-        } else if (data.status === 'offline') {
-          setAiStatus('offline');
-        } else if (data.status === 'model_missing') {
-          setAiStatus('model_missing');
-        } else {
-          setAiStatus('unavailable');
-        }
-      } catch {
-        setAiStatus('offline');
-      }
-    };
-    checkAI();
-    // Recheck every 30 seconds
-    const interval = setInterval(checkAI, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // ============================================================================
-  // VOICE RECOGNITION
-  // ============================================================================
+  const status: AIStatus = authStatus === 'unknown'
+    ? 'checking'
+    : !configured
+      ? 'not_configured'
+      : !user
+        ? 'signed_out'
+        : requestStatus ?? 'ready';
+  const canSend = status === 'ready';
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      setVoiceSupported(true);
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      // Use centralized voice language setting
-      recognition.lang = getVoiceService()?.getLanguage() || 'it-IT';
+    const SpeechRecognition = (window as any).SpeechRecognition
+      || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
 
-      recognition.onresult = (event: any) => {
-        let transcript = '';
-        for (let i = 0; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
-        }
-        setInput(transcript);
-        if (event.results[event.results.length - 1].isFinal) {
-          setIsListening(false);
-        }
-      };
+    setVoiceSupported(true);
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = getVoiceService()?.getLanguage() || 'it-IT';
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let index = 0; index < event.results.length; index += 1) {
+        transcript += event.results[index][0].transcript;
+      }
+      setInput(transcript);
+      if (event.results[event.results.length - 1].isFinal) setIsListening(false);
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+    recognitionRef.current = recognition;
 
-      recognition.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-    }
+    return () => {
+      recognition.abort?.();
+      recognitionRef.current = null;
+    };
   }, []);
-
-  const toggleVoice = () => {
-    if (!recognitionRef.current) return;
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-      } catch {
-        setIsListening(false);
-      }
-    }
-  };
-
-  // ============================================================================
-  // CONTEXT BUILDER
-  // ============================================================================
-
-  const buildContext = useCallback((): UserContext => {
-    const today = new Date();
-    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const todayStr = today.toISOString().split('T')[0];
-
-    const todaySessions = sessions.filter(s =>
-      new Date(s.startTime).toISOString().split('T')[0] === todayStr
-    );
-    const weekSessions = sessions.filter(s => new Date(s.startTime) >= weekAgo);
-
-    const focusMinutesToday = todaySessions.reduce((sum, s) => {
-      const end = s.endTime ? new Date(s.endTime) : new Date();
-      return sum + Math.round((end.getTime() - new Date(s.startTime).getTime()) / 60000);
-    }, 0);
-    const focusMinutesWeek = weekSessions.reduce((sum, s) => {
-      const end = s.endTime ? new Date(s.endTime) : new Date();
-      return sum + Math.round((end.getTime() - new Date(s.startTime).getTime()) / 60000);
-    }, 0);
-
-    const todayTimeBlocks = timeBlocks.filter(tb =>
-      new Date(tb.startTime).toISOString().split('T')[0] === todayStr
-    );
-    const plannedMinutes = todayTimeBlocks.reduce((sum, tb) =>
-      sum + Math.round((new Date(tb.endTime).getTime() - new Date(tb.startTime).getTime()) / 60000), 0);
-    const planVsActualPercent = plannedMinutes > 0 ? Math.round((focusMinutesToday / plannedMinutes) * 100) : 0;
-    const activeStreaks = habits.filter(h => h.isActive && h.streakCount > 0).length;
-    const completedTasksToday = tasks.filter(t =>
-      t.status === 'completed' && t.updatedAt && new Date(t.updatedAt).toISOString().split('T')[0] === todayStr
-    ).length;
-    const completedTasksWeek = tasks.filter(t =>
-      t.status === 'completed' && t.updatedAt && new Date(t.updatedAt) >= weekAgo
-    ).length;
-    const overrunCount = todaySessions.filter(s => {
-      const tb = timeBlocks.find(b => b.id === s.timeBlockId);
-      if (!tb || !s.endTime) return false;
-      const planned = (new Date(tb.endTime).getTime() - new Date(tb.startTime).getTime()) / 60000;
-      const actual = (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 60000;
-      return actual > planned * 1.1;
-    }).length;
-
-    return {
-      goals, projects, tasks, timeBlocks, sessions, habits, habitLogs, domains,
-      kpis: { focusMinutesToday, focusMinutesWeek, planVsActualPercent, activeStreaks, completedTasksToday, completedTasksWeek, overrunCount },
-      preferences: { workHoursStart: '09:00', workHoursEnd: '18:00', timezone: 'Europe/Rome' }
-    };
-  }, [goals, projects, tasks, timeBlocks, sessions, habits, habitLogs, domains]);
-
-  // ============================================================================
-  // SEND MESSAGE
-  // ============================================================================
-
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setShowChat(true);
-    setIsLoading(true);
-    setIsStreaming(true);
-
-    const context = buildContext();
-    const history = messages.map(m => ({ role: m.role, content: m.content }));
-
-    const assistantMessageId = `msg-${Date.now()}-assistant`;
-    setMessages(prev => [...prev, {
-      id: assistantMessageId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true,
-    }]);
-
-    try {
-      const modePrefix = mode === 'plan'
-        ? '[MODALITA PLAN - Proponi modifiche concrete] '
-        : mode === 'analyze'
-        ? '[MODALITA ANALYZE - Analizza la mia produttivita] '
-        : mode === 'coach'
-        ? '[MODALITA COACH - Dammi consigli pratici] '
-        : '';
-
-      const response = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: modePrefix + text, context, history, userId }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMsg = errorData.error || `HTTP ${response.status}`;
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-
-      setMessages(prev => prev.map(m =>
-        m.id === assistantMessageId
-          ? { ...m, content: data.response, isStreaming: false, proposedChanges: data.proposedChanges }
-          : m
-      ));
-
-      // Optionally speak AI response
-      if (data.response) {
-        getVoiceService()?.speakAIResponse(data.response);
-      }
-
-      if (data.proposedChanges && data.proposedChanges.length > 0) {
-        setPendingChanges(data.proposedChanges);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Errore sconosciuto';
-
-      // Show the real error - no fake fallback
-      let displayError = errorMessage;
-      if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed') || errorMessage.includes('non raggiungibile')) {
-        displayError = 'AI non raggiungibile. Verifica che Ollama sia avviato: ollama serve';
-        setAiStatus('offline');
-      } else if (errorMessage.includes('non trovato') || errorMessage.includes('model') || errorMessage.includes('MODEL_MISSING')) {
-        displayError = errorMessage;
-        setAiStatus('model_missing');
-      } else if (errorMessage.includes('Timeout')) {
-        displayError = errorMessage;
-      } else if (errorMessage.includes('API key')) {
-        displayError = 'API key non configurata. Verifica .env.local';
-        setAiStatus('unavailable');
-      }
-
-      setMessages(prev => prev.map(m =>
-        m.id === assistantMessageId
-          ? { ...m, content: `Errore: ${displayError}`, isStreaming: false }
-          : m
-      ));
-    } finally {
-      setIsLoading(false);
-      setIsStreaming(false);
-    }
-  };
-
-  // ============================================================================
-  // APPLY / REJECT CHANGES
-  // ============================================================================
-
-  const applyChanges = async () => {
-    if (pendingChanges.length === 0) return;
-    setIsLoading(true);
-    try {
-      for (const change of pendingChanges) {
-        if (change.type === 'timeblock') {
-          if (change.action === 'create' && onCreateTimeBlock) {
-            await onCreateTimeBlock({
-              id: `tb-ai-${Date.now()}`, title: change.after.title,
-              startTime: new Date(change.after.startTime), endTime: new Date(change.after.endTime),
-              type: change.after.type || 'work', userId, status: 'planned',
-              createdAt: new Date(), updatedAt: new Date(),
-            });
-          } else if (change.action === 'update' && onUpdateTimeBlock && change.after.timeBlockId) {
-            await onUpdateTimeBlock(change.after.timeBlockId, {
-              startTime: change.after.startTime ? new Date(change.after.startTime) : undefined,
-              endTime: change.after.endTime ? new Date(change.after.endTime) : undefined,
-              title: change.after.title, updatedAt: new Date(),
-            });
-          } else if (change.action === 'delete' && onDeleteTimeBlock && change.after.timeBlockId) {
-            await onDeleteTimeBlock(change.after.timeBlockId);
-          }
-        } else if (change.type === 'task' && change.action === 'update' && onUpdateTask && change.after.taskId) {
-          await onUpdateTask(change.after.taskId, {
-            priority: change.after.priority, status: change.after.status,
-            dueDate: change.after.dueDate ? new Date(change.after.dueDate) : undefined,
-            estimatedMinutes: change.after.estimatedMinutes, updatedAt: new Date(),
-          });
-        }
-      }
-
-      setMessages(prev => [...prev, {
-        id: `msg-${Date.now()}-confirm`, role: 'assistant',
-        content: `Applicate ${pendingChanges.length} modifiche.`, timestamp: new Date(),
-      }]);
-      setPendingChanges([]);
-      if (onApplyChanges) await onApplyChanges(pendingChanges);
-    } catch {
-      setMessages(prev => [...prev, {
-        id: `msg-${Date.now()}-error`, role: 'assistant',
-        content: 'Errore nell\'applicare le modifiche.', timestamp: new Date(),
-      }]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const rejectChanges = () => {
-    setPendingChanges([]);
-    setMessages(prev => [...prev, {
-      id: `msg-${Date.now()}-reject`, role: 'assistant',
-      content: 'Modifiche annullate.', timestamp: new Date(),
-    }]);
-  };
-
-  // ============================================================================
-  // EFFECTS
-  // ============================================================================
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setShowModeDropdown(false);
+    const handleClick = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowModeDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
-    }
+    if (!inputRef.current) return;
+    inputRef.current.style.height = 'auto';
+    inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
   }, [input]);
 
-  const handleSubmit = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    sendMessage(input);
+  const sendMessage = async (text: string) => {
+    const normalizedText = text.trim();
+    if (!normalizedText || isLoading || !canSend) return;
+
+    const userMessage: Message = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: normalizedText,
+    };
+    const assistantMessageId = `assistant-${Date.now()}`;
+    const history = messages
+      .filter((message) => !message.isStreaming)
+      .map(({ role, content }) => ({ role, content }));
+
+    setMessages((previous) => [
+      ...previous,
+      userMessage,
+      {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+      },
+    ]);
+    setInput('');
+    setShowChat(true);
+    setIsLoading(true);
+
+    try {
+      const result = await requestAIChat({
+        message: normalizedText,
+        mode,
+        history,
+      });
+      setMessages((previous) => previous.map((message) => (
+        message.id === assistantMessageId
+          ? {
+            ...message,
+            content: result.message,
+            plan: result.plan,
+            isStreaming: false,
+          }
+          : message
+      )));
+      setRequestStatus(null);
+
+      // Keep the static client self-contained: premium/cloud TTS still uses
+      // legacy same-origin routes, so AI replies are spoken only by the local
+      // browser provider.
+      const voiceService = getVoiceService();
+      if (voiceService?.getSettings().provider === 'browser') {
+        voiceService.speakAIResponse(result.message);
+      }
+    } catch (error) {
+      const safeMessage = getSafeClientMessage(error);
+      setRequestStatus(getRequestStatus(error));
+      setMessages((previous) => previous.map((message) => (
+        message.id === assistantMessageId
+          ? { ...message, content: safeMessage, isStreaming: false }
+          : message
+      )));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+  const runPlanAction = async (
+    messageId: string,
+    plan: AIPlanPreview,
+    action: 'apply' | 'rollback',
+  ) => {
+    const mapKey = `${action}:${plan.id}`;
+    let idempotencyKey = planActionKeysRef.current.get(mapKey);
+    if (!idempotencyKey) {
+      idempotencyKey = createIdempotencyKey();
+      planActionKeysRef.current.set(mapKey, idempotencyKey);
+    }
+
+    setMessages((previous) => previous.map((message) => (
+      message.id === messageId
+        ? {
+          ...message,
+          actionStatus: action === 'apply' ? 'applying' : 'rolling_back',
+          actionNotice: undefined,
+        }
+        : message
+    )));
+
+    try {
+      const result = action === 'apply'
+        ? await applyAIPlan(plan.id, idempotencyKey)
+        : await rollbackAIPlan(plan.id, idempotencyKey);
+      const nextPlan = result.plan ?? {
+        ...plan,
+        status: action === 'apply' ? 'applied' : 'rolled_back',
+      };
+      setMessages((previous) => previous.map((message) => (
+        message.id === messageId
+          ? {
+            ...message,
+            plan: nextPlan,
+            actionStatus: undefined,
+            actionNotice: result.message,
+          }
+          : message
+      )));
+      planActionKeysRef.current.delete(mapKey);
+      setRequestStatus(null);
+    } catch (error) {
+      setRequestStatus(getRequestStatus(error));
+      setMessages((previous) => previous.map((message) => (
+        message.id === messageId
+          ? {
+            ...message,
+            actionStatus: undefined,
+            actionNotice: getSafeClientMessage(error),
+          }
+          : message
+      )));
+    }
   };
 
-  // ============================================================================
-  // RENDER
-  // ============================================================================
+  const toggleVoice = () => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+    } catch {
+      setIsListening(false);
+    }
+  };
 
   const currentMode = MODE_CONFIG[mode];
-
-  const statusConfig = {
-    checking: { color: 'text-gray-500', label: 'Verifica...', icon: <Loader2 className="w-3 h-3 animate-spin" />, hint: '' },
-    connected: { color: 'text-green-400', label: 'AI connesso', icon: <Wifi className="w-3 h-3" />, hint: '' },
-    model_missing: { color: 'text-orange-400', label: 'Modello mancante', icon: <AlertCircle className="w-3 h-3" />, hint: 'ollama pull llama3.2' },
-    unavailable: { color: 'text-yellow-400', label: 'AI non configurato', icon: <WifiOff className="w-3 h-3" />, hint: '' },
-    offline: { color: 'text-red-400', label: 'AI offline', icon: <WifiOff className="w-3 h-3" />, hint: 'ollama serve' },
-  };
-  const status = statusConfig[aiStatus];
+  const statusConfig = STATUS_CONFIG[status];
 
   return (
     <div className={`bg-gray-900/95 backdrop-blur-lg border border-gray-700 rounded-2xl shadow-2xl ${className}`}>
-      {/* AI Status Indicator */}
-      <div className={`flex items-center gap-1.5 px-4 py-1.5 text-xs border-b border-gray-800 ${status.color}`}>
-        {status.icon}
-        <span>{status.label}</span>
-        {status.hint && (
-          <span className="text-gray-600 ml-1">- {status.hint}</span>
-        )}
+      <div
+        className={`flex items-center gap-1.5 px-4 py-1.5 text-xs border-b border-gray-800 ${statusConfig.color}`}
+        role="status"
+      >
+        {statusConfig.icon}
+        <span>{statusConfig.label}</span>
       </div>
 
-      {/* Chat Messages */}
       {showChat && messages.length > 0 && (
         <div ref={chatRef} className="max-h-[400px] overflow-y-auto p-4 space-y-4 border-b border-gray-700">
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          {messages.map((message) => (
+            <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] px-4 py-3 rounded-2xl ${
-                msg.role === 'user'
+                message.role === 'user'
                   ? 'bg-blue-600 text-white rounded-br-md'
                   : 'bg-gray-800 text-gray-100 rounded-bl-md'
               }`}>
-                {msg.isStreaming ? (
+                {message.isStreaming ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-gray-400">Pensando...</span>
+                    <span className="text-gray-400">Elaborazione sicura...</span>
                   </div>
                 ) : (
-                  <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+                  <div className="whitespace-pre-wrap text-sm">{message.content}</div>
                 )}
 
-                {msg.proposedChanges && msg.proposedChanges.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-700">
-                    <div className="text-xs text-cyan-400 font-bold mb-2">
-                      {msg.proposedChanges.length} modifiche proposte
-                    </div>
-                    <div className="space-y-1">
-                      {msg.proposedChanges.map((change, i) => (
-                        <div key={i} className="text-xs text-gray-400">
-                          - {change.action} {change.type}: {change.reason}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                {message.plan && (
+                  <PlanPreviewCard
+                    messageId={message.id}
+                    plan={message.plan}
+                    actionStatus={message.actionStatus}
+                    actionNotice={message.actionNotice}
+                    onAction={runPlanAction}
+                  />
                 )}
               </div>
             </div>
           ))}
-
-          {pendingChanges.length > 0 && (
-            <div className="flex justify-center gap-3 pt-2">
-              <button onClick={applyChanges} disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white rounded-lg transition-colors">
-                <Check className="w-4 h-4" /> Applica ({pendingChanges.length})
-              </button>
-              <button onClick={rejectChanges} disabled={isLoading}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white rounded-lg transition-colors">
-                <X className="w-4 h-4" /> Annulla
-              </button>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Quick Prompts */}
       {!showChat && (
         <div className="p-3 border-b border-gray-700">
           <div className="flex flex-wrap gap-2">
-            {QUICK_PROMPTS[mode].map((prompt, i) => (
-              <button key={i} onClick={() => sendMessage(prompt.text)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800/50 hover:bg-gray-700/50 text-gray-300 rounded-full transition-colors">
+            {QUICK_PROMPTS[mode].map((prompt) => (
+              <button
+                key={prompt.text}
+                type="button"
+                onClick={() => sendMessage(prompt.text)}
+                disabled={!canSend || isLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-800/50 hover:bg-gray-700/50 text-gray-300 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
                 {prompt.icon} {prompt.text}
               </button>
             ))}
@@ -516,13 +432,30 @@ export default function AIInputBarV2({
         </div>
       )}
 
-      {/* Input Area */}
       <div className="p-4">
-        <form onSubmit={handleSubmit} className="flex items-end gap-3">
-          {/* Mode Selector */}
+        {(status === 'not_configured' || status === 'signed_out') && (
+          <p className="mb-3 rounded-lg border border-amber-700/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+            {status === 'not_configured'
+              ? 'Configura NEXT_PUBLIC_AI_API_BASE_URL durante la build per collegare il backend autenticato.'
+              : 'La modalità guest non invia dati al cloud. Accedi per usare l’assistente AI.'}
+          </p>
+        )}
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            sendMessage(input);
+          }}
+          className="flex items-end gap-3"
+        >
           <div className="relative" ref={dropdownRef}>
-            <button type="button" onClick={() => setShowModeDropdown(!showModeDropdown)}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-800/50 hover:bg-gray-700/50 transition-colors ${currentMode.color}`}>
+            <button
+              type="button"
+              onClick={() => setShowModeDropdown(!showModeDropdown)}
+              disabled={!canSend || isLoading}
+              aria-label="Seleziona modalità AI"
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-800/50 hover:bg-gray-700/50 transition-colors disabled:opacity-40 ${currentMode.color}`}
+            >
               {currentMode.icon}
               <span className="text-sm font-medium">{currentMode.label}</span>
               <ChevronDown className={`w-4 h-4 transition-transform ${showModeDropdown ? 'rotate-180' : ''}`} />
@@ -530,63 +463,97 @@ export default function AIInputBarV2({
 
             {showModeDropdown && (
               <div className="absolute bottom-full left-0 mb-2 w-48 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden z-50">
-                {(Object.entries(MODE_CONFIG) as [AIMode, typeof MODE_CONFIG[AIMode]][]).map(([key, config]) => (
-                  <button key={key} type="button"
-                    onClick={() => { setMode(key); setShowModeDropdown(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-700/50 transition-colors text-left ${mode === key ? 'bg-gray-700/50' : ''}`}>
+                {(Object.entries(MODE_CONFIG) as [AIChatMode, typeof MODE_CONFIG[AIChatMode]][]).map(([key, config]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setMode(key);
+                      setShowModeDropdown(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-700/50 transition-colors text-left ${mode === key ? 'bg-gray-700/50' : ''}`}
+                  >
                     <span className={config.color}>{config.icon}</span>
-                    <div>
-                      <div className="text-sm font-medium text-white">{config.label}</div>
-                      <div className="text-xs text-gray-400">{config.description}</div>
-                    </div>
+                    <span>
+                      <span className="block text-sm font-medium text-white">{config.label}</span>
+                      <span className="block text-xs text-gray-400">{config.description}</span>
+                    </span>
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Text Input */}
           <div className="flex-1">
             <textarea
-              ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={`Chiedimi qualcosa in modalita ${currentMode.label}...`}
-              disabled={isLoading} rows={1}
+              ref={inputRef}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  sendMessage(input);
+                }
+              }}
+              aria-label="Messaggio per l’assistente AI"
+              placeholder={canSend
+                ? `Chiedimi qualcosa in modalita ${currentMode.label}...`
+                : 'AI cloud non disponibile'}
+              disabled={!canSend || isLoading}
+              maxLength={4_000}
+              rows={1}
               className={`w-full px-4 py-2.5 bg-gray-800/50 border rounded-xl text-white placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 disabled:opacity-50 transition-all ${
                 isListening ? 'border-red-500 ring-2 ring-red-500/30' : 'border-gray-600'
               }`}
             />
           </div>
 
-          {/* Voice Button */}
           {voiceSupported && (
-            <button type="button" onClick={toggleVoice}
-              className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors ${
+            <button
+              type="button"
+              onClick={toggleVoice}
+              disabled={!canSend || isLoading}
+              aria-label={isListening ? 'Interrompi dettatura' : 'Avvia dettatura'}
+              className={`flex items-center justify-center w-11 h-11 rounded-xl transition-colors disabled:opacity-40 ${
                 isListening
                   ? 'bg-red-600 hover:bg-red-500 animate-pulse'
                   : 'bg-gray-700 hover:bg-gray-600'
-              }`}>
-              {isListening ? <Mic className="w-5 h-5 text-white" /> : <MicOff className="w-5 h-5 text-gray-400" />}
+              }`}
+            >
+              {isListening
+                ? <Mic className="w-5 h-5 text-white" />
+                : <MicOff className="w-5 h-5 text-gray-400" />}
             </button>
           )}
 
-          {/* Send Button */}
-          <button type="submit" disabled={!input.trim() || isLoading}
-            className="flex items-center justify-center w-11 h-11 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-xl transition-colors">
-            {isLoading ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <Send className="w-5 h-5 text-white" />}
+          <button
+            type="submit"
+            disabled={!canSend || !input.trim() || isLoading}
+            aria-label="Invia messaggio AI"
+            className="flex items-center justify-center w-11 h-11 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-xl transition-colors"
+          >
+            {isLoading
+              ? <Loader2 className="w-5 h-5 text-white animate-spin" />
+              : <Send className="w-5 h-5 text-white" />}
           </button>
         </form>
 
-        {/* Footer */}
         <div className="flex items-center justify-between mt-3 px-1">
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <Sparkles className="w-3 h-3" />
-            <span>{goals.length} goals, {tasks.length} tasks, {timeBlocks.length} blocchi</span>
+            <ShieldCheck className="w-3 h-3" />
+            <span>Identità verificata dal backend; anteprima prima delle modifiche</span>
           </div>
-
           {showChat && messages.length > 0 && (
-            <button onClick={() => { setMessages([]); setShowChat(false); setPendingChanges([]); }}
-              className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+            <button
+              type="button"
+              onClick={() => {
+                setMessages([]);
+                setShowChat(false);
+                setRequestStatus(null);
+                planActionKeysRef.current.clear();
+              }}
+              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
               Nuova chat
             </button>
           )}
@@ -594,4 +561,150 @@ export default function AIInputBarV2({
       </div>
     </div>
   );
+}
+
+function PlanPreviewCard({
+  messageId,
+  plan,
+  actionStatus,
+  actionNotice,
+  onAction,
+}: {
+  messageId: string;
+  plan: AIPlanPreview;
+  actionStatus?: Message['actionStatus'];
+  actionNotice?: string;
+  onAction: (
+    messageId: string,
+    plan: AIPlanPreview,
+    action: 'apply' | 'rollback',
+  ) => Promise<void>;
+}) {
+  const expired = Date.parse(plan.expiresAt) <= Date.now();
+  const applied = plan.status === 'applied';
+  const rolledBack = plan.status === 'rolled_back';
+  const hasConflicts = plan.conflicts.length > 0;
+  const busy = Boolean(actionStatus);
+
+  return (
+    <div
+      data-testid={`ai-plan-${plan.id}`}
+      className="mt-3 rounded-xl border border-cyan-700/60 bg-cyan-950/30 p-3 text-xs"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-cyan-200">Anteprima piano immutabile</span>
+        <span className="rounded bg-gray-900/60 px-2 py-0.5 text-gray-300">{plan.status}</span>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-gray-300">
+        <dt>Operazioni</dt><dd className="text-right">{plan.operationCount}</dd>
+        <dt>Versione</dt><dd className="text-right font-mono">{plan.hash.slice(0, 12)}</dd>
+        <dt>Scadenza</dt>
+        <dd className="text-right">{new Date(plan.expiresAt).toLocaleString('it-IT')}</dd>
+      </dl>
+
+      <div className="mt-3">
+        <p className="font-semibold text-gray-200">Diff da approvare</p>
+        <ol className="mt-1 space-y-1.5">
+          {plan.diff.map((entry, index) => (
+            <li
+              key={`${entry.entityType}:${entry.entityId ?? index}:${entry.action}`}
+              className="rounded-lg border border-gray-700/70 bg-gray-900/40 px-2.5 py-2"
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="rounded bg-cyan-900/60 px-1.5 py-0.5 font-mono text-[10px] uppercase text-cyan-200">
+                  {entry.action}
+                </span>
+                <span className="font-medium text-gray-200">{entry.entityType}</span>
+                {entry.entityId && (
+                  <span className="font-mono text-[10px] text-gray-500">
+                    {entry.entityId}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-gray-300">{entry.summary}</p>
+              {entry.changedFields.length > 0 && (
+                <p className="mt-1 text-[10px] text-gray-500">
+                  Campi: {entry.changedFields.join(', ')}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {plan.warnings.length > 0 && (
+        <div className="mt-2 text-amber-200">
+          <p className="font-semibold">Avvisi</p>
+          <ul className="mt-1 list-disc pl-4">
+            {plan.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
+      {hasConflicts && (
+        <div className="mt-2 text-red-200">
+          <p className="font-semibold">Conflitti</p>
+          <ul className="mt-1 list-disc pl-4">
+            {plan.conflicts.map((conflict) => <li key={conflict}>{conflict}</li>)}
+          </ul>
+        </div>
+      )}
+      {expired && !applied && !rolledBack && (
+        <p className="mt-2 text-amber-200">Anteprima scaduta: richiedi un nuovo piano.</p>
+      )}
+      {actionNotice && (
+        <p className="mt-2 rounded bg-gray-900/50 px-2 py-1.5 text-gray-200" role="status">
+          {actionNotice}
+        </p>
+      )}
+
+      <div className="mt-3 flex gap-2">
+        {!applied && !rolledBack && (
+          <button
+            type="button"
+            onClick={() => onAction(messageId, plan, 'apply')}
+            disabled={busy || expired || hasConflicts}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-gray-700"
+          >
+            {actionStatus === 'applying'
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <ShieldCheck className="w-3.5 h-3.5" />}
+            Applica piano
+          </button>
+        )}
+        {applied && (
+          <button
+            type="button"
+            onClick={() => onAction(messageId, plan, 'rollback')}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:bg-gray-700"
+          >
+            {actionStatus === 'rolling_back'
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <RotateCcw className="w-3.5 h-3.5" />}
+            Rollback
+          </button>
+        )}
+        {rolledBack && (
+          <span className="inline-flex items-center gap-1.5 text-gray-300">
+            <RotateCcw className="w-3.5 h-3.5" /> Rollback completato
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getSafeClientMessage(error: unknown): string {
+  return error instanceof AIClientError
+    ? error.message
+    : 'Il servizio AI non è raggiungibile in questo momento. Riprova più tardi.';
+}
+
+function getRequestStatus(error: unknown): AIStatus {
+  if (!(error instanceof AIClientError)) return 'offline';
+  if (error.code === 'rate_limited') return 'rate_limited';
+  if (error.code === 'forbidden') return 'forbidden';
+  if (error.code === 'not_configured') return 'not_configured';
+  if (error.code === 'auth_required' || error.code === 'session_expired') return 'signed_out';
+  return 'offline';
 }

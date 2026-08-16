@@ -1,6 +1,262 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-       // Allow all for testing
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function ownsPath(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // New client-created documents must carry the authenticated owner. `uid`
+    // is optional because the established data model uses `userId`, but if a
+    // document has both fields they must agree with the authenticated path.
+    function hasValidCreateOwnership(uid, documentId) {
+      return request.resource.data.userId == uid
+        && (!('uid' in request.resource.data) || request.resource.data.uid == uid)
+        && (!('id' in request.resource.data) || request.resource.data.id == documentId)
+        && request.resource.data.keys().hasNone([
+          'ownerId',
+          'ownerUid',
+          'actorUid',
+          '_version',
+          '_aiPlanId',
+          '_aiVersion',
+          'serverVersion'
+        ]);
+    }
+
+    // Historical documents may not have an embedded owner. Their location is
+    // still user-scoped, so the owner path protects them while allowing normal
+    // reads and non-ownership updates. Documents with an owner must agree with
+    // that path.
+    function existingOwnershipMatchesPath(uid) {
+      return (!('userId' in resource.data) || resource.data.userId == uid)
+        && (!('uid' in resource.data) || resource.data.uid == uid)
+        && (!('ownerId' in resource.data) || resource.data.ownerId == uid)
+        && (!('ownerUid' in resource.data) || resource.data.ownerUid == uid);
+    }
+
+    function keepsProtectedFieldsImmutable() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasNone([
+          'userId',
+          'uid',
+          'ownerId',
+          'ownerUid',
+          'actorUid',
+          'id',
+          'createdAt',
+          '_version',
+          '_aiPlanId',
+          '_aiVersion',
+          'serverVersion'
+        ]);
+    }
+
+    function hasValidTimeBlockFields(collectionName) {
+      return collectionName != 'timeBlocks'
+        || (
+          request.resource.data.startTime is timestamp
+          && request.resource.data.endTime is timestamp
+          && request.resource.data.startTime < request.resource.data.endTime
+          && request.resource.data.status in [
+            'planned',
+            'in_progress',
+            'completed',
+            'cancelled',
+            'overrun'
+          ]
+          && request.resource.data.type in [
+            'work',
+            'break',
+            'buffer',
+            'travel',
+            'meeting',
+            'focus',
+            'admin',
+            'deep',
+            'shallow'
+          ]
+        );
+    }
+
+    // These values drive scheduling, progress, and streak calculations. They
+    // remain optional for old documents, but malformed or negative values may
+    // not be introduced or preserved by a client write.
+    function hasValidCriticalNumbers() {
+      return (!('estimatedMinutes' in request.resource.data)
+          || (request.resource.data.estimatedMinutes is number
+            && request.resource.data.estimatedMinutes >= 0))
+        && (!('estimatedDuration' in request.resource.data)
+          || (request.resource.data.estimatedDuration is number
+            && request.resource.data.estimatedDuration >= 0))
+        && (!('actualMinutes' in request.resource.data)
+          || (request.resource.data.actualMinutes is number
+            && request.resource.data.actualMinutes >= 0))
+        && (!('actualHours' in request.resource.data)
+          || (request.resource.data.actualHours is number
+            && request.resource.data.actualHours >= 0))
+        && (!('duration' in request.resource.data)
+          || (request.resource.data.duration is number
+            && request.resource.data.duration >= 0))
+        && (!('targetHours' in request.resource.data)
+          || (request.resource.data.targetHours is number
+            && request.resource.data.targetHours >= 0))
+        && (!('timeAllocationTarget' in request.resource.data)
+          || (request.resource.data.timeAllocationTarget is number
+            && request.resource.data.timeAllocationTarget >= 0))
+        && (!('weeklyHoursTarget' in request.resource.data)
+          || (request.resource.data.weeklyHoursTarget is number
+            && request.resource.data.weeklyHoursTarget >= 0))
+        && (!('totalHoursTarget' in request.resource.data)
+          || (request.resource.data.totalHoursTarget is number
+            && request.resource.data.totalHoursTarget >= 0))
+        && (!('targetValue' in request.resource.data)
+          || (request.resource.data.targetValue is number
+            && request.resource.data.targetValue >= 0))
+        && (!('currentValue' in request.resource.data)
+          || (request.resource.data.currentValue is number
+            && request.resource.data.currentValue >= 0))
+        && (!('progress' in request.resource.data)
+          || (request.resource.data.progress is number
+            && request.resource.data.progress >= 0))
+        && (!('streakCount' in request.resource.data)
+          || (request.resource.data.streakCount is number
+            && request.resource.data.streakCount >= 0))
+        && (!('bestStreak' in request.resource.data)
+          || (request.resource.data.bestStreak is number
+            && request.resource.data.bestStreak >= 0))
+        && (!('currentStreak' in request.resource.data)
+          || (request.resource.data.currentStreak is number
+            && request.resource.data.currentStreak >= 0))
+        && (!('maxStreak' in request.resource.data)
+          || (request.resource.data.maxStreak is number
+            && request.resource.data.maxStreak >= 0))
+        && (!('totalLogins' in request.resource.data)
+          || (request.resource.data.totalLogins is number
+            && request.resource.data.totalLogins >= 0));
+    }
+
+    function isClientCollection(collectionName) {
+      return collectionName in [
+        'domains',
+        'goals',
+        'keyResults',
+        'projects',
+        'tasks',
+        'timeBlocks',
+        'sessions',
+        'habits',
+        'habitLogs',
+        'metrics',
+        'calendarEvents',
+        'deadlines',
+        'journalEntries',
+        'insights',
+        'achievements',
+        'notes',
+        'noteTemplates',
+        'goalRoadmaps',
+        'visionBoards',
+        'visionItems',
+        'mediaAssets',
+        'pages'
+      ];
+    }
+
+    // Root user documents are server-managed. Client data lives only in an
+    // allowlisted collection below the authenticated user's path.
+    match /users/{uid} {
+      allow read, write: if false;
+
+      match /{collectionName}/{documentId} {
+        allow read: if isClientCollection(collectionName)
+          && ownsPath(uid)
+          && existingOwnershipMatchesPath(uid);
+
+        allow create: if isClientCollection(collectionName)
+          && ownsPath(uid)
+          && hasValidCreateOwnership(uid, documentId)
+          && hasValidTimeBlockFields(collectionName)
+          && hasValidCriticalNumbers();
+
+        allow update: if isClientCollection(collectionName)
+          && ownsPath(uid)
+          && existingOwnershipMatchesPath(uid)
+          && keepsProtectedFieldsImmutable()
+          && hasValidTimeBlockFields(collectionName)
+          && hasValidCriticalNumbers();
+
+        allow delete: if isClientCollection(collectionName)
+          && ownsPath(uid)
+          && existingOwnershipMatchesPath(uid);
+      }
+
+      // The login streak has exactly one document per user. Keeping it out of
+      // the generic allowlist prevents a client from minting extra streak docs.
+      match /login_streaks/{documentId} {
+        allow read: if ownsPath(uid)
+          && documentId == uid
+          && existingOwnershipMatchesPath(uid);
+
+        allow create: if ownsPath(uid)
+          && documentId == uid
+          && hasValidCreateOwnership(uid, documentId)
+          && hasValidCriticalNumbers();
+
+        allow update: if ownsPath(uid)
+          && documentId == uid
+          && existingOwnershipMatchesPath(uid)
+          && keepsProtectedFieldsImmutable()
+          && hasValidCriticalNumbers();
+
+        allow delete: if ownsPath(uid)
+          && documentId == uid
+          && existingOwnershipMatchesPath(uid);
+      }
+
+      // Defense in depth: these resources are written only by the backend via
+      // the Admin SDK, which bypasses Firestore Security Rules.
+      match /aiChangePlans/{document=**} {
+        allow read, write: if false;
+      }
+      match /aiSnapshots/{document=**} {
+        allow read, write: if false;
+      }
+      match /aiAuditLogs/{document=**} {
+        allow read, write: if false;
+      }
+      match /aiIdempotency/{document=**} {
+        allow read, write: if false;
+      }
+      match /aiRateLimits/{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /aiChangePlans/{document=**} {
+      allow read, write: if false;
+    }
+    match /aiSnapshots/{document=**} {
+      allow read, write: if false;
+    }
+    match /aiAuditLogs/{document=**} {
+      allow read, write: if false;
+    }
+    match /aiIdempotency/{document=**} {
+      allow read, write: if false;
+    }
+    match /aiRateLimits/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Deny by default, including unknown top-level collections, unknown user
+    // subcollections, and any nested documents not explicitly matched above.
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+  }
+}

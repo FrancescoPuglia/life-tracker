@@ -40,22 +40,31 @@ describe('AskAIDrawer', () => {
 
   it('renders children when not in static deployment mode', () => {
     render(
-      <AskAIDrawer open={true} onClose={() => {}} isStatic={false}>
+      <AskAIDrawer open={true} onClose={() => {}} backendConfigured={true}>
         <div data-testid="ai-child">child content</div>
       </AskAIDrawer>,
     );
     expect(screen.getByTestId('ai-child')).toBeInTheDocument();
-    expect(screen.queryByTestId('ai-drawer-static-notice')).toBeNull();
+    expect(screen.queryByTestId('ai-drawer-configuration-notice')).toBeNull();
   });
 
-  it('renders the static-deployment notice when isStatic is true', () => {
+  it('renders setup guidance when the external backend is not configured', () => {
     render(
-      <AskAIDrawer open={true} onClose={() => {}} isStatic={true}>
+      <AskAIDrawer open={true} onClose={() => {}} backendConfigured={false}>
         <div data-testid="ai-child">child content</div>
       </AskAIDrawer>,
     );
-    expect(screen.getByTestId('ai-drawer-static-notice')).toBeInTheDocument();
-    // Children must not render in static mode — the notice replaces them.
+    expect(screen.getByTestId('ai-drawer-configuration-notice')).toBeInTheDocument();
     expect(screen.queryByTestId('ai-child')).toBeNull();
+  });
+
+  it('keeps AI available in a static export when an external backend is configured', () => {
+    render(
+      <AskAIDrawer open={true} onClose={() => {}} backendConfigured={true}>
+        <div data-testid="ai-child">external backend</div>
+      </AskAIDrawer>,
+    );
+
+    expect(screen.getByTestId('ai-child')).toHaveTextContent('external backend');
   });
 });
