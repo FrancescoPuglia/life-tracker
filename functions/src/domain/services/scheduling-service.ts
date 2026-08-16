@@ -136,8 +136,11 @@ export class SchedulingService {
     }
 
     const commitments = existing.filter((record) => record.id !== proposed.id);
+    const protectedCommitments = commitments.filter(isProtected);
+    const mutableCommitments = commitments.filter((record) => !isProtected(record));
     const conflicts = [
-      ...detectExistingConflicts([proposed], commitments),
+      ...detectProtectedConflicts([proposed], protectedCommitments),
+      ...detectExistingConflicts([proposed], mutableCommitments),
       ...(!hasEntityMapping(proposed.input) && !UNMAPPED_SAFE_TYPES.has(proposed.input.type)
         ? [`Productive block '${proposed.input.title}' requires a Goal, Project, or Task mapping.`]
         : []),

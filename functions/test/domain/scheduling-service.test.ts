@@ -447,6 +447,21 @@ describe('Weekly Planning Intelligence backend adapter', () => {
       idempotencyKey: 'focused-conflict-key-0001',
     })).rejects.toMatchObject({ code: 'CONFLICT' });
 
+    const lockedConflict = await domain.scheduling.previewTimeBlockChange(
+      context(UID, 'focused-locked-conflict'),
+      {
+        action: 'create',
+        timezone: 'Europe/Rome',
+        block: block({
+          id: 'overlap-locked',
+          start: '2026-08-17T10:30:00.000Z',
+          end: '2026-08-17T11:30:00.000Z',
+        }),
+        reason: 'Locked overlap must be classified as protected.',
+      },
+    );
+    expect(lockedConflict.conflicts.some((message) => /overlaps protected block/i.test(message))).toBe(true);
+
     await expect(domain.scheduling.previewTimeBlockChange(context(UID, 'locked-focused'), {
       action: 'move',
       timezone: 'Europe/Rome',

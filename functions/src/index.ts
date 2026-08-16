@@ -30,6 +30,10 @@ const OPENAI_REASONING_EFFORT = defineString('OPENAI_REASONING_EFFORT', {
   default: 'low',
   description: 'Responses reasoning effort: none, low, medium, high, xhigh, or max.',
 });
+const OPENAI_BASE_URL = defineString('OPENAI_BASE_URL', {
+  default: 'https://api.openai.com/v1',
+  description: 'Backend-only OpenAI-compatible base URL. Plain HTTP is accepted only on loopback for local tests.',
+});
 const AI_ALLOWED_ORIGINS = defineString('AI_ALLOWED_ORIGINS', {
   default: 'https://francescopuglia.github.io,http://localhost:3000,http://127.0.0.1:3000',
   description: 'Comma-separated exact browser origins allowed to call the authenticated API.',
@@ -104,7 +108,7 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
   const apiKey = OPENAI_API_KEY.value();
   if (!apiKey) throw new DomainError('INTERNAL', 'OpenAI secret is unavailable.');
   cachedResponses = new OpenAIResponsesAdapter(
-    createProductionResponsesClient(apiKey),
+    createProductionResponsesClient(apiKey, { baseURL: OPENAI_BASE_URL.value() }),
     domain.registry,
     domain.executor,
     {

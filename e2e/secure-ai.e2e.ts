@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
 
-const API_ORIGIN = 'http://127.0.0.1:8787';
+const API_ORIGIN = 'http://127.0.0.1:5001/life-tracker-test/europe-west1/lifeTrackerAiApi';
 const APPROVAL_CAPABILITY = 'a'.repeat(43);
 const ROLLBACK_CAPABILITY = 'r'.repeat(43);
 const CHANGESET_HASH = 'b'.repeat(64);
@@ -90,6 +90,60 @@ test.describe('secure AI browser boundary', () => {
     expect(consoleErrors.filter((entry) => entry.includes('status of 401'))).toHaveLength(2);
   });
 
+  test('desktop covers the real Functions, Auth, Firestore, Responses-tool, apply, drift, and rollback boundary', async ({ page }, testInfo) => {
+    const consoleErrors = collectUnexpectedConsoleErrors(page);
+    const identity = await registerWithFirebaseEmulator(page, testInfo);
+    await seedAuthorizedLifeTrackerState(page, identity);
+
+    await page.getByTestId('ask-ai-button').click();
+    await sendAIMessage(page, 'Analizza il mio stato reale');
+    await expect(page.getByText('Analisi grounded su dati Life Tracker autorizzati.')).toBeVisible();
+    const providerStats = await page.request.get('http://127.0.0.1:8787/stats');
+    expect(providerStats.ok()).toBe(true);
+    await expect(providerStats.json()).resolves.toMatchObject({
+      toolFollowups: expect.any(Number),
+      groundedBlockSeen: true,
+      hostileNoteSeen: false,
+      approvalCapabilitySeen: false,
+    });
+
+    await startNewChat(page);
+    await selectPlanMode(page);
+    await sendAIMessage(page, 'Piano con conflitto reale');
+    await expect(page.getByText(/overlaps protected block/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Applica piano' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Rifiuta' }).click();
+
+    await startNewChat(page);
+    await sendAIMessage(page, 'Piano sicuro reale');
+    const apply = page.getByRole('button', { name: 'Applica piano' });
+    await expect(apply).toBeEnabled();
+    await apply.dblclick();
+    await expect(page.getByText(/Ricevuta:/)).toBeVisible();
+    await expect(page.getByText('completata', { exact: true })).toBeVisible();
+    expect(timestampMillis(await readFirestoreDocument(page, identity, 'timeBlocks', 'block_1'), 'startTime'))
+      .toBe(Date.parse('2098-12-31T11:00:00.000Z'));
+
+    await page.getByRole('button', { name: 'Annulla modifiche' }).click();
+    await expect(page.getByText('Rollback completato', { exact: true })).toBeVisible();
+    expect(timestampMillis(await readFirestoreDocument(page, identity, 'timeBlocks', 'block_1'), 'startTime'))
+      .toBe(Date.parse('2098-12-31T09:00:00.000Z'));
+
+    await startNewChat(page);
+    await sendAIMessage(page, 'Piano stale reale');
+    await expect(page.getByRole('button', { name: 'Applica piano' })).toBeEnabled();
+    await writeFirestoreDocument(page, identity, 'timeBlocks', 'block_1', {
+      title: 'Modifica umana successiva all’anteprima',
+      updatedAt: timestamp('2098-12-30T12:05:00.000Z'),
+    }, ['title', 'updatedAt']);
+    await page.getByRole('button', { name: 'Applica piano' }).click();
+    await expect(page.getByText(/Lo stato è cambiato: questa anteprima/)).toBeVisible();
+    const afterStale = await readFirestoreDocument(page, identity, 'timeBlocks', 'block_1');
+    expect(afterStale.fields.title.stringValue).toBe('Modifica umana successiva all’anteprima');
+    expect(timestampMillis(afterStale, 'startTime')).toBe(Date.parse('2098-12-31T09:00:00.000Z'));
+    expect(consoleErrors.filter((entry) => entry.startsWith('pageerror:'))).toEqual([]);
+  });
+
   test('mobile preserves layout, focus, authenticated request, and keyboard close', async ({ page }, testInfo) => {
     const calls: CallCounts = { chat: 0, apply: 0, rollback: 0, expiredAuth: 0 };
     const consoleErrors = collectUnexpectedConsoleErrors(page);
@@ -121,15 +175,23 @@ test.describe('secure AI browser boundary', () => {
   });
 });
 
-async function registerWithFirebaseEmulator(page: Page, testInfo: TestInfo): Promise<void> {
+interface EmulatorIdentity {
+  readonly uid: string;
+  readonly idToken: string;
+}
+
+async function registerWithFirebaseEmulator(page: Page, testInfo: TestInfo): Promise<EmulatorIdentity> {
   const suffix = `${testInfo.project.name}-${Date.now()}`.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
   const email = `browser-${suffix}@example.test`;
   const password = 'Verifier-Password-2026';
   const createResponse = await page.request.post(
     'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key',
-    { data: { email, password, returnSecureToken: false } },
+    { data: { email, password, returnSecureToken: true } },
   );
   expect(createResponse.ok()).toBe(true);
+  const created = await createResponse.json() as { localId?: string; idToken?: string };
+  expect(created.localId).toBeTruthy();
+  expect(created.idToken).toBeTruthy();
 
   await page.goto('/');
   await page.getByLabel('Email').fill(email);
@@ -138,6 +200,100 @@ async function registerWithFirebaseEmulator(page: Page, testInfo: TestInfo): Pro
   await expect(page.getByTestId('app-ready')).toBeVisible({ timeout: 45_000 });
   const motivation = page.getByRole('button', { name: 'Chiudi motivazione giornaliera' });
   if (await motivation.isVisible()) await motivation.click();
+  return { uid: created.localId!, idToken: created.idToken! };
+}
+
+async function seedAuthorizedLifeTrackerState(page: Page, identity: EmulatorIdentity): Promise<void> {
+  const owner = { id: '', userId: identity.uid };
+  const createdAt = timestamp('2098-12-30T12:00:00.000Z');
+  await writeFirestoreDocument(page, identity, 'domains', 'domain-1', {
+    ...owner, id: 'domain-1', name: 'Work', color: '#336699', icon: 'briefcase', createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'goals', 'goal-1', {
+    ...owner, id: 'goal-1', title: 'Outcome reale', domainId: 'domain-1', status: 'active', createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'projects', 'project-1', {
+    ...owner, id: 'project-1', name: 'Risultato finito', goalId: 'goal-1', domainId: 'domain-1', status: 'active', createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'tasks', 'task-1', {
+    ...owner, id: 'task-1', title: 'Azione concreta', projectId: 'project-1', goalId: 'goal-1', domainId: 'domain-1',
+    status: 'pending', priority: 'high', estimatedMinutes: 60, createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'timeBlocks', 'block_1', {
+    ...owner, id: 'block_1', title: 'Lavoro profondo', taskId: 'task-1', projectId: 'project-1', goalId: 'goal-1',
+    domainId: 'domain-1', startTime: timestamp('2098-12-31T09:00:00.000Z'),
+    endTime: timestamp('2098-12-31T10:00:00.000Z'), status: 'planned', type: 'deep', createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'timeBlocks', 'fixed-block', {
+    ...owner, id: 'fixed-block', title: 'Impegno bloccato', domainId: 'domain-1',
+    startTime: timestamp('2098-12-31T13:00:00.000Z'), endTime: timestamp('2098-12-31T14:00:00.000Z'),
+    status: 'planned', type: 'meeting', locked: true, createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'sessions', 'session-1', {
+    ...owner, id: 'session-1', timeBlockId: 'block_1', taskId: 'task-1',
+    startTime: timestamp('2098-12-31T09:10:00.000Z'), endTime: timestamp('2098-12-31T09:40:00.000Z'),
+    duration: 1_800, status: 'completed', createdAt, updatedAt: createdAt,
+  });
+}
+
+type FirestoreScalar = string | number | boolean | null | Readonly<{ __timestamp: string }>;
+
+function timestamp(value: string): Readonly<{ __timestamp: string }> {
+  return { __timestamp: value };
+}
+
+async function writeFirestoreDocument(
+  page: Page,
+  identity: EmulatorIdentity,
+  collection: string,
+  id: string,
+  values: Readonly<Record<string, FirestoreScalar>>,
+  updateFields: readonly string[] = [],
+): Promise<void> {
+  const query = updateFields.length
+    ? `?${updateFields.map((field) => `updateMask.fieldPaths=${encodeURIComponent(field)}`).join('&')}`
+    : '';
+  const response = await page.request.patch(`${firestoreDocumentUrl(identity.uid, collection, id)}${query}`, {
+    headers: { Authorization: `Bearer ${identity.idToken}` },
+    data: { fields: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, firestoreValue(value)])) },
+  });
+  if (!response.ok()) throw new Error(`Firestore seed failed (${response.status()}): ${await response.text()}`);
+}
+
+async function readFirestoreDocument(
+  page: Page,
+  identity: EmulatorIdentity,
+  collection: string,
+  id: string,
+): Promise<{ fields: Record<string, Record<string, unknown>> }> {
+  const response = await page.request.get(firestoreDocumentUrl(identity.uid, collection, id), {
+    headers: { Authorization: `Bearer ${identity.idToken}` },
+  });
+  if (!response.ok()) throw new Error(`Firestore read failed (${response.status()}): ${await response.text()}`);
+  return await response.json() as { fields: Record<string, Record<string, unknown>> };
+}
+
+function firestoreDocumentUrl(uid: string, collection: string, id: string): string {
+  return `http://127.0.0.1:8080/v1/projects/life-tracker-test/databases/(default)/documents/users/${encodeURIComponent(uid)}/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`;
+}
+
+function firestoreValue(value: FirestoreScalar): Record<string, unknown> {
+  if (value === null) return { nullValue: null };
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') return Number.isInteger(value)
+    ? { integerValue: String(value) }
+    : { doubleValue: value };
+  return { timestampValue: value.__timestamp };
+}
+
+function timestampMillis(
+  document: { fields: Record<string, Record<string, unknown>> },
+  field: string,
+): number {
+  const value = document.fields[field]?.timestampValue;
+  if (typeof value !== 'string') throw new Error(`Firestore field '${field}' is not a timestamp.`);
+  return Date.parse(value);
 }
 
 async function sendAIMessage(page: Page, message: string): Promise<void> {

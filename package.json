@@ -16,7 +16,7 @@
     "test:functions:emulator": "firebase emulators:exec --only firestore --project life-tracker-test \"npm --prefix functions test -- --run test/domain/firestore-repository.emulator.test.ts\"",
     "test:auth:emulator": "firebase emulators:exec --only auth --project life-tracker-test \"npm --prefix functions test -- --run test/http/auth.emulator.test.ts\"",
     "test:e2e": "playwright test",
-    "test:e2e:emulator": "firebase emulators:exec --only auth,firestore --project life-tracker-test \"npm run test:e2e\"",
+    "test:e2e:emulator": "node e2e/prepare-emulator-config.mjs && npm --prefix functions run build && CI=1 FIREBASE_CLI_DISABLE_UPDATE_CHECK=1 FUNCTIONS_DISCOVERY_TIMEOUT=120 E2E_USE_FUNCTIONS_EMULATOR=true firebase emulators:exec --only auth,firestore,functions --project life-tracker-test \"npm run test:e2e\"",
     "check:static-security": "node scripts/check-static-security.mjs",
     "firebase:deploy": "npm run build && firebase deploy",
     "firebase:rules": "firebase deploy --only firestore:rules"
