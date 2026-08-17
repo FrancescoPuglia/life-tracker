@@ -145,26 +145,26 @@ test.describe('secure AI browser boundary', () => {
     await apply.dblclick();
     await expect(page.getByText(/Ricevuta:/)).toBeVisible();
     await expect(page.getByText('completata', { exact: true })).toBeVisible();
-    expect(timestampMillis(await readFirestoreDocument(page, identity, 'timeBlocks', 'block_1'), 'startTime'))
+    expect(timestampMillis(await readFirestoreDocument(page, identity, 'timeBlocks', 'block_2'), 'startTime'))
       .toBe(Date.parse('2098-12-31T11:00:00.000Z'));
 
     await page.getByRole('button', { name: 'Annulla modifiche' }).click();
     await expect(page.getByText('Rollback completato', { exact: true })).toBeVisible();
-    expect(timestampMillis(await readFirestoreDocument(page, identity, 'timeBlocks', 'block_1'), 'startTime'))
-      .toBe(Date.parse('2098-12-31T09:00:00.000Z'));
+    expect(timestampMillis(await readFirestoreDocument(page, identity, 'timeBlocks', 'block_2'), 'startTime'))
+      .toBe(Date.parse('2098-12-31T10:00:00.000Z'));
 
     await startNewChat(page);
     await sendAIMessage(page, 'Piano stale reale');
     await expect(page.getByRole('button', { name: 'Applica piano' })).toBeEnabled();
-    await writeFirestoreDocument(page, identity, 'timeBlocks', 'block_1', {
+    await writeFirestoreDocument(page, identity, 'timeBlocks', 'block_2', {
       title: 'Modifica umana successiva all’anteprima',
       updatedAt: timestamp('2098-12-30T12:05:00.000Z'),
     }, ['title', 'updatedAt']);
     await page.getByRole('button', { name: 'Applica piano' }).click();
     await expect(page.getByText(/Lo stato è cambiato: questa anteprima/)).toBeVisible();
-    const afterStale = await readFirestoreDocument(page, identity, 'timeBlocks', 'block_1');
+    const afterStale = await readFirestoreDocument(page, identity, 'timeBlocks', 'block_2');
     expect(afterStale.fields.title.stringValue).toBe('Modifica umana successiva all’anteprima');
-    expect(timestampMillis(afterStale, 'startTime')).toBe(Date.parse('2098-12-31T09:00:00.000Z'));
+    expect(timestampMillis(afterStale, 'startTime')).toBe(Date.parse('2098-12-31T10:00:00.000Z'));
     expect(consoleErrors.filter((entry) => entry.startsWith('pageerror:'))).toEqual([]);
   });
 
@@ -248,6 +248,11 @@ async function seedAuthorizedLifeTrackerState(page: Page, identity: EmulatorIden
     ...owner, id: 'block_1', title: 'Lavoro profondo', taskId: 'task-1', projectId: 'project-1', goalId: 'goal-1',
     domainId: 'domain-1', startTime: timestamp('2098-12-31T09:00:00.000Z'),
     endTime: timestamp('2098-12-31T10:00:00.000Z'), status: 'planned', type: 'deep', createdAt, updatedAt: createdAt,
+  });
+  await writeFirestoreDocument(page, identity, 'timeBlocks', 'block_2', {
+    ...owner, id: 'block_2', title: 'Lavoro pianificabile', taskId: 'task-1', projectId: 'project-1', goalId: 'goal-1',
+    domainId: 'domain-1', startTime: timestamp('2098-12-31T10:00:00.000Z'),
+    endTime: timestamp('2098-12-31T11:00:00.000Z'), status: 'planned', type: 'deep', createdAt, updatedAt: createdAt,
   });
   await writeFirestoreDocument(page, identity, 'timeBlocks', 'fixed-block', {
     ...owner, id: 'fixed-block', title: 'Impegno bloccato', domainId: 'domain-1',

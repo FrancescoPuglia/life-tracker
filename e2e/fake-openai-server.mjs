@@ -76,8 +76,8 @@ const server = createServer(async (request, response) => {
             action: 'move',
             timezone: 'Europe/Rome',
             block: scheduleBlock({
-              id: 'block_1',
-              title: 'Lavoro profondo',
+              id: 'block_2',
+              title: 'Lavoro pianificabile',
               start: '2098-12-31T11:00:00.000Z',
               end: '2098-12-31T12:00:00.000Z',
             }),
