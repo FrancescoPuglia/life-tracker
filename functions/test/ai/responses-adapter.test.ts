@@ -61,8 +61,29 @@ describe('bounded OpenAI Responses orchestration', () => {
       }),
     };
     const { adapter, requests, repository } = setup([
-      { id: 'response-tool', output: [toolCall] },
-      { id: 'response-final', output: [], output_text: 'Review the exact preview.' },
+      {
+        id: 'response-tool',
+        output: [toolCall],
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          total_tokens: 120,
+          input_tokens_details: { cached_tokens: 10 },
+          output_tokens_details: { reasoning_tokens: 5 },
+        },
+      },
+      {
+        id: 'response-final',
+        output: [],
+        output_text: 'Review the exact preview.',
+        usage: {
+          input_tokens: 150,
+          output_tokens: 30,
+          total_tokens: 180,
+          input_tokens_details: { cached_tokens: 50 },
+          output_tokens_details: { reasoning_tokens: 8 },
+        },
+      },
     ]);
     const result = await adapter.run({
       auth: AUTH,
@@ -84,8 +105,18 @@ describe('bounded OpenAI Responses orchestration', () => {
     expect(result.metadata).toEqual({
       providerResponseId: 'response-final',
       model: 'test-model',
+      reasoningEffort: 'provider_default',
       promptVersion: 'prompt-v1',
       schemaVersion: 'schema-v1',
+      providerCalls: 2,
+      toolCalls: 1,
+      toolNames: ['preview_changes'],
+      inputTokens: 250,
+      cachedInputTokens: 60,
+      outputTokens: 50,
+      reasoningTokens: 13,
+      totalTokens: 300,
+      orchestrationLatencyMs: expect.any(Number),
     });
     expect(await repository.getPlan(UID, 'plan-1')).toMatchObject({
       orchestration: {

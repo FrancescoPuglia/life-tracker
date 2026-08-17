@@ -23,6 +23,13 @@ interface ResponseLike {
   readonly status?: string;
   readonly output: readonly ResponseOutputItem[];
   readonly output_text?: string;
+  readonly usage?: Readonly<{
+    readonly input_tokens?: number;
+    readonly output_tokens?: number;
+    readonly total_tokens?: number;
+    readonly input_tokens_details?: Readonly<{ readonly cached_tokens?: number }>;
+    readonly output_tokens_details?: Readonly<{ readonly reasoning_tokens?: number }>;
+  }>;
 }
 
 export interface ResponsesClientLike {
@@ -53,8 +60,18 @@ export interface NormalizedAiResponse {
   readonly metadata: Readonly<{
     readonly providerResponseId: string;
     readonly model: string;
+    readonly reasoningEffort: string;
     readonly promptVersion: string;
     readonly schemaVersion: string;
+    readonly providerCalls: number;
+    readonly toolCalls: number;
+    readonly toolNames: readonly string[];
+    readonly inputTokens: number;
+    readonly cachedInputTokens: number;
+    readonly outputTokens: number;
+    readonly reasoningTokens: number;
+    readonly totalTokens: number;
+    readonly orchestrationLatencyMs: number;
   }>;
 }
 
@@ -92,6 +109,7 @@ export class OpenAIResponsesAdapter {
   }
 
   async run(input: ResponsesRunInput): Promise<NormalizedAiResponse> {
+    const startedAt = Date.now();
     const message = z.string().trim().min(1).max(12_000).parse(input.message);
     const mode = z.string().trim().min(1).max(50).parse(input.mode);
     const history = historySchema.parse(input.history ?? []);
@@ -130,6 +148,15 @@ export class OpenAIResponsesAdapter {
     let toolCalls = 0;
     let toolOutputBytes = 0;
     let lastPlan: PublicChangePlan | undefined;
+    let providerCalls = 0;
+    const toolNames = new Set<string>();
+    const usage = {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+    };
 
     try {
       for (let turn = 0; turn < this.maxTurns; turn += 1) {
@@ -156,6 +183,8 @@ export class OpenAIResponsesAdapter {
           deadline,
           controller,
         );
+        providerCalls += 1;
+        addUsage(usage, response.usage);
         promptItems.push(...response.output);
         const calls = response.output.filter(isFunctionCall);
         if (!calls.length) {
@@ -166,8 +195,14 @@ export class OpenAIResponsesAdapter {
           const metadata = {
             providerResponseId: response.id,
             model: this.options.model,
+            reasoningEffort: this.options.reasoningEffort ?? 'provider_default',
             promptVersion: this.options.promptVersion,
             schemaVersion: this.options.schemaVersion,
+            providerCalls,
+            toolCalls,
+            toolNames: [...toolNames].sort(),
+            ...usage,
+            orchestrationLatencyMs: Math.max(0, Date.now() - startedAt),
           };
           const normalized: NormalizedAiResponse = lastPlan
             ? { message: finalText, plan: lastPlan, metadata }
@@ -187,6 +222,7 @@ export class OpenAIResponsesAdapter {
           if (!allowedNames.has(call.name)) {
             throw new DomainError('UNKNOWN_TOOL', `Tool '${call.name}' is not allowed in this mode.`);
           }
+          toolNames.add(call.name);
           const result = await withDeadline(
             this.executor.executeJson(call.name, call.arguments, toolContext),
             deadline,
@@ -293,4 +329,26 @@ function modelVisibleToolOutput(value: unknown): unknown {
       expiresAt: approval.expiresAt,
     },
   };
+}
+
+function addUsage(
+  total: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    reasoningTokens: number;
+    totalTokens: number;
+  },
+  usage: ResponseLike['usage'],
+): void {
+  if (!usage) return;
+  total.inputTokens += safeTokenCount(usage.input_tokens);
+  total.cachedInputTokens += safeTokenCount(usage.input_tokens_details?.cached_tokens);
+  total.outputTokens += safeTokenCount(usage.output_tokens);
+  total.reasoningTokens += safeTokenCount(usage.output_tokens_details?.reasoning_tokens);
+  total.totalTokens += safeTokenCount(usage.total_tokens);
+}
+
+function safeTokenCount(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
