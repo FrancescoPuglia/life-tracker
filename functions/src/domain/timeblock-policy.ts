@@ -21,6 +21,15 @@ export function isProtectedTimeBlock(record: EntityRecord): boolean {
     || hasTimestamp(record.actualEndTime);
 }
 
+/**
+ * Cancelled blocks remain authoritative history, but they are not current
+ * calendar commitments. Preserve the record while excluding it from overlap
+ * and capacity calculations.
+ */
+export function isActiveScheduleTimeBlock(record: EntityRecord): boolean {
+  return record.status !== 'cancelled';
+}
+
 function hasTimestamp(value: unknown): boolean {
   return typeof value === 'string' && value.trim().length > 0;
 }

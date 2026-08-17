@@ -108,6 +108,32 @@ describe('bounded canonical Life Tracker state', () => {
     ]));
   });
 
+  it('excludes cancelled TimeBlocks from current overlap detection while preserving them as facts', async () => {
+    const repository = seededRepository();
+    repository.seed(UID, 'timeBlocks', [
+      {
+        id: 'cancelled-overlap-history',
+        title: 'Cancelled slot',
+        startTime: '2026-08-20T08:00:00.000Z',
+        endTime: '2026-08-20T10:00:00.000Z',
+        status: 'cancelled',
+      },
+      {
+        id: 'active-in-former-slot',
+        title: 'Current commitment',
+        startTime: '2026-08-20T09:00:00.000Z',
+        endTime: '2026-08-20T11:00:00.000Z',
+        status: 'planned',
+      },
+    ]);
+    const service = new ReadService(repository);
+
+    const result = await service.detectScheduleConflicts(context(), RANGE);
+
+    expect(result.conflicts).toEqual([]);
+    expect(await repository.getEntity(UID, 'timeBlocks', 'cancelled-overlap-history')).not.toBeNull();
+  });
+
   it('honors persisted goal allocation and Session contribution weights', async () => {
     const repository = new InMemoryRepository();
     repository.seed(UID, 'goals', [

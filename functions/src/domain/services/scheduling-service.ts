@@ -19,7 +19,7 @@ import type {
   UserPlanningPreferences,
   PreviewValidationRequirements,
 } from '../types';
-import { isProtectedTimeBlock } from '../timeblock-policy';
+import { isActiveScheduleTimeBlock, isProtectedTimeBlock } from '../timeblock-policy';
 import { extractWpiMarkers, stripSemanticMarkerLines } from '../semantic-markers';
 import type { WpiBlock, WpiDraft } from '../scheduling/wpi-adapter';
 import { validateWithWeeklyPlanningIntelligence } from '../scheduling/wpi-adapter';
@@ -165,8 +165,12 @@ export class SchedulingService {
       }
     }
 
-    const commitments = existing.filter((record) => record.id !== proposed.id);
-    const capacityCommitments = capacityExisting.filter((record) => record.id !== proposed.id);
+    const commitments = existing.filter((record) => (
+      record.id !== proposed.id && isActiveScheduleTimeBlock(record)
+    ));
+    const capacityCommitments = capacityExisting.filter((record) => (
+      record.id !== proposed.id && isActiveScheduleTimeBlock(record)
+    ));
     const protectedCommitments = commitments.filter(isProtectedTimeBlock);
     const mutableCommitments = commitments.filter((record) => !isProtectedTimeBlock(record));
     const conflicts = [
@@ -237,8 +241,9 @@ export class SchedulingService {
       ? existing
       : await this.readExisting(context.uid, capacityRange.from, capacityRange.to);
     const existingById = new Map(existing.map((record) => [record.id, record]));
-    const protectedBlocks = existing.filter(isProtectedTimeBlock);
-    const mutableBlocks = existing.filter((record) => !isProtectedTimeBlock(record));
+    const activeExisting = existing.filter(isActiveScheduleTimeBlock);
+    const protectedBlocks = activeExisting.filter(isProtectedTimeBlock);
+    const mutableBlocks = activeExisting.filter((record) => !isProtectedTimeBlock(record));
     for (const record of mutableBlocks) assertBlockWhollyContained(record, range.from, range.to);
     const warnings: string[] = protectedBlocks.length
       ? [`Preserved ${protectedBlocks.length} completed, in-progress, or protected time block(s).`]
@@ -257,9 +262,10 @@ export class SchedulingService {
       }
     }
 
-    const targetIds = new Set(existing.map((record) => record.id));
+    const targetIds = new Set(activeExisting.map((record) => record.id));
     const unchangedCapacityCommitments = capacityExisting.filter((record) =>
-      isProtectedTimeBlock(record) || !targetIds.has(record.id));
+      isActiveScheduleTimeBlock(record)
+      && (isProtectedTimeBlock(record) || !targetIds.has(record.id)));
     const draft = buildWpiDraft(tool, startDate, timezone, normalized, unchangedCapacityCommitments);
     const wpi = validateWithWeeklyPlanningIntelligence(draft, {
       earliestHour: preferences.workingHours?.start ?? '07:00',

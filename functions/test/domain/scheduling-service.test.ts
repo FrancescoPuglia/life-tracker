@@ -432,6 +432,48 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect(plan.warnings.some((message) => /150 minuti.*120/i.test(message))).toBe(true);
   });
 
+  it('preserves cancelled history without treating it as an active conflict or capacity commitment', async () => {
+    const { repository, domain } = harness();
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '07:00', end: '22:00' },
+      maxDailyPlannedMinutes: 60,
+      maxWeeklyPlannedMinutes: 600,
+      minBufferMinutes: 0,
+      maxConsecutiveHighEnergyBlocks: 3,
+    });
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'cancelled-history',
+      title: 'Cancelled historical slot',
+      domainId: 'domain-1',
+      startTime: '2026-08-17T07:00:00.000Z',
+      endTime: '2026-08-17T09:00:00.000Z',
+      status: 'cancelled',
+      type: 'deep',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+    }]);
+
+    const plan = await domain.scheduling.replaceDaySchedule(context(UID, 'cancelled-history-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'replacement-in-cancelled-slot',
+        start: '2026-08-17T07:00:00.000Z',
+        end: '2026-08-17T08:00:00.000Z',
+      })],
+      reason: 'Cancelled history must not reserve live capacity.',
+    });
+
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.warnings.some((message) => /overload|sovraccarico/i.test(message))).toBe(false);
+    expect(plan.operations.some((operation) => operation.entityId === 'cancelled-history')).toBe(false);
+    expect(await repository.getEntity(UID, 'timeBlocks', 'cancelled-history')).not.toBeNull();
+  });
+
   it('clips a long-running protected commitment to the requested WPI week for capacity', async () => {
     const { repository, domain } = harness();
     repository.setPlanningPreferencesForTest(UID, {

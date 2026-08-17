@@ -6,7 +6,7 @@ import { assertAuthenticated } from '../policy';
 import type { Repository } from '../repository';
 import type { AnalyticsArgs, ReadArgs, StateArgs } from '../schemas-internal';
 import { sanitizeEntity } from '../sanitize';
-import { isProtectedTimeBlock } from '../timeblock-policy';
+import { isActiveScheduleTimeBlock, isProtectedTimeBlock } from '../timeblock-policy';
 import type { AuthContext, EntityCollection, EntityRecord, ReadFilter } from '../types';
 
 const MAX_ANALYTICS_RECORDS = 5_000;
@@ -241,7 +241,11 @@ export class ReadService {
       to: args.to,
     });
     const sorted = blocks
-      .filter((block) => typeof block.startTime === 'string' && typeof block.endTime === 'string')
+      .filter((block) => (
+        isActiveScheduleTimeBlock(block)
+        && typeof block.startTime === 'string'
+        && typeof block.endTime === 'string'
+      ))
       .sort((a, b) => Date.parse(String(a.startTime)) - Date.parse(String(b.startTime)) || a.id.localeCompare(b.id));
     const conflicts: Readonly<Record<string, unknown>>[] = [];
     for (let index = 0; index < sorted.length; index += 1) {
