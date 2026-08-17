@@ -4,8 +4,8 @@ Status: feature-branch implementation; no production deployment has been
 performed. The recovered working state was checkpointed at
 `3c2d58570bd5740b6ca41d67e0533b71ce0c6b0d` from base
 `5ea328066d207d695fcf689015fd610e3751f457`. The locally verified code
-candidate before release-documentation changes is
-`a10fa6923e89899be647f4b97f437672929ce42c`.
+candidate before the final verification receipt is
+`378f13bd669aec891ee5cb7e4d7eba71743040d4`.
 
 ## Trust and control flow
 

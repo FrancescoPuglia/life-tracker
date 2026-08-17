@@ -131,7 +131,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 **Persistence**: Adapter pattern (Firebase/IndexedDB/Memory)
 **Rollup**: TimeBlock → Task → Project → Goal (automatic)
 
-The secure AI flow is: browser → Firebase Auth → HTTPS Function → UID-scoped domain tools → Responses API → immutable preview → explicit approval → Firestore transaction → verification/audit/rollback. See [AI_SETUP_GUIDE.md](AI_SETUP_GUIDE.md) and [docs/SECURE_AI_INTEGRATION.md](docs/SECURE_AI_INTEGRATION.md).
+The secure AI flow is: browser → Firebase Auth → HTTPS Function → UID-scoped domain tools → Responses API → immutable preview → explicit approval → Firestore transaction → verification/audit/rollback. See [AI_SETUP_GUIDE.md](AI_SETUP_GUIDE.md), [docs/SECURE_AI_INTEGRATION.md](docs/SECURE_AI_INTEGRATION.md), and the [local verification receipt](docs/SECURE_AI_VERIFICATION_RECEIPT.md).
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture.
 
