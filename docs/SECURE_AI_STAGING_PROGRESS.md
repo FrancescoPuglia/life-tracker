@@ -76,6 +76,28 @@ response as `429 insufficient_quota`. Its artifact again recorded overall
 `FAIL`, every provider-dependent flow as NOT RUN, production untouched, and
 successful deletion of 15/15 fixture documents plus 2/2 synthetic Auth users.
 
+The final evidence hardening was deployed from exact clean commit `c18c820` as
+Function revision `lifetrackeraiapi-00005-beb`, Firebase source hash
+`bf5ad32afd15d760d7381903c4d9ec19a6c852c3`, and storage-source generation
+`1786980891480225`. Its runtime health response exposes the non-secret source
+fingerprint
+`sha256:b4dad10b19f5dd4f3bb25b2b9764d8deee79a0e1a5cfbbed06ca63e43b3dad75`,
+which the clean-source harness requires to match its locally generated
+fingerprint before creating any staging identity or data. The deploy command
+targeted only `functions:lifeTrackerAiApi` with
+`--project life-tracker-staging` and exited 0. A read-only post-deploy CLI check
+confirmed that only `OPENAI_API_KEY` version 2 and
+`AI_CAPABILITY_SIGNING_SECRET` version 1 are bound, both in the staging project.
+
+The exact-source browser run (`stg-20260817154149-c3a7ff`) passed approved and
+denied CORS checks plus a valid-mode authenticated payload-`userId` spoof
+rejection before calling OpenAI. The first grounded read then returned the
+expected typed HTTP 503. Secret-safe Function telemetry tied that request to
+upstream Responses HTTP 429 `insufficient_quota`. The artifact is explicitly
+`FAIL`, records every later provider-dependent flow as NOT RUN, states
+`productionTouched: false`, and confirms deletion of 15/15 explicit fixture
+documents plus 2/2 synthetic Auth accounts.
+
 Because no provider response could be generated, grounded read,
 planned-vs-actual interpretation, hostile-Note behavior, proposal, Reject,
 Apply, replay, drift, audit receipt, and Undo remain **NOT RUN against the real
@@ -107,7 +129,8 @@ not merely a plausible response:
 - the payload-UID negative case now uses a valid `ask` mode, and privileged
   Rules probes address the real root `aiChangePlans/{uid}_{planId}` namespace;
 - explicit overall `PASS`/`FAIL`, failure stage, completed/NOT-RUN matrix,
-  local source commit, and cleanup result in the evidence artifact;
+  clean local source commit, exact deployed backend source fingerprint, and
+  cleanup result in the evidence artifact;
 - teardown of every explicit synthetic user document followed by deletion of
   both synthetic Auth accounts, including provider-failure paths. Durable
   server audit records remain server-only. Plans, approvals, executions, and
@@ -119,9 +142,15 @@ not merely a plausible response:
 Targeted evidence-helper tests: 3 files / 18 tests passed. Root TypeScript and
 the static security scan also passed after this hardening.
 
+The deployed Firestore configuration was independently reread after deployment:
+the `timeBlocks` composite index is present and TTL is enabled for
+`aiSnapshots.purgeAt`, `aiChangePlans.purgeAt`, `aiApprovals.purgeAt`,
+`aiExecutions.purgeAt`, `aiIdempotency.purgeAt`, and
+`aiRateLimits.expiresAt`.
+
 ## Green independent regression at this checkpoint
 
-- Root unit tests: 46 files, 583 tests passed.
+- Root unit tests: 46 files, 585 tests passed.
 - Functions unit tests: 13 files / 142 tests passed; 27 emulator-only tests
   skipped in the unit invocation.
 - Firestore Rules emulator: 47/47 passed.
@@ -136,6 +165,11 @@ the static security scan also passed after this hardening.
 - Post-build static security scan: passed.
 - `git diff --check`: passed.
 
+The final clean-commit rerun reproduced these results. The first Rules command
+hit a cold-start-only 10-second setup-hook timeout before any assertion ran;
+the immediate unchanged rerun exercised and passed all 47/47 cases. No rule or
+test was weakened.
+
 The final transaction-emulator rerun also verifies that TTL metadata is stored
 as Firestore timestamps while remaining outside the immutable LifePlan hash.
 The first attempt failed closed on this boundary; after explicitly excluding
@@ -149,7 +183,8 @@ Keep the key restricted to the minimum endpoint permissions required for
 `/v1/responses`, and confirm that project access includes `gpt-5.6-sol`.
 
 If quota is enabled for the already-bound key, no new secret or Firebase
-deploy is needed. If the key must be replaced, enter it only through:
+deploy is needed while `/v1/health` continues to return the exact reviewed
+fingerprint recorded above. If the key must be replaced, enter it only through:
 
 ```bash
 firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
