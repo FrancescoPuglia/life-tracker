@@ -56,6 +56,20 @@ Responses endpoint. OpenAI returned HTTP 429 with the safe code
 telemetry recorded only our request ID, provider status/code/type, and provider
 request ID. It did not log prompts, response bodies, headers, tokens, or keys.
 
+A second live browser run from source commit `fc04226` reproduced the same
+provider `429 insufficient_quota` on staging Function revision
+`lifetrackeraiapi-00002-lep`. The evidence artifact recorded overall `FAIL`,
+the exact grounded-read failure stage, and every later flow as NOT RUN. Its
+failure-path teardown deleted 15/15 explicit fixture documents and 2/2
+synthetic Auth accounts. Production remained untouched.
+
+That call exposed one runtime-classification defect: provider availability was
+being flattened to generic HTTP 500. The staged remediation maps external
+provider failures to a typed, non-secret HTTP 503 `PROVIDER_UNAVAILABLE` while
+leaving unexpected internal failures as 500. Targeted adapter/HTTP tests pass;
+the change must be deployed only to `life-tracker-staging` before the next live
+retry.
+
 Because no provider response could be generated, grounded read,
 planned-vs-actual interpretation, hostile-Note behavior, proposal, Reject,
 Apply, replay, drift, audit receipt, and Undo remain **NOT RUN against the real

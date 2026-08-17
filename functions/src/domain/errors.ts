@@ -12,6 +12,7 @@ export type DomainErrorCode =
   | 'APPROVAL_REQUIRED'
   | 'APPROVAL_REPLAYED'
   | 'COMMITTED_UNVERIFIED'
+  | 'PROVIDER_UNAVAILABLE'
   | 'INTERNAL';
 
 /** Error safe to map to an HTTP status without exposing stack traces or secrets. */

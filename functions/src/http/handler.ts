@@ -166,6 +166,7 @@ function normalizeError(error: unknown): {
     APPROVAL_REQUIRED: [403, 'Valid approval is required.'],
     APPROVAL_REPLAYED: [409, 'Approval has already been consumed.'],
     COMMITTED_UNVERIFIED: [503, 'The change committed but verification is pending. Retry with the same idempotency key.'],
+    PROVIDER_UNAVAILABLE: [503, 'The AI provider is unavailable.'],
     INTERNAL: [500, 'Request failed.'],
   };
   const [status, message] = mapping[error.code];

@@ -404,7 +404,7 @@ describe('bounded OpenAI Responses orchestration', () => {
       mode: 'ask',
       authenticatedContext: CONTEXT,
     })).rejects.toMatchObject({
-      code: 'INTERNAL',
+      code: 'PROVIDER_UNAVAILABLE',
       message: 'The AI provider request failed safely.',
     });
     expect(onProviderError).toHaveBeenCalledWith({
@@ -433,7 +433,7 @@ describe('bounded OpenAI Responses orchestration', () => {
       message: 'Read',
       mode: 'ask',
       authenticatedContext: CONTEXT,
-    })).rejects.toMatchObject({ code: 'INTERNAL' });
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
     expect(secretShapedObserver).toHaveBeenCalledWith({
       requestId: AUTH.requestId,
       providerStatus: 401,

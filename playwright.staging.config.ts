@@ -23,7 +23,9 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --hostname 127.0.0.1 --port 3300',
     url: staging.appOrigin,
-    reuseExistingServer: false,
+    // Sandboxed CI can launch the reviewed staging UI in a separately
+    // approved process, then run Playwright without spawning a second server.
+    reuseExistingServer: process.env.E2E_REUSE_EXISTING_SERVER === 'true',
     timeout: 120_000,
     env: {
       NEXT_PUBLIC_USE_FIREBASE_EMULATOR: 'false',

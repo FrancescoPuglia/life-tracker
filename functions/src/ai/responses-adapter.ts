@@ -262,7 +262,7 @@ export class OpenAIResponsesAdapter {
       } catch {
         // Observability must never change the normalized provider-error path.
       }
-      throw new DomainError('INTERNAL', 'The AI provider request failed safely.');
+      throw new DomainError('PROVIDER_UNAVAILABLE', 'The AI provider request failed safely.');
     } finally {
       controller.abort();
     }

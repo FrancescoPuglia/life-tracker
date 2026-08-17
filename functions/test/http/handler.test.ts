@@ -241,6 +241,19 @@ describe('Life Tracker HTTP API boundary', () => {
     });
   });
 
+  it('returns a typed non-secret 503 when the Responses provider is unavailable', async () => {
+    application.chat = vi.fn(async () => {
+      throw new DomainError('PROVIDER_UNAVAILABLE', 'private provider quota detail');
+    });
+    const response = await execute(authenticatedRequest('/v1/chat', validChatBody()));
+    expect(response.statusCode).toBe(503);
+    expect(response.body).toEqual({
+      error: { code: 'PROVIDER_UNAVAILABLE', message: 'The AI provider is unavailable.' },
+      requestId: 'request-test-1',
+    });
+    expect(JSON.stringify(response.body)).not.toContain('quota');
+  });
+
   async function execute(request: HttpRequestLike): Promise<ResponseRecorder> {
     const response = new ResponseRecorder();
     const handler = createApiHandler({
