@@ -1,5 +1,6 @@
 import { auth } from '@/lib/firebase';
 import { getConfiguredAIBackendBaseUrl } from '@/lib/ai/backendConfig';
+import { firebaseConfig } from '@/config/firebaseConfig';
 import {
   parseLifePlanActionResponse,
   parseLifePlanPreview,
@@ -224,7 +225,7 @@ async function authenticatedRequest(
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const initialToken = await currentUser.getIdToken(false);
+    const initialToken = await getProjectBoundFirebaseToken(currentUser, false);
     let response = await sendRequest(
       `${baseUrl}${path}`,
       initialToken,
@@ -235,7 +236,7 @@ async function authenticatedRequest(
     // A token may expire between acquisition and verification. Refresh once;
     // never retry any other status automatically.
     if (response.status === 401) {
-      const refreshedToken = await currentUser.getIdToken(true);
+      const refreshedToken = await getProjectBoundFirebaseToken(currentUser, true);
       response = await sendRequest(
         `${baseUrl}${path}`,
         refreshedToken,
@@ -260,6 +261,22 @@ async function authenticatedRequest(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function getProjectBoundFirebaseToken(
+  currentUser: NonNullable<typeof auth.currentUser>,
+  forceRefresh: boolean,
+): Promise<string> {
+  const tokenResult = await currentUser.getIdTokenResult(forceRefresh);
+  const expectedProjectId = firebaseConfig.projectId;
+  const expectedIssuer = `https://securetoken.google.com/${expectedProjectId}`;
+  if (
+    tokenResult.claims.aud !== expectedProjectId
+    || tokenResult.claims.iss !== expectedIssuer
+  ) {
+    throw new AIClientError('session_expired', 401);
+  }
+  return tokenResult.token;
 }
 
 function isFirebaseSessionCredentialError(error: unknown): boolean {

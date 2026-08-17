@@ -10,10 +10,22 @@ import {
 } from './client';
 
 const API_BASE_URL = 'https://europe-west1-life-tracker-12000.cloudfunctions.net/lifeTrackerAiApi';
+const FIREBASE_PROJECT_ID = 'life-tracker-12000';
+const FIREBASE_ISSUER = `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`;
 
-function setCurrentUser(getIdToken: ReturnType<typeof vi.fn> | null) {
-  (auth as unknown as { currentUser: unknown }).currentUser = getIdToken
-    ? { getIdToken }
+function tokenResult(
+  token: string,
+  claims: Readonly<Record<string, unknown>> = {
+    aud: FIREBASE_PROJECT_ID,
+    iss: FIREBASE_ISSUER,
+  },
+) {
+  return { token, claims };
+}
+
+function setCurrentUser(getIdTokenResult: ReturnType<typeof vi.fn> | null) {
+  (auth as unknown as { currentUser: unknown }).currentUser = getIdTokenResult
+    ? { getIdTokenResult }
     : null;
 }
 
@@ -27,7 +39,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('authenticated AI client', () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_AI_API_BASE_URL = API_BASE_URL;
-    setCurrentUser(vi.fn().mockResolvedValue('firebase-id-token'));
+    setCurrentUser(vi.fn().mockResolvedValue(tokenResult('firebase-id-token')));
     vi.stubGlobal('fetch', vi.fn());
   });
 
@@ -101,10 +113,10 @@ describe('authenticated AI client', () => {
   });
 
   it('refreshes an expired token once after 401 and reuses the same request body', async () => {
-    const getIdToken = vi.fn()
-      .mockResolvedValueOnce('stale-token')
-      .mockResolvedValueOnce('fresh-token');
-    setCurrentUser(getIdToken);
+    const getIdTokenResult = vi.fn()
+      .mockResolvedValueOnce(tokenResult('stale-token'))
+      .mockResolvedValueOnce(tokenResult('fresh-token'));
+    setCurrentUser(getIdTokenResult);
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse({ error: 'ignored' }, 401))
       .mockResolvedValueOnce(jsonResponse({ message: 'Autenticato' }));
@@ -113,8 +125,8 @@ describe('authenticated AI client', () => {
       message: 'Autenticato',
     });
 
-    expect(getIdToken).toHaveBeenNthCalledWith(1, false);
-    expect(getIdToken).toHaveBeenNthCalledWith(2, true);
+    expect(getIdTokenResult).toHaveBeenNthCalledWith(1, false);
+    expect(getIdTokenResult).toHaveBeenNthCalledWith(2, true);
     expect(fetch).toHaveBeenCalledTimes(2);
     const first = vi.mocked(fetch).mock.calls[0][1];
     const second = vi.mocked(fetch).mock.calls[1][1];
@@ -124,10 +136,10 @@ describe('authenticated AI client', () => {
   });
 
   it('stops after one token refresh when the backend still returns 401', async () => {
-    const getIdToken = vi.fn()
-      .mockResolvedValueOnce('stale-token')
-      .mockResolvedValueOnce('refreshed-but-invalid-token');
-    setCurrentUser(getIdToken);
+    const getIdTokenResult = vi.fn()
+      .mockResolvedValueOnce(tokenResult('stale-token'))
+      .mockResolvedValueOnce(tokenResult('refreshed-but-invalid-token'));
+    setCurrentUser(getIdTokenResult);
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse({ error: { code: 'UNAUTHENTICATED' } }, 401))
       .mockResolvedValueOnce(jsonResponse({ error: { code: 'UNAUTHENTICATED' } }, 401));
@@ -136,8 +148,22 @@ describe('authenticated AI client', () => {
       code: 'session_expired',
       status: 401,
     });
-    expect(getIdToken).toHaveBeenCalledTimes(2);
+    expect(getIdTokenResult).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['audience', { aud: 'other-project', iss: FIREBASE_ISSUER }],
+    ['issuer', { aud: FIREBASE_PROJECT_ID, iss: 'https://securetoken.google.com/other-project' }],
+    ['missing claims', {}],
+  ] as const)('rejects a token with a mismatched %s before network access', async (_label, claims) => {
+    setCurrentUser(vi.fn().mockResolvedValue(tokenResult('must-not-leave-browser', claims)));
+
+    await expect(requestAIChat({ message: 'Ciao', mode: 'ask' })).rejects.toMatchObject({
+      code: 'session_expired',
+      status: 401,
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('distinguishes rejected Firebase credentials from a network outage', async () => {
