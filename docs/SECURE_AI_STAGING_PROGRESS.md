@@ -64,11 +64,17 @@ failure-path teardown deleted 15/15 explicit fixture documents and 2/2
 synthetic Auth accounts. Production remained untouched.
 
 That call exposed one runtime-classification defect: provider availability was
-being flattened to generic HTTP 500. The staged remediation maps external
-provider failures to a typed, non-secret HTTP 503 `PROVIDER_UNAVAILABLE` while
-leaving unexpected internal failures as 500. Targeted adapter/HTTP tests pass;
-the change must be deployed only to `life-tracker-staging` before the next live
-retry.
+being flattened to generic HTTP 500. The remediation maps external provider
+failures to a typed, non-secret HTTP 503 `PROVIDER_UNAVAILABLE` while leaving
+unexpected internal failures as 500. Targeted adapter/HTTP tests passed. Only
+`functions:lifeTrackerAiApi` was then deployed to `life-tracker-staging` with
+Firebase source hash `071d9f3f44060b8399a69081c92e1f60f56a38ba`.
+
+The post-deploy live browser retry from commit `94ba619` returned the expected
+typed HTTP 503 while the safe Function telemetry still classified the upstream
+response as `429 insufficient_quota`. Its artifact again recorded overall
+`FAIL`, every provider-dependent flow as NOT RUN, production untouched, and
+successful deletion of 15/15 fixture documents plus 2/2 synthetic Auth users.
 
 Because no provider response could be generated, grounded read,
 planned-vs-actual interpretation, hostile-Note behavior, proposal, Reject,
