@@ -6,7 +6,7 @@ const PUBLIC_FIELDS: Readonly<Record<EntityCollection, readonly string[]>> = {
   goals: ['id', 'title', 'description', 'status', 'priority', 'targetDate', 'targetHours', 'timeAllocationTarget', 'category', 'complexity', 'estimatedHours', 'domainId', 'createdAt', 'updatedAt'],
   keyResults: ['id', 'title', 'description', 'status', 'targetValue', 'currentValue', 'unit', 'progress', 'goalId', 'domainId', 'createdAt', 'updatedAt'],
   projects: ['id', 'name', 'description', 'status', 'priority', 'goalId', 'domainId', 'dueDate', 'weeklyHoursTarget', 'totalHoursTarget', 'createdAt', 'updatedAt'],
-  tasks: ['id', 'title', 'description', 'status', 'priority', 'estimatedMinutes', 'dueDate', 'projectId', 'goalId', 'domainId', 'createdAt', 'updatedAt'],
+  tasks: ['id', 'title', 'description', 'status', 'priority', 'estimatedMinutes', 'dueDate', 'completedAt', 'projectId', 'goalId', 'domainId', 'createdAt', 'updatedAt'],
   timeBlocks: ['id', 'title', 'startTime', 'endTime', 'actualStartTime', 'actualEndTime', 'status', 'type', 'taskId', 'projectId', 'goalId', 'goalIds', 'goalAllocation', 'domainId', 'notes', 'protected', 'locked', 'isLocked', 'fixed', 'flexibility', 'createdAt', 'updatedAt'],
   habits: ['id', 'name', 'description', 'frequency', 'targetValue', 'unit', 'isActive', 'streakCount', 'bestStreak', 'domainId', 'createdAt', 'updatedAt'],
   habitLogs: ['id', 'habitId', 'date', 'dateKey', 'completed', 'value', 'notes', 'createdAt', 'updatedAt'],

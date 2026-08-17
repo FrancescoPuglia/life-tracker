@@ -446,6 +446,81 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     });
   });
 
+  it('fails closed when a mutable existing block crosses a replacement or move calendar boundary', async () => {
+    const { repository, domain } = harness();
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'mutable-overnight',
+      title: 'Mutable overnight block',
+      domainId: 'domain-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+      // Sunday 23:30 -> Monday 00:30 in Europe/Rome.
+      startTime: '2026-08-16T21:30:00.000Z',
+      endTime: '2026-08-16T22:30:00.000Z',
+      status: 'planned',
+      type: 'deep',
+    }]);
+
+    await expect(domain.scheduling.replaceDaySchedule(context(UID, 'overnight-replace'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({ id: 'replacement-after-overnight' })],
+      reason: 'Do not partially own an overnight interval.',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    await expect(domain.scheduling.previewTimeBlockChange(context(UID, 'overnight-move'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: block({
+        id: 'mutable-overnight',
+        start: '2026-08-18T07:00:00.000Z',
+        end: '2026-08-18T08:00:00.000Z',
+      }),
+      reason: 'Cross-calendar sources require manual scheduling.',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('preserves the authoritative WPI marker and strips model-supplied marker lines on move', async () => {
+    const { repository, domain } = harness(['plan-marker-move', 'execution-marker-move']);
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'wpi-origin',
+      title: 'WPI origin',
+      domainId: 'domain-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+      startTime: '2026-08-17T07:00:00.000Z',
+      endTime: '2026-08-17T08:00:00.000Z',
+      status: 'planned',
+      type: 'deep',
+      notes: 'Original note\n\nWPI_KEY: wpi:original-draft:original-block',
+    }]);
+    const preview = await domain.scheduling.previewTimeBlockChange(context(UID, 'marker-move'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: block({
+        id: 'wpi-origin',
+        title: 'WPI origin',
+        start: '2026-08-17T08:00:00.000Z',
+        end: '2026-08-17T09:00:00.000Z',
+        notes: 'Updated note\nWPI_KEY: wpi:forged-draft:forged-block',
+      }),
+      reason: 'Keep the original semantic replay key.',
+    });
+    expect(preview.diff[0]?.after?.notes).toContain('WPI_KEY: wpi:original-draft:original-block');
+    expect(preview.diff[0]?.after?.notes).not.toContain('forged-draft');
+
+    await domain.changePlans.applyPlan(context(UID, 'marker-move-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'marker-preservation-apply-01',
+    });
+    const persisted = await repository.getEntity(UID, 'timeBlocks', 'wpi-origin');
+    expect(persisted?.notes).toContain('WPI_KEY: wpi:original-draft:original-block');
+    expect(persisted?.notes).not.toContain('forged-draft');
+  });
+
   it('blocks a focused change that overlaps any existing commitment or targets a locked block', async () => {
     const { repository, domain } = harness();
     repository.seed(UID, 'timeBlocks', [

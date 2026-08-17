@@ -20,6 +20,7 @@ import type {
   PreviewValidationRequirements,
 } from '../types';
 import { isProtectedTimeBlock } from '../timeblock-policy';
+import { extractWpiMarkers, stripSemanticMarkerLines } from '../semantic-markers';
 import type { WpiBlock, WpiDraft } from '../scheduling/wpi-adapter';
 import { validateWithWeeklyPlanningIntelligence } from '../scheduling/wpi-adapter';
 import { ChangePlanService } from './change-plan-service';
@@ -120,6 +121,7 @@ export class SchedulingService {
     if (current && isProtectedTimeBlock(current)) {
       throw new DomainError('FORBIDDEN', 'Executed, in-progress, fixed, or locked TimeBlocks cannot be changed by AI.');
     }
+    if (current) assertSingleCalendarDayBlock(current, args.timezone);
     if (
       args.action === 'move'
       && current
@@ -187,7 +189,7 @@ export class SchedulingService {
       op: args.action === 'create' ? 'create' : 'update',
       collection: 'timeBlocks',
       id: proposed.id,
-      values: scheduleValues(args.block, wpi.generatedNotes[proposed.id]),
+      values: scheduleValues(args.block, wpi.generatedNotes[proposed.id], current),
     };
     return this.changePlans.previewOperations(
       context,
@@ -226,6 +228,7 @@ export class SchedulingService {
     const existingById = new Map(existing.map((record) => [record.id, record]));
     const protectedBlocks = existing.filter(isProtectedTimeBlock);
     const mutableBlocks = existing.filter((record) => !isProtectedTimeBlock(record));
+    for (const record of mutableBlocks) assertBlockWhollyContained(record, range.from, range.to);
     const warnings: string[] = protectedBlocks.length
       ? [`Preserved ${protectedBlocks.length} completed, in-progress, or protected time block(s).`]
       : [];
@@ -266,7 +269,7 @@ export class SchedulingService {
       const current = existingById.get(block.id);
       if (current && isProtectedTimeBlock(current)) continue;
       const generatedNotes = wpi.generatedNotes[block.id];
-      const values = scheduleValues(block.input, generatedNotes);
+      const values = scheduleValues(block.input, generatedNotes, current);
       operations.push({
         op: current ? 'update' : 'create',
         collection: 'timeBlocks',
@@ -658,8 +661,14 @@ function hhmm(value: Temporal.ZonedDateTime): string {
 function scheduleValues(
   input: ScheduleBlockInput,
   generatedNotes: string | undefined,
+  current: EntityRecord | null | undefined,
 ): Readonly<Record<string, ScalarPatchValue>> {
-  const notes = [input.notes?.trim(), generatedNotes?.trim()]
+  const requestedNotes = stripSemanticMarkerLines(input.notes, 'WPI_KEY');
+  const generatedBody = stripSemanticMarkerLines(generatedNotes, 'WPI_KEY');
+  const existingMarkers = extractWpiMarkers(typeof current?.notes === 'string' ? current.notes : null);
+  const generatedMarkers = extractWpiMarkers(generatedNotes);
+  const trustedMarkers = existingMarkers.length ? existingMarkers : generatedMarkers;
+  const notes = [requestedNotes, generatedBody, ...trustedMarkers]
     .filter((value): value is string => Boolean(value))
     .filter((value, index, values) => values.indexOf(value) === index)
     .join('\n\n');
@@ -676,6 +685,46 @@ function scheduleValues(
     notes: notes || null,
     flexibility: input.flexibility,
   };
+}
+
+function assertSingleCalendarDayBlock(record: EntityRecord, timezone: string): void {
+  try {
+    if (typeof record.startTime !== 'string' || typeof record.endTime !== 'string') throw new Error('missing');
+    const start = Temporal.Instant.from(record.startTime);
+    const end = Temporal.Instant.from(record.endTime);
+    if (Temporal.Instant.compare(start, end) >= 0) throw new Error('geometry');
+    if (!start.toZonedDateTimeISO(timezone).toPlainDate()
+      .equals(end.toZonedDateTimeISO(timezone).toPlainDate())) {
+      throw new DomainError(
+        'CONFLICT',
+        'A mutable cross-calendar TimeBlock requires the manual scheduling workflow.',
+      );
+    }
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
+    throw new DomainError('CONFLICT', 'The existing TimeBlock has an invalid interval.');
+  }
+}
+
+function assertBlockWhollyContained(record: EntityRecord, from: string, to: string): void {
+  try {
+    if (typeof record.startTime !== 'string' || typeof record.endTime !== 'string') throw new Error('missing');
+    const start = Temporal.Instant.from(record.startTime);
+    const end = Temporal.Instant.from(record.endTime);
+    if (
+      Temporal.Instant.compare(start, end) >= 0
+      || Temporal.Instant.compare(start, Temporal.Instant.from(from)) < 0
+      || Temporal.Instant.compare(end, Temporal.Instant.from(to)) > 0
+    ) {
+      throw new DomainError(
+        'CONFLICT',
+        'A mutable TimeBlock crossing the requested calendar boundary requires the manual scheduling workflow.',
+      );
+    }
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
+    throw new DomainError('CONFLICT', 'The existing TimeBlock has an invalid interval.');
+  }
 }
 
 function hasEntityMapping(input: ScheduleBlockInput): boolean {

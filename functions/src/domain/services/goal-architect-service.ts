@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DomainError } from '../errors';
 import { hashValidationScopeRecords } from '../integrity';
+import { extractTaskGaiMarkers, stripSemanticMarkerLines } from '../semantic-markers';
 import {
   normalizeGoalArchitectTitle,
   validateWithGoalArchitect,
@@ -189,20 +190,17 @@ export class GoalArchitectService {
   }
 }
 
-const TASK_MARKER_PATTERN = /GAI_KEY: task:[a-f0-9]{24}/g;
-
 function taskDescription(
   action: PreviewTaskChangeArgs['action'],
   requested: string | null,
   current: EntityRecord | null,
   generatedMarker: string,
 ): string | null {
-  const plain = requested?.replace(TASK_MARKER_PATTERN, '').trim() ?? '';
-  const existingMarker = typeof current?.description === 'string'
-    ? current.description.match(TASK_MARKER_PATTERN)?.[0] ?? null
-    : null;
-  const marker = action === 'create' ? generatedMarker : existingMarker;
-  const result = [plain, marker].filter((value): value is string => Boolean(value)).join('\n\n');
+  const plain = stripSemanticMarkerLines(requested, 'GAI_KEY');
+  const markers = action === 'create'
+    ? [generatedMarker]
+    : extractTaskGaiMarkers(typeof current?.description === 'string' ? current.description : null);
+  const result = [plain, ...markers].filter((value): value is string => Boolean(value)).join('\n\n');
   return result || null;
 }
 
@@ -310,7 +308,8 @@ function buildOperations(
   draftId: string,
 ): readonly ChangeOperation[] {
   const marker = (kind: string, id: string, description: string | null): string => {
-    const prefix = description?.trim() ? `${description.trim()}\n\n` : '';
+    const plain = stripSemanticMarkerLines(description, 'GAI_KEY');
+    const prefix = plain ? `${plain}\n\n` : '';
     return `${prefix}GAI_KEY: gai:${draftId}:${kind}:${id}`;
   };
   const operations: ChangeOperation[] = [{

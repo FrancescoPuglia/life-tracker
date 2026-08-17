@@ -479,6 +479,87 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     expect((await firestore.doc(`users/${uid}/timeBlocks/human-source-fill`).get()).exists).toBe(true);
   }, 30_000);
 
+  it('rejects mutable cross-midnight replacement and move previews before any destructive plan is stored', async () => {
+    const uid = uniqueUid('mutable-overnight');
+    await seedHierarchy(firestore, uid);
+    const createdAt = Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z'));
+    await firestore.doc(`users/${uid}/timeBlocks/mutable-overnight`).set({
+      id: 'mutable-overnight', userId: uid, title: 'Mutable overnight', domainId: 'domain-1',
+      taskId: 'task-1', projectId: 'project-1', goalId: 'goal-1',
+      // Sunday 23:30 -> Monday 00:30 in Europe/Rome.
+      startTime: Timestamp.fromDate(new Date('2026-08-16T21:30:00.000Z')),
+      endTime: Timestamp.fromDate(new Date('2026-08-16T22:30:00.000Z')),
+      status: 'planned', type: 'deep', flexibility: 'flexible', createdAt, updatedAt: createdAt,
+    });
+    const { domain } = domainFor(firestore, ['plan-overnight-reject']);
+
+    await expect(domain.scheduling.replaceDaySchedule(context(uid, 'overnight-replace'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [scheduleBlock({ id: 'safe-replacement' })],
+      reason: 'A range replacement must not own only half of an overnight block.',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    await expect(domain.scheduling.previewTimeBlockChange(context(uid, 'overnight-move'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: 'mutable-overnight',
+        title: 'Mutable overnight',
+        start: '2026-08-18T07:00:00.000Z',
+        end: '2026-08-18T08:00:00.000Z',
+      }),
+      reason: 'Cross-calendar source intervals require the manual workflow.',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    expect((await firestore.doc(`users/${uid}/timeBlocks/mutable-overnight`).get()).exists).toBe(true);
+    expect((await firestore.collection('aiChangePlans').where('uid', '==', uid).get()).empty).toBe(true);
+  }, 30_000);
+
+  it('binds the before and after reference chains so rollback cannot restore an orphan', async () => {
+    const uid = uniqueUid('old-reference-rollback');
+    await seedHierarchy(firestore, uid);
+    const createdAt = Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z'));
+    await Promise.all([
+      firestore.doc(`users/${uid}/tasks/task-2`).set({
+        id: 'task-2', userId: uid, title: 'Replacement action', projectId: 'project-1',
+        goalId: 'goal-1', domainId: 'domain-1', status: 'pending', createdAt, updatedAt: createdAt,
+      }),
+      firestore.doc(`users/${uid}/timeBlocks/remap-block`).set({
+        id: 'remap-block', userId: uid, title: 'Remap me', domainId: 'domain-1',
+        taskId: 'task-1', projectId: 'project-1', goalId: 'goal-1',
+        startTime: Timestamp.fromDate(new Date('2026-08-17T06:00:00.000Z')),
+        endTime: Timestamp.fromDate(new Date('2026-08-17T07:00:00.000Z')),
+        status: 'planned', type: 'deep', flexibility: 'flexible', createdAt, updatedAt: createdAt,
+      }),
+    ]);
+    const { domain } = domainFor(firestore, ['plan-remap', 'execution-remap']);
+    const preview = await domain.scheduling.previewTimeBlockChange(context(uid, 'remap-preview'), {
+      action: 'update',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: 'remap-block', title: 'Remap me',
+        start: '2026-08-17T06:00:00.000Z', end: '2026-08-17T07:00:00.000Z',
+        taskId: 'task-2',
+      }),
+      reason: 'Move the mapping to another owned Task.',
+    });
+    const applied = await domain.changePlans.applyPlan(context(uid, 'remap-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'old-reference-apply-key-001',
+    });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/remap-block`).get()).data()?.taskId).toBe('task-2');
+
+    await firestore.doc(`users/${uid}/tasks/task-1`).delete();
+    await expect(domain.changePlans.rollbackExecution(context(uid, 'remap-rollback'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'old-reference-rollback-key-01',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/remap-block`).get()).data()?.taskId).toBe('task-2');
+  }, 30_000);
+
   it('recovers idempotently when apply and rollback commit before post-write verification fails', async () => {
     const uid = uniqueUid('post-commit-recovery');
     await seedSchedule(firestore, uid);

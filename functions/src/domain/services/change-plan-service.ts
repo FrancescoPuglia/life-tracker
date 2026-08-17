@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { CapabilityIssuer, hashCapability } from '../capabilities';
 import { DomainError, isDomainError } from '../errors';
+import { taskCompletionValuesForPreview } from '../entity-mutation';
 import {
   hashIdempotencyKey,
   hashPlan,
@@ -120,15 +121,20 @@ export class ChangePlanService {
     if (!operations.length || operations.length > MAX_OPERATIONS) {
       throw new DomainError('LIMIT_EXCEEDED', `A preview must contain 1-${MAX_OPERATIONS} operations.`);
     }
-    const operationValidation = await this.validateOperations(context.uid, operations);
+    const now = this.clock();
+    const createdAt = now.toISOString();
+    const previewOperations = await this.normalizeOperationsForPreview(
+      context.uid,
+      operations,
+      createdAt,
+    );
+    const operationValidation = await this.validateOperations(context.uid, previewOperations);
     const validation = mergeValidationRequirements(operationValidation, metadata.validation);
 
     const planId = this.idFactory();
-    const now = this.clock();
-    const createdAt = now.toISOString();
     const expiresAt = new Date(now.getTime() + this.previewTtlMs).toISOString();
     const refs = uniqueReferences([
-      ...operations.map(({ collection, id }) => ({ collection, id })),
+      ...previewOperations.map(({ collection, id }) => ({ collection, id })),
       ...validation.refs,
     ]);
     const snapshot = await this.repository.captureSnapshot(
@@ -142,7 +148,7 @@ export class ChangePlanService {
     // checked inside captureSnapshot; generic references/scopes are recomputed
     // once after capture and must describe the identical state.
     const postCaptureValidation = mergeValidationRequirements(
-      await this.validateOperations(context.uid, operations),
+      await this.validateOperations(context.uid, previewOperations),
       metadata.validation,
     );
     if (validationRequirementsKey(postCaptureValidation) !== validationRequirementsKey(validation)) {
@@ -150,7 +156,7 @@ export class ChangePlanService {
     }
     const baseStateHash = hashSnapshotState(snapshot);
     const snapshotByRef = new Map(snapshot.entries.map((entry) => [refKey(entry.collection, entry.id), entry]));
-    const diff = operations.map((operation) => {
+    const diff = previewOperations.map((operation) => {
       const before = snapshotByRef.get(refKey(operation.collection, operation.id));
       if (!before) throw new DomainError('INTERNAL', 'Snapshot is incomplete.');
       if (operation.op === 'create' && before.existed) {
@@ -172,14 +178,14 @@ export class ChangePlanService {
       snapshotId: snapshot.id,
       baseStateHash,
       orchestration: context.orchestration ? structuredClone(context.orchestration) : null,
-      operations: structuredClone(operations),
+      operations: structuredClone(previewOperations),
       diff,
       reason: normalizeNotice(metadata.reason ?? 'User-requested Life Tracker proposal.', 500),
       warnings: [...warnings],
       conflicts: [...conflicts],
       assumptions: normalizeNotices(metadata.assumptions ?? []),
       expectedImpact: normalizeNotices(metadata.expectedImpact ?? []),
-      destructiveOperationCount: operations.filter((operation) => operation.op === 'delete').length,
+      destructiveOperationCount: previewOperations.filter((operation) => operation.op === 'delete').length,
     };
     const plan: ImmutableChangePlan = {
       ...planWithoutHash,
@@ -210,6 +216,30 @@ export class ChangePlanService {
       audit: auditFor(plan, context, 'preview', 'success', createdAt),
     });
     return publicPlan(stored, approvalCapability);
+  }
+
+  private async normalizeOperationsForPreview(
+    uid: string,
+    operations: readonly ChangeOperation[],
+    previewedAt: string,
+  ): Promise<readonly ChangeOperation[]> {
+    return Promise.all(operations.map(async (operation) => {
+      if (operation.collection !== 'tasks' || operation.op === 'delete') {
+        return structuredClone(operation);
+      }
+      const current = operation.op === 'create'
+        ? null
+        : await this.repository.getEntity(uid, operation.collection, operation.id);
+      return {
+        ...structuredClone(operation),
+        values: taskCompletionValuesForPreview(
+          operation.collection,
+          operation.values,
+          current,
+          previewedAt,
+        ) as Readonly<Record<string, WriteValue>>,
+      };
+    }));
   }
 
   async getPlan(context: AuthContext, planId: string): Promise<PublicChangePlan> {
@@ -438,6 +468,23 @@ export class ChangePlanService {
       dependencyRefs.set(key, { collection, id });
       return entity;
     };
+    const resolveExisting = async (collection: EntityCollection, id: string): Promise<EntityRecord | null> => {
+      const key = refKey(collection, id);
+      if (existingByRef.has(key)) return existingByRef.get(key) ?? null;
+      if (dependencyRecords.has(key)) return dependencyRecords.get(key) ?? null;
+      const entity = await this.repository.getEntity(uid, collection, id);
+      dependencyRecords.set(key, entity);
+      dependencyRefs.set(key, { collection, id });
+      return entity;
+    };
+    // Rollback can restore the before-state, so its complete relationship chain
+    // is just as authoritative as the proposed after-state. Binding both chains
+    // prevents a later parent deletion from turning rollback into an orphaning
+    // mutation.
+    for (const operation of operations) {
+      const existing = existingByRef.get(refKey(operation.collection, operation.id));
+      if (existing) await assertReferenceChain(operation.collection, existing, resolveExisting);
+    }
     for (const operation of operations) {
       const merged = mergedByRef.get(refKey(operation.collection, operation.id));
       if (merged) await assertReferenceChain(operation.collection, merged, resolve);

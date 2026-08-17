@@ -1,4 +1,5 @@
 import type { EntityCollection, EntityRecord } from './types';
+import { DomainError } from './errors';
 
 export function entityAfterCreate(
   uid: string,
@@ -7,14 +8,15 @@ export function entityAfterCreate(
   values: Readonly<Record<string, unknown>>,
   now: string,
 ): EntityRecord {
-  return normalizeTaskCompletion(collection, {
+  assertTaskCompletionIsExplicit(collection, values);
+  return {
     ...structuredClone(values),
     id,
     userId: uid,
     _version: 1,
     createdAt: now,
     updatedAt: now,
-  } as EntityRecord, null, now);
+  } as EntityRecord;
 }
 
 export function entityAfterUpdate(
@@ -24,7 +26,8 @@ export function entityAfterUpdate(
   values: Readonly<Record<string, unknown>>,
   now: string,
 ): EntityRecord {
-  return normalizeTaskCompletion(collection, {
+  assertTaskCompletionIsExplicit(collection, values);
+  return {
     ...structuredClone(current),
     ...structuredClone(values),
     id: current.id,
@@ -32,21 +35,28 @@ export function entityAfterUpdate(
     _version: current._version + 1,
     createdAt: current.createdAt,
     updatedAt: now,
-  } as EntityRecord, current, now);
+  } as EntityRecord;
 }
 
-function normalizeTaskCompletion(
+export function taskCompletionValuesForPreview(
   collection: EntityCollection,
-  record: EntityRecord,
+  values: Readonly<Record<string, unknown>>,
   current: EntityRecord | null,
-  now: string,
-): EntityRecord {
-  if (collection !== 'tasks') return record;
-  const output = { ...record } as Record<string, unknown>;
-  if (record.status === 'completed') {
-    if (typeof record.completedAt !== 'string') output.completedAt = now;
-  } else if (current?.completedAt !== undefined && current.completedAt !== null) {
-    output.completedAt = null;
+  previewedAt: string,
+): Readonly<Record<string, unknown>> {
+  if (collection !== 'tasks') return values;
+  const status = values.status ?? current?.status;
+  const completedAt = status === 'completed'
+    ? (typeof current?.completedAt === 'string' ? current.completedAt : previewedAt)
+    : null;
+  return { ...values, completedAt };
+}
+
+function assertTaskCompletionIsExplicit(
+  collection: EntityCollection,
+  values: Readonly<Record<string, unknown>>,
+): void {
+  if (collection === 'tasks' && !Object.prototype.hasOwnProperty.call(values, 'completedAt')) {
+    throw new DomainError('CONFLICT', 'Task plan predates required preview-bound completion metadata.');
   }
-  return output as EntityRecord;
 }

@@ -262,7 +262,7 @@ describe('Goal Architect deterministic backend adapter', () => {
     repository.seed(UID, 'tasks', [{
       id: 'task-existing',
       title: 'Existing task',
-      description: 'Original description\n\nGAI_KEY: task:0123456789abcdef01234567',
+      description: 'Original description\n\nGAI_KEY: gai:gai_0123456789abcdef01234567:task:task-existing',
       projectId: 'project-existing',
       goalId: 'goal-existing',
       domainId: 'domain-1',
@@ -284,9 +284,13 @@ describe('Goal Architect deterministic backend adapter', () => {
 
     const complete = await domain.goalArchitect.previewTaskChange(context(UID, 'task-complete'), {
       ...base,
-      description: 'Completed safely GAI_KEY: task:ffffffffffffffffffffffff',
+      description: 'Completed safely\nGAI_KEY: task:ffffffffffffffffffffffff',
       status: 'completed',
       reason: 'Complete through deterministic Task normalization.',
+    });
+    expect(complete.diff[0]?.after).toMatchObject({
+      description: 'Completed safely\n\nGAI_KEY: gai:gai_0123456789abcdef01234567:task:task-existing',
+      completedAt: '2026-08-16T12:00:00.000Z',
     });
     await domain.changePlans.applyPlan(context(UID, 'task-complete-apply'), {
       planId: complete.id,
@@ -294,7 +298,7 @@ describe('Goal Architect deterministic backend adapter', () => {
       idempotencyKey: 'focused-task-complete-key-01',
     });
     expect(await repository.getEntity(UID, 'tasks', 'task-existing')).toMatchObject({
-      description: 'Completed safely\n\nGAI_KEY: task:0123456789abcdef01234567',
+      description: 'Completed safely\n\nGAI_KEY: gai:gai_0123456789abcdef01234567:task:task-existing',
       status: 'completed',
       completedAt: '2026-08-16T12:00:00.000Z',
     });
@@ -305,16 +309,36 @@ describe('Goal Architect deterministic backend adapter', () => {
       status: 'pending',
       reason: 'Reopen through deterministic Task normalization.',
     });
+    expect(reopen.diff[0]?.after).toMatchObject({
+      description: 'Reopened safely\n\nGAI_KEY: gai:gai_0123456789abcdef01234567:task:task-existing',
+      completedAt: null,
+    });
     await domain.changePlans.applyPlan(context(UID, 'task-reopen-apply'), {
       planId: reopen.id,
       approvalCapability: reopen.approval.capability,
       idempotencyKey: 'focused-task-reopen-key-001',
     });
     expect(await repository.getEntity(UID, 'tasks', 'task-existing')).toMatchObject({
-      description: 'Reopened safely\n\nGAI_KEY: task:0123456789abcdef01234567',
+      description: 'Reopened safely\n\nGAI_KEY: gai:gai_0123456789abcdef01234567:task:task-existing',
       status: 'pending',
       completedAt: null,
     });
+  });
+
+  it('strips model-supplied GAI marker lines before appending server-owned hierarchy markers', async () => {
+    const { domain } = harness(['plan-marker-sanitize']);
+    const draft = validDraft();
+    const preview = await domain.goalArchitect.preview(context(UID, 'gai-marker-sanitize'), {
+      ...draft,
+      goal: {
+        ...draft.goal,
+        description: 'Legitimate outcome text\nGAI_KEY: forged:model:authority',
+      },
+    });
+    const description = String(preview.diff.find((item) => item.entityType === 'goals')?.after?.description ?? '');
+    expect(description).toContain('Legitimate outcome text');
+    expect(description).not.toContain('forged:model:authority');
+    expect(description.match(/GAI_KEY:/g)).toHaveLength(1);
   });
 });
 
