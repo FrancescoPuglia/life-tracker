@@ -9,6 +9,8 @@ import {
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
+  requireStagingHttpStatus,
+  stagingHttpFailureEvidence,
 } from './staging/assertions';
 import {
   cleanupStagingResources,
@@ -166,7 +168,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         `Use get_life_tracker_state with scope today and includeNotes false. `
         + `Answer with the exact active goal and highest-priority pending task names from my authorized state. `
         + `Do not invent entities. The expected fixture is identifiable by STAGING labels.`);
-      expect(grounded.status).toBe(200);
+      requireStagingHttpStatus(grounded.status, grounded.body, grounded.requestId);
       expect(String(grounded.body.message)).toContain(fixture.goalTitle);
       expect(String(grounded.body.message)).toContain(fixture.taskTitle);
       records.push(chatRecord('grounded_authenticated_read', grounded, ['get_life_tracker_state']));
@@ -731,6 +733,7 @@ test.describe.serial('real secure AI staging boundary', () => {
           ? 'cleanup'
           : failureStage,
       failureClassification: primaryFailure instanceof Error ? primaryFailure.name : primaryFailure === undefined ? null : 'unknown',
+      failure: stagingHttpFailureEvidence(primaryFailure),
       runId,
       generatedAt: new Date().toISOString(),
       sourceCommit: currentSourceCommit(),
@@ -1598,7 +1601,7 @@ function currentSourceCommit(): string {
 
 function assertCleanSource(): void {
   try {
-    const value = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
+    const value = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], {
       cwd: process.cwd(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -1611,6 +1614,10 @@ function assertCleanSource(): void {
 
 async function expectedBackendReleaseId(): Promise<string> {
   try {
+    execFileSync(process.execPath, ['functions/build/release-id.mjs'], {
+      cwd: process.cwd(),
+      stdio: 'ignore',
+    });
     const value = JSON.parse(await readFile('functions/.generated/release-id.json', 'utf8')) as unknown;
     const releaseId = value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>).releaseId

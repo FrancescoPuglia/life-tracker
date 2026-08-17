@@ -55,6 +55,7 @@ const SCAN_BATCH_SIZE = 100;
 const MAX_AUDIT_RESULTS = 500;
 const EPOCH = new Date(0).toISOString();
 const SERVER_RECORD_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const SERVER_RECORD_RETENTION_SAFETY_MS = 24 * 60 * 60 * 1_000;
 
 const PRODUCT_DEFAULT_PREFERENCES: UserPlanningPreferences = Object.freeze({
   source: 'product_default',
@@ -552,7 +553,7 @@ export class FirestoreRepository implements AuditableRepository {
         request.idempotencyKeyHash,
       );
 
-      const retainedUntil = serverRecordPurgeAt(request.now);
+      const retainedUntil = serverRecordPurgeAt(request.now, request.rollbackExpiresAt);
       transaction.set(planRef, { ...encodeServer(updatedPlan), purgeAt: retainedUntil });
       transaction.update(snapshotRef, {
         purgeAt: Timestamp.fromDate(new Date(request.rollbackExpiresAt)),
@@ -1307,10 +1308,17 @@ function encodeServer(value: unknown): DocumentData {
   return stripUndefined(clone(value)) as DocumentData;
 }
 
-function serverRecordPurgeAt(now: string): Timestamp {
+function serverRecordPurgeAt(now: string, minimumUntil?: string): Timestamp {
   const timestamp = Date.parse(now);
   if (!Number.isFinite(timestamp)) throw new DomainError('INTERNAL', 'Server retention timestamp is invalid.');
-  return Timestamp.fromMillis(timestamp + SERVER_RECORD_RETENTION_MS);
+  const minimumTimestamp = minimumUntil === undefined ? timestamp : Date.parse(minimumUntil);
+  if (!Number.isFinite(minimumTimestamp)) {
+    throw new DomainError('INTERNAL', 'Server retention minimum timestamp is invalid.');
+  }
+  return Timestamp.fromMillis(Math.max(
+    timestamp + SERVER_RECORD_RETENTION_MS,
+    minimumTimestamp + SERVER_RECORD_RETENTION_SAFETY_MS,
+  ));
 }
 
 function stripUndefined(value: unknown): unknown {

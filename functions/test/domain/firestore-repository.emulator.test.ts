@@ -60,17 +60,22 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     const executions = await firestore.collection('aiExecutions').where('uid', '==', uid).get();
     expect(executions.size).toBe(1);
     expect(executions.docs[0]?.data().purgeAt).toBeInstanceOf(Timestamp);
+    const rollbackExpiry = Date.parse(first.receipt.rollbackExpiresAt ?? '');
+    expect(executions.docs[0]?.data().purgeAt.toMillis()).toBeGreaterThan(rollbackExpiry);
     const plan = await firestore.doc(`aiChangePlans/${uid}_${preview.id}`).get();
     const snapshot = await firestore.doc(`aiSnapshots/${uid}_${preview.id}`).get();
     expect(plan.data()?.purgeAt).toBeInstanceOf(Timestamp);
+    expect(plan.data()?.purgeAt.toMillis()).toBeGreaterThan(rollbackExpiry);
     expect(snapshot.data()?.purgeAt).toBeInstanceOf(Timestamp);
     const approval = await firestore.doc(`aiApprovals/${uid}_${preview.id}`).get();
     expect(approval.data()?.status).toBe('consumed');
     expect(approval.data()?.purgeAt).toBeInstanceOf(Timestamp);
+    expect(approval.data()?.purgeAt.toMillis()).toBeGreaterThan(rollbackExpiry);
     expect(JSON.stringify(approval.data())).not.toContain(preview.approval.capability);
     const idempotency = await firestore.collection('aiIdempotency').where('uid', '==', uid).get();
     expect(idempotency.size).toBe(1);
     expect(idempotency.docs[0]?.data().purgeAt).toBeInstanceOf(Timestamp);
+    expect(idempotency.docs[0]?.data().purgeAt.toMillis()).toBeGreaterThan(rollbackExpiry);
     const audit = await firestore.doc(`aiAuditLogs/${uid}_${first.executionId}`).get();
     expect(audit.data()?.purgeAt).toBeUndefined();
     expect(audit.data()?.metadata).toMatchObject({

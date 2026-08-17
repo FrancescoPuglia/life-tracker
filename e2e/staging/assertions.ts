@@ -49,6 +49,41 @@ export interface ExpectedActionResult {
   readonly executionId?: string;
 }
 
+export interface SafeStagingHttpFailure {
+  readonly status: number;
+  readonly errorCode: string;
+  readonly requestId: string | null;
+}
+
+export class StagingHttpFailure extends Error {
+  readonly evidence: SafeStagingHttpFailure;
+
+  constructor(evidence: SafeStagingHttpFailure) {
+    super('Staging HTTP request failed safely.');
+    this.name = 'StagingHttpFailure';
+    this.evidence = evidence;
+  }
+}
+
+/** Retain only an allowlisted failure tuple; never retain the response body. */
+export function requireStagingHttpStatus(
+  status: number,
+  body: unknown,
+  requestId: string | null,
+  expectedStatus = 200,
+): void {
+  if (status === expectedStatus) return;
+  throw new StagingHttpFailure({
+    status,
+    errorCode: safeErrorCode(body),
+    requestId: safeRequestId(requestId),
+  });
+}
+
+export function stagingHttpFailureEvidence(error: unknown): SafeStagingHttpFailure | null {
+  return error instanceof StagingHttpFailure ? error.evidence : null;
+}
+
 /**
  * Response checks deliberately throw fixed classifications. Never let an
  * assertion framework serialize a body that can contain an approval or
@@ -196,6 +231,18 @@ function sameReferences(
   const left = normalize(actual);
   const right = normalize(expected);
   return left.every((value, index) => value === right[index]);
+}
+
+function safeErrorCode(body: unknown): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'UNKNOWN';
+  const error = (body as Record<string, unknown>).error;
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return 'UNKNOWN';
+  const code = (error as Record<string, unknown>).code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_:-]{0,79}$/.test(code) ? code : 'UNKNOWN';
+}
+
+function safeRequestId(value: string | null): string | null {
+  return value && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
 }
 
 function canonicalInstant(value: unknown): string | null {

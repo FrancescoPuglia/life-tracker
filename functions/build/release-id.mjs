@@ -13,6 +13,10 @@ const inputs = [
   resolve(functionsRoot, 'package-lock.json'),
   resolve(functionsRoot, 'build/release-id.mjs'),
   resolve(generatedRoot, 'shared-validators.cjs'),
+  resolve(repositoryRoot, '.firebaserc'),
+  resolve(repositoryRoot, 'firebase.json'),
+  resolve(repositoryRoot, 'firestore.indexes.json'),
+  resolve(repositoryRoot, 'firestore.rules'),
   resolve(repositoryRoot, 'packages/ai-contract/index.js'),
   resolve(repositoryRoot, 'packages/ai-contract/index.d.ts'),
 ].sort();

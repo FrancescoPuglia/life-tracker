@@ -5,6 +5,8 @@ import {
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
+  requireStagingHttpStatus,
+  stagingHttpFailureEvidence,
 } from '../../../e2e/staging/assertions';
 
 const CAPABILITY = 'c'.repeat(43);
@@ -164,5 +166,29 @@ describe('secret-safe staging evidence assertions', () => {
       beforeFields: { id: 'block-1', title: 'Block' },
       afterFields: { id: 'block-1', title: 'Block', startTime: START, endTime: END },
     })).toThrow('Staging proposal changed fields outside the exact requested scope.');
+  });
+
+  it('retains only a sanitized HTTP failure tuple', () => {
+    const sentinel = ['sk', 'proj', 'never-retain-this-value-1234567890'].join('-');
+    let failure: unknown;
+    try {
+      requireStagingHttpStatus(503, {
+        error: { code: 'PROVIDER_UNAVAILABLE', message: sentinel },
+        approvalCapability: sentinel,
+      }, 'request-safe-1');
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      name: 'StagingHttpFailure',
+      message: 'Staging HTTP request failed safely.',
+    });
+    const evidence = stagingHttpFailureEvidence(failure);
+    expect(evidence).toEqual({
+      status: 503,
+      errorCode: 'PROVIDER_UNAVAILABLE',
+      requestId: 'request-safe-1',
+    });
+    expect(JSON.stringify(evidence)).not.toContain(sentinel);
   });
 });
