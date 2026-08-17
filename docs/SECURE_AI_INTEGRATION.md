@@ -161,29 +161,66 @@ References:
 - [Firebase parameterized configuration and secrets](https://firebase.google.com/docs/functions/config-env)
 - [Firebase function deployment](https://firebase.google.com/docs/functions/manage-functions)
 
-## Staging deployment (do not run without human approval)
+## Dedicated staging environment
 
-1. Select and verify the staging project explicitly.
-2. Revoke the historical key; create a scoped, budget-limited replacement.
-3. Set both secrets interactively and review exact origins/model parameters.
+The isolated Goal 1 target is Firebase project `life-tracker-staging`
+(project number `675076431391`). The existing `life-tracker-12000` project is
+the production/reference project and is never a valid staging target. The
+repository `.firebaserc` maps both `default` and `staging` to the isolated
+staging project, while every cloud command in this runbook still names the
+project explicitly.
+
+Firebase CLI/API verification on 2026-08-17 established:
+
+- active Web app: `Life Tracker Staging Web`;
+- default Firestore database: Native mode, Standard edition, location `eur3`;
+- project billing enabled;
+- Email/Password Auth accepts a synthetic account (the verification account
+  was deleted immediately);
+- `AI_CAPABILITY_SIGNING_SECRET` exists as an enabled Secret Manager version;
+- `OPENAI_API_KEY` remains intentionally absent until the human-controlled
+  rotated staging credential is entered.
+
+The Functions package reads non-secret staging parameters from the ignored
+`functions/.env.life-tracker-staging` file. The staging values are
+`OPENAI_MODEL=gpt-5.6-sol`, `OPENAI_REASONING_EFFORT=medium`, the official
+OpenAI API base URL, and an exact CORS allowlist for the local verification
+origin plus the staging Firebase Hosting origin. Neither secret belongs in an
+environment file.
+
+Set the rotated OpenAI credential only through the interactive terminal prompt
+and never paste it into chat or a tracked file:
+
+```bash
+firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
+```
+
+## Staging deployment (production remains forbidden)
+
+1. Verify the active/explicit project resolves to `life-tracker-staging` and
+   never `life-tracker-12000`.
+2. Confirm the historical key is revoked; create a scoped, budget-limited
+   staging replacement.
+3. Set `OPENAI_API_KEY` interactively and verify only its metadata. The
+   capability-signing secret is generated independently and never displayed.
 4. Run every local gate above from a clean reviewed commit.
 5. Deploy only the Function:
 
    ```bash
-   firebase deploy --project PROJECT_ID --only functions:lifeTrackerAiApi
+   firebase deploy --project life-tracker-staging --only functions:lifeTrackerAiApi
    ```
 
 6. Run authenticated staging negative tests and a budget-limited live smoke.
 7. Deploy Firestore Rules only after a separate diff/review:
 
    ```bash
-   firebase deploy --project PROJECT_ID --only firestore:rules
+   firebase deploy --project life-tracker-staging --only firestore:rules
    ```
 
 8. Deploy the reviewed Firestore index/TTL configuration separately:
 
    ```bash
-   firebase deploy --project PROJECT_ID --only firestore:indexes
+   firebase deploy --project life-tracker-staging --only firestore:indexes
    ```
 
 9. Set the GitHub Pages repository variable `NEXT_PUBLIC_AI_API_BASE_URL` to

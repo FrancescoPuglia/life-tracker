@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "life-tracker-staging",
+    "staging": "life-tracker-staging"
+  }
+}
