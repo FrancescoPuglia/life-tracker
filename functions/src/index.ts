@@ -2,6 +2,7 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { defineSecret, defineString } from 'firebase-functions/params';
+import * as logger from 'firebase-functions/logger';
 import { onRequest } from 'firebase-functions/v2/https';
 import { LifeTrackerApiApplication } from './application';
 import { createProductionResponsesClient } from './ai/production-client';
@@ -124,6 +125,9 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
       maxTurns: 6,
       maxToolCalls: 12,
       maxOutputTokens: 1_500,
+      onProviderError: (metadata) => {
+        logger.error('OpenAI Responses provider request failed safely.', metadata);
+      },
     },
   );
   return cachedResponses;

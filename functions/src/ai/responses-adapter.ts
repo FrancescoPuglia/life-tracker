@@ -86,6 +86,16 @@ export interface ResponsesAdapterOptions {
   readonly reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   readonly promptVersion: string;
   readonly schemaVersion: string;
+  readonly onProviderError?: (metadata: SafeProviderErrorMetadata) => void;
+}
+
+export interface SafeProviderErrorMetadata {
+  readonly requestId: string;
+  readonly providerStatus?: number;
+  readonly providerCode?: string;
+  readonly providerType?: string;
+  readonly providerParam?: string;
+  readonly providerRequestId?: string;
 }
 
 export class OpenAIResponsesAdapter {
@@ -247,11 +257,59 @@ export class OpenAIResponsesAdapter {
       if (controller.signal.aborted || Date.now() >= deadline) {
         throw new DomainError('INTERNAL', 'AI request timed out.');
       }
+      try {
+        this.options.onProviderError?.(safeProviderErrorMetadata(input.auth.requestId, error));
+      } catch {
+        // Observability must never change the normalized provider-error path.
+      }
       throw new DomainError('INTERNAL', 'The AI provider request failed safely.');
     } finally {
       controller.abort();
     }
   }
+}
+
+export function safeProviderErrorMetadata(
+  requestId: string,
+  error: unknown,
+): SafeProviderErrorMetadata {
+  const outer = record(error);
+  const nested = record(outer?.error);
+  const providerStatus = safeStatus(outer?.status);
+  const providerCode = safeProviderScalar(outer?.code ?? nested?.code);
+  const providerType = safeProviderScalar(outer?.type ?? nested?.type);
+  const providerParam = safeProviderScalar(outer?.param ?? nested?.param);
+  const providerRequestId = safeProviderScalar(
+    outer?.requestID ?? outer?.request_id ?? nested?.request_id,
+    200,
+  );
+  return {
+    requestId,
+    ...(providerStatus === undefined ? {} : { providerStatus }),
+    ...(providerCode === undefined ? {} : { providerCode }),
+    ...(providerType === undefined ? {} : { providerType }),
+    ...(providerParam === undefined ? {} : { providerParam }),
+    ...(providerRequestId === undefined ? {} : { providerRequestId }),
+  };
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return value && typeof value === 'object' ? value as Readonly<Record<string, unknown>> : undefined;
+}
+
+function safeStatus(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 400 && value <= 599
+    ? value
+    : undefined;
+}
+
+function safeProviderScalar(value: unknown, maxLength = 80): string | undefined {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= maxLength
+    && /^[A-Za-z0-9_.:/-]+$/.test(value)
+    ? value
+    : undefined;
 }
 
 function isFunctionCall(item: ResponseOutputItem): item is ResponseOutputItem & ResponseFunctionCall {

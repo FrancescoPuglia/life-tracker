@@ -387,8 +387,17 @@ describe('bounded OpenAI Responses orchestration', () => {
   });
 
   it('normalizes provider failures and preserves typed domain tool failures', async () => {
-    const provider = setup([{ id: 'unused', output: [] }]);
-    provider.create.mockRejectedValueOnce(new Error('provider secret detail'));
+    const onProviderError = vi.fn();
+    const provider = setup([{ id: 'unused', output: [] }], { onProviderError });
+    provider.create.mockRejectedValueOnce(Object.assign(new Error('provider secret detail never-log'), {
+      status: 404,
+      code: 'model_not_found',
+      type: 'invalid_request_error',
+      param: 'model',
+      requestID: 'req_safe_123',
+      headers: { authorization: 'sensitive-header-never-log' },
+      body: { apiKey: 'provider-secret-never-log' },
+    }));
     await expect(provider.adapter.run({
       auth: AUTH,
       message: 'Read',
@@ -398,6 +407,15 @@ describe('bounded OpenAI Responses orchestration', () => {
       code: 'INTERNAL',
       message: 'The AI provider request failed safely.',
     });
+    expect(onProviderError).toHaveBeenCalledWith({
+      requestId: AUTH.requestId,
+      providerStatus: 404,
+      providerCode: 'model_not_found',
+      providerType: 'invalid_request_error',
+      providerParam: 'model',
+      providerRequestId: 'req_safe_123',
+    });
+    expect(JSON.stringify(onProviderError.mock.calls)).not.toContain('never-log');
 
     const toolCall = {
       id: 'response-tool-error',
