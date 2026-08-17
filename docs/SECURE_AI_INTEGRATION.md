@@ -178,8 +178,8 @@ Firebase CLI/API verification on 2026-08-17 established:
 - Email/Password Auth accepts a synthetic account (the verification account
   was deleted immediately);
 - `AI_CAPABILITY_SIGNING_SECRET` exists as an enabled Secret Manager version;
-- `OPENAI_API_KEY` remains intentionally absent until the human-controlled
-  rotated staging credential is entered.
+- `OPENAI_API_KEY` exists only in staging Secret Manager and is bound to the
+  deployed Function; its value is never read, printed, or stored locally.
 
 The Functions package reads non-secret staging parameters from the ignored
 `functions/.env.life-tracker-staging` file. The staging values are
@@ -187,6 +187,11 @@ The Functions package reads non-secret staging parameters from the ignored
 OpenAI API base URL, and an exact CORS allowlist for the local verification
 origin plus the staging Firebase Hosting origin. Neither secret belongs in an
 environment file.
+
+The staging Function is `lifeTrackerAiApi` (Gen 2, Node 22, `europe-west1`).
+Its deployed secret environment contains exactly `OPENAI_API_KEY` and
+`AI_CAPABILITY_SIGNING_SECRET`. Container images in the staging
+`gcf-artifacts` repository have a seven-day cleanup policy.
 
 Set the rotated OpenAI credential only through the interactive terminal prompt
 and never paste it into chat or a tracked file:
