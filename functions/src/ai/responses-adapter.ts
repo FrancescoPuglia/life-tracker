@@ -21,7 +21,7 @@ interface ResponseOutputItem {
 interface ResponseLike {
   readonly id: string;
   readonly model?: string;
-  readonly status?: string;
+  readonly status?: 'completed' | 'failed' | 'in_progress' | 'cancelled' | 'queued' | 'incomplete';
   readonly output: readonly ResponseOutputItem[];
   readonly output_text?: string;
   readonly usage?: Readonly<{
@@ -202,7 +202,7 @@ export class OpenAIResponsesAdapter {
           response.model,
           this.options.model,
         );
-        if (response.status === 'failed' || response.status === 'incomplete') {
+        if (response.status !== 'completed') {
           throw new DomainError('INTERNAL', 'The AI response did not complete safely.');
         }
         providerCalls += 1;

@@ -99,15 +99,22 @@ describe('bounded OpenAI Responses orchestration', () => {
     },
   );
 
-  it.each(['failed', 'incomplete'] as const)(
-    'rejects an explicitly %s intermediate response before executing its tool call',
-    async (status) => {
+  it.each([
+    ['missing', undefined],
+    ['failed', 'failed'],
+    ['incomplete', 'incomplete'],
+    ['in progress', 'in_progress'],
+    ['cancelled', 'cancelled'],
+    ['queued', 'queued'],
+  ] as const)(
+    'rejects a non-completed %s intermediate response before executing its tool call',
+    async (label, status) => {
       const { adapter, repository } = setup([{
-        id: `unsafe-${status}-tool-turn`,
+        id: `unsafe-${label.replaceAll(' ', '-')}-tool-turn`,
         status,
         output: [{
           type: 'function_call',
-          call_id: `call-${status}`,
+          call_id: `call-${label.replaceAll(' ', '-')}`,
           name: 'preview_changes',
           arguments: JSON.stringify({
             operations: [{
@@ -116,7 +123,7 @@ describe('bounded OpenAI Responses orchestration', () => {
               id: 'domain-1',
               patch: [{ field: 'name', value: 'Must not execute' }],
             }],
-            reason: `The provider marked this response ${status}.`,
+            reason: `The provider marked this response ${label}.`,
           }),
         }],
       }]);
@@ -612,6 +619,7 @@ function setup(
     requests.push(request);
     return {
       model: 'test-model',
+      status: 'completed',
       ...responses[Math.min(index++, responses.length - 1)],
     } as never;
   });
