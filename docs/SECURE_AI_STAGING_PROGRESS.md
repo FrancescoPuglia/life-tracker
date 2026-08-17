@@ -1,7 +1,8 @@
 # Secure AI staging progress checkpoint
 
-Date: 2026-08-17  
-Branch: `codex/secure-ai-staging`  
+Date: 2026-08-17
+
+Branch: `codex/secure-ai-staging`
 Verified source baseline: `ae26be152cb550c495c548bb271f3704bcda5202`
 
 This is a resumable progress checkpoint, not a final staging-verification
