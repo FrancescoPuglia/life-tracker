@@ -254,7 +254,7 @@ The same checkpoint distinguishes the configured model from the
 provider-returned model identity. A successful staging record must now report
 both the reviewed request model and the provider's exact safe model field.
 Missing or malformed provider model metadata fails closed. Follow-up commit
-`0373bae874df7c4c2df0bb1b4808d56dd95db079` strengthens that boundary by
+`0373bae2f9ac6d30162f34f893a221ba7e23a257` strengthens that boundary by
 requiring the exact configured model identity on **every** provider response,
 including intermediate tool-call turns, before usage, output, or tool execution
 is processed. Missing, malformed, and mismatched intermediate identities are
@@ -283,6 +283,15 @@ The per-turn provider-identity checkpoint passed its focused adapter suite
 build, `git diff --check`, and the canonical static security scan. Its locally
 generated backend source fingerprint is
 `sha256:d4046d28fdb96b6c3b2454b1bfad91dfa89980a03b0727e8984c644b68caba24`.
+Independent review then identified that an explicitly `failed` or `incomplete`
+provider response containing a tool call could reach proposal execution.
+Commit `029d85c876b6e4f03a21558f8adcb3aa14564b2b` now rejects either status
+immediately after model attestation and before accounting, output ingestion, or
+tool execution. The regression proves no proposal or audit event is created.
+Its focused adapter suite passed 17/17, the complete Functions unit suite
+157/157, Functions typecheck and build passed, and the generated backend source
+fingerprint is
+`sha256:dd9b08c86037d78a4bb7ec7dd3ece78e340d6886af877ae4f4ae253ec9c39d1c`.
 At exact source checkpoint `08f26fa94f070c1f9d0fb1f30f275fe6e6d5e1fb`,
 the fresh production static export and output-inclusive scan passed, static
 browser E2E passed 1/1, and the full isolated Auth + Firestore + Functions
