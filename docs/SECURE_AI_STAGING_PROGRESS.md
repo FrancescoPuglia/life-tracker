@@ -98,6 +98,33 @@ upstream Responses HTTP 429 `insufficient_quota`. The artifact is explicitly
 `productionTouched: false`, and confirms deletion of 15/15 explicit fixture
 documents plus 2/2 synthetic Auth accounts.
 
+A subsequent attestation/retention hardening checkpoint was deployed from exact
+clean commit `e80fbe7` as Function revision
+`lifetrackeraiapi-00006-per`, Firebase source hash
+`70f8ebe1fd5c8b5e4ef899a4959c351fd14fbd70`, and storage-source generation
+`1786984624882907`. Its runtime health fingerprint is
+`sha256:de3d12d180462fdb29dd9e7272b69fb8491f94a625e3dcd0ae56a508692d2d80`.
+The fingerprint now covers the reviewed Firestore Rules, indexes/TTL
+configuration, Firebase project mapping, and deployment configuration as well
+as the backend source and shared contracts. The deploy targeted only
+`functions:lifeTrackerAiApi` in `life-tracker-staging`; the first CLI attempt
+failed before upload on the default 10-second source-discovery timeout, and the
+unchanged retry with `FUNCTIONS_DISCOVERY_TIMEOUT=120` exited 0. Read-only
+metadata confirmed that only `OPENAI_API_KEY` version 2 and
+`AI_CAPABILITY_SIGNING_SECRET` version 1 are bound. A fresh Firestore Admin
+metadata read confirmed all six reviewed TTL policies remain `ACTIVE`.
+
+The corresponding exact-source browser run
+(`stg-20260817164501-0a7ffb`) again passed health/fingerprint, exact CORS, and
+valid-mode authenticated payload-UID rejection before calling OpenAI. The
+grounded request returned normalized HTTP 503 `PROVIDER_UNAVAILABLE`;
+request-ID-scoped, allowlisted telemetry confirmed the upstream Responses
+result remained HTTP 429 `insufficient_quota`. The artifact retains only
+status, safe error code, and request ID for that failure—never the provider
+response body. It records overall `FAIL`, every later flow as NOT RUN,
+`productionTouched: false`, and successful deletion of 15/15 fixture documents
+plus 2/2 synthetic Auth accounts.
+
 Because no provider response could be generated, grounded read,
 planned-vs-actual interpretation, hostile-Note behavior, proposal, Reject,
 Apply, replay, drift, audit receipt, and Undo remain **NOT RUN against the real
@@ -139,7 +166,7 @@ not merely a plausible response:
   the immediate result `userAndAuthCleanupComplete` rather than claiming that
   asynchronous server TTL deletion has already occurred.
 
-Targeted evidence-helper tests: 3 files / 18 tests passed. Root TypeScript and
+Targeted evidence-helper tests: 3 files / 19 tests passed. Root TypeScript and
 the static security scan also passed after this hardening.
 
 The deployed Firestore configuration was independently reread after deployment:
@@ -184,7 +211,8 @@ Keep the key restricted to the minimum endpoint permissions required for
 
 If quota is enabled for the already-bound key, no new secret or Firebase
 deploy is needed while `/v1/health` continues to return the exact reviewed
-fingerprint recorded above. If the key must be replaced, enter it only through:
+`sha256:de3d12d180462fdb29dd9e7272b69fb8491f94a625e3dcd0ae56a508692d2d80`
+fingerprint. If the key must be replaced, enter it only through:
 
 ```bash
 firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
