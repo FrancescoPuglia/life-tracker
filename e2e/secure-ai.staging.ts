@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import {
   assertCapabilityShape,
@@ -22,6 +22,7 @@ const EXPECTED_REASONING = 'medium';
 const TIMEZONE = 'Europe/Rome';
 const EXPECTED_SMOKE_NAMES = [
   'staging_health_and_exact_cors',
+  'authenticated_payload_uid_rejected',
   'grounded_authenticated_read',
   'sessions_grounded_planned_vs_actual',
   'hostile_note_is_data',
@@ -123,6 +124,7 @@ test.describe.serial('real secure AI staging boundary', () => {
     });
 
     try {
+      assertCleanSource();
       await verifyHealthAndCors(records);
       failureStage = 'create_staging_identity_a';
       const activeA = accountA = await createStagingIdentity(`${runId}-a`);
@@ -136,6 +138,22 @@ test.describe.serial('real secure AI staging boundary', () => {
       await seedFixture(activeA, fixtureDocumentsA);
       failureStage = 'seed_staging_fixture_b';
       await seedFixture(activeB, fixtureDocumentsB);
+
+      failureStage = 'authenticated_payload_uid_rejected';
+      const spoofedUid = await backendJson(activeA, '/v1/chat', {
+        message: 'Use get_goals and return only my authenticated goals.',
+        mode: 'ask',
+        history: [],
+        userId: activeB.uid,
+      });
+      expect(spoofedUid.status).toBe(400);
+      expect(errorCode(spoofedUid.body)).toBe('INVALID_ARGUMENT');
+      records.push({
+        name: 'authenticated_payload_uid_rejected',
+        status: 'PASS',
+        requestId: spoofedUid.requestId ?? undefined,
+        detail: { validMode: true, clientUserIdRejected: true },
+      });
 
       failureStage = 'grounded_authenticated_read';
       await signIn(page, activeA);
@@ -263,6 +281,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       const mutableAfterApply = await readDocument(activeA, 'timeBlocks', fixture.mutableBlockId);
       expect(timestampField(mutableAfterApply, 'startTime')).toBe(fixture.times.firstTargetStart);
       expect(timestampField(mutableAfterApply, 'endTime')).toBe(fixture.times.firstTargetEnd);
+      expect(stringField(mutableAfterApply, 'notes')).toBe(appliedPlan.diff[0]!.after!.notes);
       const fixtureAfterApply = await readFixtureState(activeA, fixtureDocumentsA);
       assertOnlyFixtureDocumentChanged(
         fixtureBeforeApply,
@@ -405,6 +424,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       );
       const createEntityId = createPlan.operations[0]!.entityId;
       dynamicDocumentsA.push(['timeBlocks', createEntityId]);
+      expect((await rawFirestoreGet(activeA, activeA.uid, 'timeBlocks', createEntityId)).status).toBe(404);
       const createCapability = createPlan.approval.capability;
       assertCapabilityShape(createCapability);
       const createIdempotencyKey = newIdempotencyKey();
@@ -436,6 +456,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       const createdDocument = await readDocument(activeA, 'timeBlocks', createEntityId);
       expect(timestampField(createdDocument, 'startTime')).toBe(fixture.times.createTargetStart);
       expect(timestampField(createdDocument, 'endTime')).toBe(fixture.times.createTargetEnd);
+      expect(stringField(createdDocument, 'notes')).toBe(createPlan.diff[0]!.after!.notes);
       expect(await countDocumentsWithTitle(activeA, 'timeBlocks', createTitle)).toBe(1);
       const createConsumed = await backendJson(activeA, createApplyPath, {
         approvalCapability: createCapability,
@@ -545,15 +566,6 @@ test.describe.serial('real secure AI staging boundary', () => {
         await readFixtureState(activeB, fixtureDocumentsB),
         'cross-user proposal',
       );
-
-      const spoofedUid = await backendJson(activeA, '/v1/chat', {
-        message: 'Use get_goals and return only my authenticated goals.',
-        mode: 'ask',
-        history: [],
-        userId: activeB.uid,
-      });
-      expect(spoofedUid.status).toBe(400);
-      expect(errorCode(spoofedUid.body)).toBe('INVALID_ARGUMENT');
 
       const bPlanResponse = await backendJson(activeB, '/v1/chat', {
         message: proposalPromptForBlock(fixtureB.block, fixtureB.targetStart, fixtureB.targetEnd),
@@ -748,13 +760,18 @@ test.describe.serial('real secure AI staging boundary', () => {
 });
 
 async function verifyHealthAndCors(records: SmokeRecord[]): Promise<void> {
+  const expectedReleaseId = await expectedBackendReleaseId();
   const health = await fetch(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: staging.appOrigin },
     signal: AbortSignal.timeout(30_000),
   });
   expect(health.status).toBe(200);
   const healthBody = await safeJson(health);
-  expect(healthBody).toMatchObject({ status: 'ok', service: 'life-tracker-ai' });
+  expect(healthBody).toMatchObject({
+    status: 'ok',
+    service: 'life-tracker-ai',
+    releaseId: expectedReleaseId,
+  });
   const evil = await fetch(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: 'https://untrusted-origin.example' },
     signal: AbortSignal.timeout(30_000),
@@ -764,7 +781,11 @@ async function verifyHealthAndCors(records: SmokeRecord[]): Promise<void> {
     name: 'staging_health_and_exact_cors',
     status: 'PASS',
     requestId: typeof healthBody.requestId === 'string' ? healthBody.requestId : undefined,
-    detail: { approvedOrigin: true, unapprovedOriginDenied: true },
+    detail: {
+      approvedOrigin: true,
+      unapprovedOriginDenied: true,
+      backendReleaseId: expectedReleaseId,
+    },
   });
 }
 
@@ -1572,6 +1593,34 @@ function currentSourceCommit(): string {
     return /^[a-f0-9]{40}$/.test(value) ? value : 'unknown';
   } catch {
     return 'unknown';
+  }
+}
+
+function assertCleanSource(): void {
+  try {
+    const value = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (value !== '') throw new Error('dirty');
+  } catch {
+    throw new Error('Staging verification requires an exact clean committed source tree.');
+  }
+}
+
+async function expectedBackendReleaseId(): Promise<string> {
+  try {
+    const value = JSON.parse(await readFile('functions/.generated/release-id.json', 'utf8')) as unknown;
+    const releaseId = value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>).releaseId
+      : null;
+    if (typeof releaseId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(releaseId)) {
+      throw new Error('invalid');
+    }
+    return releaseId;
+  } catch {
+    throw new Error('The generated backend source fingerprint is missing or invalid.');
   }
 }
 

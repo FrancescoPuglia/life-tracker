@@ -31,8 +31,10 @@ sufficient.
 1. Revoke or disable the old provider credential.
 2. Create a replacement with the minimum required project permissions and a
    spending limit.
-3. Store a new secret version with `firebase functions:secrets:set` without
-   echoing it into shell history or CI logs.
+3. Store a new secret version with
+   `firebase functions:secrets:set SECRET_NAME --project TARGET_PROJECT_ID`
+   without echoing it into shell history or CI logs. Resolve and verify the
+   non-production target before running the command.
 4. Redeploy only the backend function that binds the secret. Do not deploy from
    an unreviewed working tree.
 5. Verify authentication, rate limiting, audit records, and provider usage.

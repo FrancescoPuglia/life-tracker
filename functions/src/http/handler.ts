@@ -21,6 +21,7 @@ export interface ApiHandlerDependencies {
   readonly tokenVerifier: TokenVerifier;
   readonly rateLimiter: RateLimiter;
   readonly allowedOrigins: ReadonlySet<string>;
+  readonly releaseId: string;
   readonly clock?: () => Date;
   readonly requestId?: () => string;
 }
@@ -44,7 +45,12 @@ export function createApiHandler(dependencies: ApiHandlerDependencies) {
       }
       const path = requestPath(request);
       if (method === 'GET' && path === '/v1/health') {
-        response.status(200).json({ status: 'ok', service: 'life-tracker-ai', requestId });
+        response.status(200).json({
+          status: 'ok',
+          service: 'life-tracker-ai',
+          releaseId: dependencies.releaseId,
+          requestId,
+        });
         return;
       }
       if (method !== 'POST') throw new DomainError('NOT_FOUND', 'Route not found.');

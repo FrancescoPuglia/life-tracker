@@ -7,11 +7,13 @@
     "node": "22"
   },
   "scripts": {
-    "build": "npm run build:shared && npm run typecheck && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=lib/index.js --sourcemap",
+    "build": "npm run build:shared && npm run build:release && npm run typecheck:check && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=lib/index.js --sourcemap",
     "build:shared": "esbuild build/shared-validators-entry.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=.generated/shared-validators.cjs --sourcemap",
-    "pretest": "npm run build:shared",
-    "pretest:run": "npm run build:shared",
-    "typecheck": "tsc --noEmit",
+    "build:release": "node build/release-id.mjs",
+    "pretest": "npm run build:shared && npm run build:release",
+    "pretest:run": "npm run build:shared && npm run build:release",
+    "typecheck": "npm run build:shared && npm run build:release && npm run typecheck:check",
+    "typecheck:check": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run"
   },

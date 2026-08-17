@@ -16,6 +16,7 @@ import { parseAllowedOrigins } from './http/cors';
 import { createApiHandler } from './http/handler';
 import { FirestoreRateLimiter } from './http/rate-limiter';
 import type { ApiApplication, HttpRequestLike, HttpResponseLike } from './http/types';
+import { BACKEND_SOURCE_FINGERPRINT } from '../.generated/release-id';
 
 const OPENAI_API_KEY = defineSecret('OPENAI_API_KEY', {
   description: 'Backend-only OpenAI API key used by the Responses API.',
@@ -73,6 +74,7 @@ export const lifeTrackerAiApi = onRequest({
       tokenVerifier,
       rateLimiter,
       allowedOrigins: parseAllowedOrigins(AI_ALLOWED_ORIGINS.value()),
+      releaseId: BACKEND_SOURCE_FINGERPRINT,
     });
     await handler(
       request as unknown as HttpRequestLike,

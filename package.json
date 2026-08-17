@@ -18,6 +18,7 @@
     "test:e2e": "playwright test",
     "test:e2e:emulator": "node e2e/prepare-emulator-config.mjs && npm --prefix functions run build && CI=1 FIREBASE_CLI_DISABLE_UPDATE_CHECK=1 FUNCTIONS_DISCOVERY_TIMEOUT=120 E2E_USE_FUNCTIONS_EMULATOR=true firebase emulators:exec --only auth,firestore,functions --project life-tracker-test \"npm run test:e2e\"",
     "test:e2e:static": "playwright test --config playwright.static.config.ts",
+    "pretest:e2e:staging": "npm --prefix functions run build",
     "test:e2e:staging": "playwright test --config playwright.staging.config.ts",
     "check:static-security": "node scripts/check-static-security.mjs",
     "firebase:deploy": "npm run build && firebase deploy",

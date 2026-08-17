@@ -66,6 +66,7 @@ describe('Life Tracker HTTP API boundary', () => {
     expect(response.body).toEqual({
       status: 'ok',
       service: 'life-tracker-ai',
+      releaseId: 'sha256:test-release',
       requestId: 'request-test-1',
     });
     expect(tokenVerifier.verifyBearerToken).not.toHaveBeenCalled();
@@ -261,6 +262,7 @@ describe('Life Tracker HTTP API boundary', () => {
       tokenVerifier,
       rateLimiter,
       allowedOrigins: new Set([ALLOWED_ORIGIN, 'http://localhost:3000']),
+      releaseId: 'sha256:test-release',
       clock: () => FIXED_NOW,
       requestId: () => 'request-test-1',
     });
