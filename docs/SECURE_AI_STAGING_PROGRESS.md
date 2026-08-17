@@ -261,8 +261,28 @@ Full unit verification after this remediation passed 597/597 root tests and
 152/152 Functions unit tests; both typechecks and the focused positive/negative
 static-boundary checks passed. Its locally generated backend source fingerprint
 is `sha256:d436cf7146f159187c574957ace734fb623b1fa5229946429c310b7a6cef8f4c`.
-Exact-commit static and emulator browser reruns follow after the documentation
-checkpoint; this commit is not yet deployed.
+The clean documentation checkpoint `c1a8379` then passed the Functions build,
+root lint with only the established warnings, a fresh production Pages export,
+the automatic output-inclusive static security scan, static browser E2E 1/1,
+full Auth + Firestore + Functions emulator browser E2E 3/3, Firestore Rules
+47/47, Auth token verification 2/2, and transaction/failure-injection emulator
+25/25. The first static Playwright launch was denied by the managed sandbox at
+localhost bind (`EPERM`); the unchanged already-built gate was rerun with the
+approved localhost sandbox permission and passed. The first full emulator
+attempt selected system Node 18 because of an overly narrow temporary PATH and
+failed before emulator startup; restoring the repository Node 22 path made the
+unchanged gate pass. No test or security policy was weakened.
+
+The exact static export attested source
+`c1a837994680c808f23dea10e9d05fb1d3532ea3` and public AI backend state
+`not-configured`; a configured production or staging export is required to
+attest its exact project-bound Function URL instead. The ignored Playwright
+status artifacts both reported `passed`. Screenshot SHA-256 evidence for the
+emulator conflict preview, applied receipt, and mobile grounded answer is,
+respectively, `2f287b927823a690bdac02bd99b2cf3b14a2ee984a1f5cb5e3c9eb14070e9bfd`,
+`7f79119f542df9fcedfd3487056592447f1d48d7027ec207b14522aca307a19d`,
+and `b9c881b1ee6aa59a22ba853eeb76e1898a783f9e1a5ca2078ea19b9ef459e47e`.
+This checkpoint is not yet deployed; production remains untouched.
 
 ## Exact external unblock
 
