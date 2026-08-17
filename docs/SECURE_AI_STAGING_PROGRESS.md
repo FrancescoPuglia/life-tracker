@@ -177,8 +177,8 @@ the `timeBlocks` composite index is present and TTL is enabled for
 
 ## Green independent regression at this checkpoint
 
-- Root unit tests: 46 files, 585 tests passed.
-- Functions unit tests: 13 files / 142 tests passed; 27 emulator-only tests
+- Root unit tests: 47 files, 594 tests passed.
+- Functions unit tests: 14 files / 151 tests passed; 27 emulator-only tests
   skipped in the unit invocation.
 - Firestore Rules emulator: 47/47 passed.
 - Firebase Auth emulator: 2/2 passed.
@@ -202,17 +202,96 @@ as Firestore timestamps while remaining outside the immutable LifePlan hash.
 The first attempt failed closed on this boundary; after explicitly excluding
 `purgeAt` from changeset integrity, all 25/25 cases passed again.
 
+## Local attestation checkpoint awaiting staging deployment
+
+Clean commit `8c11adab11b78bd63466cc3f12fc39bb68fddbe3` adds two
+independent fail-closed provenance checks without changing the AI authority or
+mutation model:
+
+- `/v1/health` now returns a non-secret runtime-policy digest in addition to
+  the source/configuration fingerprint. The digest binds the configured model,
+  reasoning effort, validated provider URL, exact origin allowlist,
+  prompt/schema versions, timeout, tool/call limits, and output-token limit.
+  Only the digest and safe model/version labels are exposed.
+- Static and staging browser builds embed the exact lowercase 40-character Git
+  commit in the document body. The staging harness requires it to match the
+  clean source commit before creating Auth users or fixture data.
+- `npm run build:static` performs a fresh real GitHub Pages export, clears both
+  OpenAI environment variables, embeds the exact commit, and runs the output
+  security scan. The deploy workflow uses this reproducible command.
+
+Exact-commit verification at `8c11ada` passed 594/594 root tests, 151/151
+Functions unit tests, root and Functions typechecks, the Functions build, the
+fresh static export and output-inclusive security scan, static browser E2E
+1/1, and full Auth + Firestore + Functions emulator browser E2E 3/3. Durable
+Playwright status artifacts both report `passed`; the three emulator evidence
+screenshots cover conflict preview, applied receipt, and mobile grounded answer.
+No provider credential was used by these local/emulator gates.
+
+This commit is pushed to `origin/codex/secure-ai-staging` but is **not yet
+deployed**. The deployed Function remains exact commit `e80fbe7` with runtime
+source fingerprint
+`sha256:de3d12d180462fdb29dd9e7272b69fb8491f94a625e3dcd0ae56a508692d2d80`.
+The locally generated source fingerprint for `8c11ada` is
+`sha256:580797247f5ed3fcffd9f17fc5428bab6c5e1095c101d6001b0b8ad394204701`.
+No cloud or production mutation was made for this local checkpoint.
+
+The subsequent independent security review found one P1 in the Pages build
+boundary: an arbitrary HTTPS `NEXT_PUBLIC_AI_API_BASE_URL` could have received
+the user's Firebase bearer token. Commit
+`aa10db867d348cf8c9c79ce1507b02329511ef01` fixes this by sharing one strict
+public contract between the browser and static scanner. A configured backend
+is now accepted only when it is the exact
+`europe-west1-{firebaseProject}.cloudfunctions.net/lifeTrackerAiApi` endpoint
+for the same Firebase project that owns Auth. Only the matching project-bound
+Functions emulator path is allowed in explicit development. The Pages workflow
+hard-binds the production Firebase project ID, the exported body attests the
+exact public backend endpoint, and the staging harness checks that marker
+before creating any identity or data. A direct negative scan proved
+`https://attacker.example/lifeTrackerAiApi` is rejected.
+
+The same checkpoint distinguishes the configured model from the
+provider-returned model identity. A successful staging record must now report
+both the reviewed request model and the provider's exact safe model field.
+Missing or malformed provider model metadata fails closed. It also captures a
+single immutable source commit for the entire staging run and fails if the tree
+or HEAD changes before evidence finalization.
+
+Full unit verification after this remediation passed 597/597 root tests and
+152/152 Functions unit tests; both typechecks and the focused positive/negative
+static-boundary checks passed. Its locally generated backend source fingerprint
+is `sha256:d436cf7146f159187c574957ace734fb623b1fa5229946429c310b7a6cef8f4c`.
+Exact-commit static and emulator browser reruns follow after the documentation
+checkpoint; this commit is not yet deployed.
+
 ## Exact external unblock
 
-In the dedicated OpenAI staging project, enable funded API usage and a
-non-zero project budget/usage limit sufficient for a small Responses API test.
-Keep the key restricted to the minimum endpoint permissions required for
-`/v1/responses`, and confirm that project access includes `gpt-5.6-sol`.
+Two human-controlled prerequisites now remain before the next staging cloud
+mutation and funded browser run:
 
-If quota is enabled for the already-bound key, no new secret or Firebase
-deploy is needed while `/v1/health` continues to return the exact reviewed
-`sha256:de3d12d180462fdb29dd9e7272b69fb8491f94a625e3dcd0ae56a508692d2d80`
-fingerprint. If the key must be replaced, enter it only through:
+1. Invalidate and reauthenticate the Firebase CLI session before reuse. A
+   local CLI diagnostic emitted credential-bearing authentication metadata to
+   the private tool transcript. No credential was copied into repository files,
+   artifacts, logs, or this receipt, but the session must be treated as exposed.
+   Run `firebase logout`, then `firebase login`, and confirm successful login.
+2. In the dedicated OpenAI staging project, enable funded API usage and a
+   non-zero project budget/usage limit sufficient for the bounded Responses
+   smoke. Keep the key restricted to the minimum endpoint permissions required
+   for `/v1/responses`, and confirm project access to `gpt-5.6-sol`.
+
+After Firebase reauthentication, deploy only the final exact reviewed commit
+at or after `aa10db867d348cf8c9c79ce1507b02329511ef01`
+to the explicit staging project and verify both health attestations before
+creating any synthetic data:
+
+```bash
+FUNCTIONS_DISCOVERY_TIMEOUT=120 firebase deploy \
+  --project life-tracker-staging \
+  --only functions:lifeTrackerAiApi
+```
+
+If quota is enabled for the already-bound key, no new secret version is
+required. If the key must be replaced, enter it only through:
 
 ```bash
 firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging

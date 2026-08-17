@@ -41,6 +41,10 @@ The single exported v2 Function is `lifeTrackerAiApi` in `europe-west1`:
 Privileged routes require JSON, a bounded body, an exact allowed Origin when an
 Origin header is present, and `Authorization: Bearer <Firebase ID token>`.
 Errors expose stable classifications and request IDs, not provider/auth details.
+The browser accepts a configured bearer-token destination only when it is the
+canonical `lifeTrackerAiApi` Function for the same public Firebase project that
+owns Auth. Arbitrary HTTPS hosts fail closed; loopback is limited to the exact
+project-bound Functions emulator path in explicit development.
 The Firestore rate limiter is per authenticated UID and shared across serverless
 instances. Fixed windows are deliberately simple and may allow boundary bursts.
 Health returns two independent attestations: a source/configuration fingerprint
@@ -48,6 +52,9 @@ and a runtime-policy digest. The latter binds the configured model, reasoning
 effort, official provider URL, exact CORS allowlist, prompt/schema versions,
 timeouts, tool-loop limits, and output limit. Only its digest plus safe
 model/version labels are public; origins and provider URL are not echoed.
+Successful Responses metadata records the configured/requested model separately
+from the provider-returned model identity; the live staging harness requires
+both to match the reviewed model.
 
 ## Authorized state and tools
 
@@ -129,9 +136,12 @@ production Firebase project.
 
 `build:static` always performs a fresh GitHub Pages export, clears OpenAI
 variables, embeds the current public Git commit, and never reuses an existing
-`out/` directory as evidence. Static and staging browser gates assert that
-commit marker; a stale reused frontend process fails before staging identities
-or fixture data are created.
+`out/` directory as evidence. It then runs the output-inclusive static security
+scan under the same public build configuration. Static and staging browser
+gates assert the commit marker. The body also attests the exact non-secret AI
+backend endpoint, which staging binds to its reviewed Function before identities
+or fixture data are created. A stale or differently configured frontend fails
+closed.
 
 ## Secrets and configuration
 
@@ -249,7 +259,10 @@ firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
    these deployed TTL policies.
 
 9. Set the GitHub Pages repository variable `NEXT_PUBLIC_AI_API_BASE_URL` to
-   the verified Function URL, then use the existing reviewed Pages workflow.
+   exactly
+   `https://europe-west1-life-tracker-12000.cloudfunctions.net/lifeTrackerAiApi`,
+   then use the existing reviewed Pages workflow. Any other host, project,
+   path, query, credentials, or fragment is rejected before export.
 
 CORS cannot isolate one GitHub Pages project path from another project under
 the same `https://francescopuglia.github.io` origin. Treat every page on that
