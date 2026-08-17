@@ -21,6 +21,7 @@ import type {
   WeeklyPlanDraft,
   WeekDay,
 } from './types';
+import { containsCanonicalWpiKey } from './semanticMarker';
 import { instantIntervalIsPositive, timeToMinutes } from './timeUtils';
 
 // ============================================================================
@@ -532,12 +533,6 @@ function resolveDraftBlockDates(
     throw new Error(`Invalid wall-clock interval for draft block "${block.id}".`);
   }
   return { startTime, endTime };
-}
-
-function containsCanonicalWpiKey(notes: string | undefined, key: string): boolean {
-  if (!notes) return false;
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|\\r?\\n)[ \\t]*WPI_KEY:\\s*${escaped}[ \\t]*(?:\\r?\\n|$)`).test(notes);
 }
 
 function toIsoDate(v: Date | string): string {

@@ -262,6 +262,38 @@ describe('AIInputBarV2 secure client flow', () => {
     expect((await screen.findAllByText('Rollback completato')).length).toBeGreaterThan(0);
   });
 
+  it('renders the authoritative rolled-back state when apply reconciliation observes a prior rollback', async () => {
+    mocks.requestAIChat.mockResolvedValueOnce({
+      message: 'Anteprima pronta',
+      plan: minimalPlan(),
+    });
+    mocks.applyAIPlan.mockResolvedValueOnce({
+      ...validActionResult(),
+      message: 'Rollback già completato',
+      status: 'rolled_back',
+      idempotentReplay: true,
+      rollback: undefined,
+      receipt: {
+        ...validActionResult().receipt,
+        status: 'rolled_back',
+        rollbackAvailable: false,
+        rollbackExpiresAt: null,
+      },
+    });
+    render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Riconcilia il piano' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
+
+    expect(await screen.findByText('Rollback già completato')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-plan-plan_123')).toHaveTextContent('rolled_back');
+    expect(screen.getByText('Rollback completato')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Annulla modifiche' })).not.toBeInTheDocument();
+  });
+
   it('marks a stale preview unusable without reporting the backend offline', async () => {
     mocks.requestAIChat.mockResolvedValueOnce({
       message: 'Anteprima pronta',

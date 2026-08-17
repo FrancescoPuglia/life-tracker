@@ -125,6 +125,9 @@ export class SchedulingService {
     if (current && isProtectedTimeBlock(current)) {
       throw new DomainError('FORBIDDEN', 'Executed, in-progress, fixed, or locked TimeBlocks cannot be changed by AI.');
     }
+    if (current && !isActiveScheduleTimeBlock(current)) {
+      throw new DomainError('FORBIDDEN', 'Cancelled TimeBlock history cannot be changed or reactivated by AI.');
+    }
     if (current) assertSingleCalendarDayBlock(current, args.timezone);
     if (
       args.action === 'move'
@@ -260,6 +263,9 @@ export class SchedulingService {
       if (protectedMatch && isProtectedTimeBlock(protectedMatch)) {
         conflicts.push(`Protected time block '${block.id}' cannot be replaced.`);
       }
+      if (protectedMatch && !isActiveScheduleTimeBlock(protectedMatch)) {
+        conflicts.push(`Cancelled time block '${block.id}' is immutable history and its ID cannot be reused.`);
+      }
     }
 
     const targetIds = new Set(activeExisting.map((record) => record.id));
@@ -288,6 +294,7 @@ export class SchedulingService {
     for (const block of normalized) {
       const current = existingById.get(block.id);
       if (current && isProtectedTimeBlock(current)) continue;
+      if (current && !isActiveScheduleTimeBlock(current)) continue;
       const generatedNotes = wpi.generatedNotes[block.id];
       const values = scheduleValues(block.input, generatedNotes, current);
       operations.push({

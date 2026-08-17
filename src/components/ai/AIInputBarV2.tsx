@@ -467,7 +467,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       if (!requestStillOwned()) return;
       const nextPlan: AIPlanPreview = {
         ...plan,
-        status: action === 'apply' ? 'applied' : 'rolled_back',
+        status: result.status,
       };
       setMessages((previous) => previous.map((message) => (
         message.id === messageId

@@ -203,10 +203,13 @@ async function requestPlanAction(
   const data = await authenticatedRequest(path, { body: { ...body } });
   try {
     const result = parseLifePlanActionResponse(data);
+    const authoritativeRollbackReplay = expected.status === 'applied'
+      && result.status === 'rolled_back'
+      && result.idempotentReplay;
     if (
       result.planId !== expected.planId
       || result.hash !== expected.hash
-      || result.status !== expected.status
+      || (result.status !== expected.status && !authoritativeRollbackReplay)
       || (expected.executionId !== undefined && result.executionId !== expected.executionId)
     ) {
       throw new Error('response binding mismatch');

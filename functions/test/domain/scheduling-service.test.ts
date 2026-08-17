@@ -472,6 +472,29 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect(plan.warnings.some((message) => /overload|sovraccarico/i.test(message))).toBe(false);
     expect(plan.operations.some((operation) => operation.entityId === 'cancelled-history')).toBe(false);
     expect(await repository.getEntity(UID, 'timeBlocks', 'cancelled-history')).not.toBeNull();
+
+    await expect(domain.scheduling.previewTimeBlockChange(context(UID, 'cancelled-history-focused'), {
+      action: 'update',
+      timezone: 'Europe/Rome',
+      block: block({
+        id: 'cancelled-history',
+        start: '2026-08-17T07:00:00.000Z',
+        end: '2026-08-17T09:00:00.000Z',
+      }),
+      reason: 'Cancelled history must remain immutable.',
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    await expect(domain.scheduling.replaceDaySchedule(context(UID, 'cancelled-history-reuse'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'cancelled-history',
+        start: '2026-08-17T07:00:00.000Z',
+        end: '2026-08-17T08:00:00.000Z',
+      })],
+      reason: 'A replacement cannot reactivate a cancelled identifier.',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await repository.getEntity(UID, 'timeBlocks', 'cancelled-history'))?.status).toBe('cancelled');
   });
 
   it('clips a long-running protected commitment to the requested WPI week for capacity', async () => {

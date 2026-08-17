@@ -84,6 +84,15 @@ describe('extractWpiKey / parseWpiKey', () => {
     expect(extractWpiKey('')).toBeNull();
     expect(extractWpiKey('no key in this string')).toBeNull();
     expect(extractWpiKey('WPI_KEY: not-a-wpi-format')).toBeNull();
+    expect(extractWpiKey('ordinary text WPI_KEY: wpi:forged:block')).toBeNull();
+    expect(extractWpiKey('WPI_KEY: wpi:forged:block trailing text')).toBeNull();
+  });
+
+  it('accepts a canonical standalone marker with CRLF or CR line endings', () => {
+    expect(extractWpiKey('header\r\n WPI_KEY: wpi:draft_crlf:block_1 \r\nfooter'))
+      .toBe('wpi:draft_crlf:block_1');
+    expect(extractWpiKey('header\rWPI_KEY: wpi:draft_cr:block_2\rfooter'))
+      .toBe('wpi:draft_cr:block_2');
   });
 
   it('parseWpiKey splits draftId and blockId', () => {

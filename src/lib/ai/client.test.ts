@@ -228,6 +228,28 @@ describe('authenticated AI client', () => {
     );
   });
 
+  it('accepts an authoritative rolled-back apply replay but rejects a fresh status mismatch', async () => {
+    const rolledBackReplay = validActionResult({
+      status: 'rolled_back',
+      rollback: false,
+      idempotentReplay: true,
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(rolledBackReplay))
+      .mockResolvedValueOnce(jsonResponse({
+        ...rolledBackReplay,
+        idempotentReplay: false,
+      }));
+
+    await expect(applyAIPlan(validPlan(), 'idem_1234567890123456')).resolves.toMatchObject({
+      status: 'rolled_back',
+      idempotentReplay: true,
+    });
+    await expect(applyAIPlan(validPlan(), 'idem_1234567890123456')).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+  });
+
   it('rejects invalid plan identifiers before network access', async () => {
     await expect(applyAIPlan({ ...validPlan(), id: '../cross-user' }, 'idem_1234567890123456')).rejects.toMatchObject({
       code: 'invalid_request',
@@ -300,6 +322,7 @@ function validPlan(): AIPlanPreview {
 function validActionResult(options: {
   status?: 'applied' | 'rolled_back';
   rollback?: boolean;
+  idempotentReplay?: boolean;
 } = {}) {
   const status = options.status ?? 'applied';
   const rollback = options.rollback ?? true;
@@ -309,7 +332,7 @@ function validActionResult(options: {
     planId: 'plan_123',
     hash: 'b'.repeat(64),
     status,
-    idempotentReplay: false,
+    idempotentReplay: options.idempotentReplay ?? false,
     verified: true,
     receipt: {
       executionId: 'execution_123',

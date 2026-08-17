@@ -11,6 +11,7 @@
 // `loadWeeklyPlanDraft` from `./draftStore`, which itself is SSR-safe.
 
 import { loadWeeklyPlanDraft } from './draftStore';
+import { extractCanonicalWpiKey } from './semanticMarker';
 import type { WeekDay, WeeklyPlanDraft } from './types';
 
 // ============================================================================
@@ -101,15 +102,10 @@ export interface WpiAnalyticsResult {
 // WPI KEY PARSING
 // ============================================================================
 
-// Matches the line stamped by commitDraft.ts:
-//   WPI_KEY: wpi:${draft.id}:${block.id}
-const WPI_KEY_LINE_RE = /WPI_KEY:\s*(wpi:[A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+)/;
 const WPI_KEY_PARSE_RE = /^wpi:([^:\s]+):([^:\s]+)$/;
 
 export function extractWpiKey(notes?: string): string | null {
-  if (!notes) return null;
-  const m = notes.match(WPI_KEY_LINE_RE);
-  return m ? m[1] : null;
+  return extractCanonicalWpiKey(notes);
 }
 
 export function parseWpiKey(key: string): WpiParsedKey | null {
