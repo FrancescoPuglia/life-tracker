@@ -43,6 +43,12 @@ The Function binds two secrets with Firebase `defineSecret`:
 - `AI_CAPABILITY_SIGNING_SECRET`: at least 32 random bytes for approval and
   rollback capabilities.
 
+Documentation placeholder only — never replace this in a tracked file:
+
+```dotenv
+OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE
+```
+
 After selecting the intended non-production/staging Firebase project, a human
 operator sets them interactively:
 
@@ -58,6 +64,9 @@ The non-secret `defineString` parameters are:
 
 - `OPENAI_MODEL` (backend-configurable model);
 - `OPENAI_REASONING_EFFORT`;
+- `OPENAI_BASE_URL` (defaults to the official OpenAI API; production rejects
+  non-official hosts, while the emulator may use loopback for deterministic
+  tests);
 - `AI_ALLOWED_ORIGINS` (comma-separated exact HTTPS origins plus explicit
   loopback development origins).
 
@@ -94,7 +103,9 @@ firebase emulators:start --only auth,firestore,functions --project PROJECT_ID
 ```
 
 Automated tests inject a deterministic fake Responses transport and make no
-live OpenAI calls.
+live OpenAI calls. Production Responses requests use `store: false`; Life
+Tracker persists only its own bounded plan/audit metadata, not hosted response
+state.
 
 ## Static frontend verification
 
@@ -103,6 +114,7 @@ GITHUB_PAGES=true \
 NEXT_PUBLIC_AI_API_BASE_URL=https://europe-west1-PROJECT_ID.cloudfunctions.net/lifeTrackerAiApi \
 npm run build
 npm run check:static-security -- --include-output
+npm run test:e2e:static
 ```
 
 The security check rejects legacy local AI routes, provider-key names, direct
@@ -124,8 +136,20 @@ Firestore Rules are a separate high-impact deployment:
 firebase deploy --project PROJECT_ID --only firestore:rules
 ```
 
+The proposal-snapshot retention policy and required Firestore index are also a
+separate deployment:
+
+```bash
+firebase deploy --project PROJECT_ID --only firestore:indexes
+```
+
 Do not combine these commands implicitly and do not deploy from an unreviewed
 working tree.
+
+CORS is origin-based, not path-based. All projects hosted below
+`https://francescopuglia.github.io` share one browser origin and must therefore
+be treated as mutually trusted. A dedicated custom origin is the stronger
+production isolation option.
 
 ## Current MCP boundary
 
@@ -134,7 +158,18 @@ disabled by default and has no remote transport in this branch. It exposes only
 bounded read tools when explicitly enabled. Proposal, apply, rollback, and raw
 database operations remain unavailable. A future remote MCP server must add a
 reviewed authentication transport without creating a second business-logic or
-write-authority path.
+write-authority path. Official OpenAI plugin documentation describes MCP tools
+that may read information or take actions, but the public documentation checked
+for this release does not establish availability for this owner's current plan.
+No MCP capability is enabled on that assumption.
+
+Official references:
+
+- [MCP server concepts](https://developers.openai.com/plugins/concepts/mcp-server)
+- [Tool design](https://developers.openai.com/plugins/plan/tools)
+- [Authentication](https://developers.openai.com/plugins/build/auth)
+- [Responses API MCP and connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
+- [OpenAI API data controls](https://developers.openai.com/api/docs/guides/your-data)
 
 ## Incident note
 

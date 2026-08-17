@@ -21,9 +21,10 @@ data, and any mitigation already attempted.
 - Local Functions emulation may use an ignored `functions/.secret.local` file.
   Never commit that file or paste its contents into test output.
 
-The repository intentionally contains no secret value or identifying key
-prefix. If a credential was ever exposed, revoke it at the provider; deleting
-it from the current tree is not sufficient.
+The repository intentionally contains no usable secret value. Documentation
+may contain an unmistakable non-secret placeholder. If a credential was ever
+exposed, revoke it at the provider; deleting it from the current tree is not
+sufficient.
 
 ## Rotation procedure
 

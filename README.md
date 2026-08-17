@@ -35,8 +35,8 @@ Full architecture, safety model, data flow and roadmap: [`docs/WEEKLY_PLANNING_I
 
 ## 📋 Prerequisites
 
-- **Node.js**: 18.x or higher
-- **npm**: 9.x or higher
+- **Node.js**: 22.x
+- **npm**: 10.x or compatible with the checked-in lockfiles
 - **Firebase Project**: (optional, for production)
 - **Firebase CLI + Java 21**: for emulator-backed Rules and transaction tests
 - **OpenAI project key**: optional for a separately approved live backend; never needed for builds or automated tests
@@ -48,7 +48,7 @@ Full architecture, safety model, data flow and roadmap: [`docs/WEEKLY_PLANNING_I
 ```bash
 git clone https://github.com/your-username/life-tracker.git
 cd life-tracker
-npm install
+npm ci
 ```
 
 ### 2. Environment Variables
@@ -66,7 +66,7 @@ See `.env.local.example`, [AI_SETUP_GUIDE.md](AI_SETUP_GUIDE.md), and [SECURITY.
 
 ```bash
 npm run dev  # Development at http://localhost:3000
-npm run build && npm start  # Production
+GITHUB_PAGES=true npm run build  # Static production export in out/
 ```
 
 ## 📜 Scripts
@@ -81,6 +81,8 @@ npm run build && npm start  # Production
 | `npm run test:rules` | Firestore Rules emulator tests |
 | `npm run test:functions:emulator` | Firestore transaction integration tests |
 | `npm run test:auth:emulator` | Firebase Auth boundary integration tests |
+| `npm run test:e2e:emulator` | Full local Auth/Firestore/Functions/UI integration |
+| `npm run test:e2e:static` | Serve and verify the generated static export |
 | `npm run check:static-security` | Browser/static AI security scan |
 | `npm --prefix functions run test:run` | Functions unit tests |
 | `npm --prefix functions run build` | Build the Functions backend |

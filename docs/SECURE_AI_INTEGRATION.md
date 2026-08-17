@@ -3,7 +3,9 @@
 Status: feature-branch implementation; no production deployment has been
 performed. The recovered working state was checkpointed at
 `3c2d58570bd5740b6ca41d67e0533b71ce0c6b0d` from base
-`5ea328066d207d695fcf689015fd610e3751f457`.
+`5ea328066d207d695fcf689015fd610e3751f457`. The locally verified code
+candidate before release-documentation changes is
+`a10fa6923e89899be647f4b97f437672929ce42c`.
 
 ## Trust and control flow
 
@@ -108,13 +110,17 @@ npm run test:auth:emulator
 npm run test:e2e:emulator
 GITHUB_PAGES=true NEXT_PUBLIC_AI_API_BASE_URL=https://europe-west1-PROJECT_ID.cloudfunctions.net/lifeTrackerAiApi npm run build
 npm run check:static-security -- --include-output
+npm run test:e2e:static
 ```
 
 Automated tests use synthetic data, fake Responses transports, and demo
-emulators. The Playwright gate signs in through the Auth emulator, exercises
-desktop and mobile UI flows, and intercepts only the fake AI transport. Its
-screenshots/traces are written to ignored `test-results/` evidence. Tests must
-never call a live model or production Firebase project.
+emulators. The Playwright gate has both browser-fixture coverage and a real
+local boundary path: the latter signs in through the Auth emulator and calls
+the built HTTPS Function, Firestore emulator, and a loopback fake
+OpenAI-compatible Responses transport. It exercises desktop and mobile UI
+flows without a provider key or live model. Screenshots/traces are written to
+ignored `test-results/` evidence. Tests must never call a live model or
+production Firebase project.
 
 ## Secrets and configuration
 
@@ -130,21 +136,27 @@ firebase functions:secrets:set AI_CAPABILITY_SIGNING_SECRET
 ```
 
 No live OpenAI smoke test may use the historical exposed key. Human revocation
-and a rotated backend secret are prerequisites.
+and a rotated backend secret are prerequisites. `OPENAI_BASE_URL` defaults to
+`https://api.openai.com/v1`; production rejects another provider host and only
+the Functions emulator may use loopback. Responses requests set `store: false`.
 
 ## MCP boundary
 
 The feature-disabled `ReadOnlyMcpDomainAdapter` reuses the same registry and
 executor. It can expose only authenticated read tools; it has no remote network
-transport in this branch. OpenAI's current ChatGPT developer-mode documentation
-allows Pro users to build Apps SDK apps and connect read/fetch MCP servers, while
-full MCP write/modify support is currently limited to eligible workspace plans.
-Accordingly, MCP writes remain disabled. A future adapter must reuse this same
-approval/transaction service and must not create a second privileged path.
+transport in this branch. Official OpenAI plugin documentation describes tools
+that can read information or take actions and requires the server to enforce
+its own authentication and behavior. The public documentation checked for this
+release does not establish availability for the owner's current ChatGPT plan.
+Accordingly, no remote MCP integration is enabled and MCP writes remain
+disabled. A future adapter must reuse this same approval/transaction service
+and must not create a second privileged path.
 
 References:
 
-- [OpenAI: Developer mode, apps, and full MCP connectors](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt-beta)
+- [OpenAI MCP server concepts](https://developers.openai.com/plugins/concepts/mcp-server)
+- [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth)
+- [OpenAI Responses API MCP and connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
 - [OpenAI API data controls](https://developers.openai.com/api/docs/guides/your-data#default-usage-policies-by-endpoint)
 - [Firebase parameterized configuration and secrets](https://firebase.google.com/docs/functions/config-env)
 - [Firebase function deployment](https://firebase.google.com/docs/functions/manage-functions)
@@ -168,8 +180,18 @@ References:
    firebase deploy --project PROJECT_ID --only firestore:rules
    ```
 
-8. Set the GitHub Pages repository variable `NEXT_PUBLIC_AI_API_BASE_URL` to
+8. Deploy the reviewed Firestore index/TTL configuration separately:
+
+   ```bash
+   firebase deploy --project PROJECT_ID --only firestore:indexes
+   ```
+
+9. Set the GitHub Pages repository variable `NEXT_PUBLIC_AI_API_BASE_URL` to
    the verified Function URL, then use the existing reviewed Pages workflow.
+
+CORS cannot isolate one GitHub Pages project path from another project under
+the same `https://francescopuglia.github.io` origin. Treat every page on that
+origin as trusted or move Life Tracker to a dedicated origin before production.
 
 ## Rollback
 
@@ -184,3 +206,6 @@ References:
   rollback.
 - Rules: redeploy the last known-good reviewed `firestore.rules` only after
   emulator verification. Never use production data to test rollback.
+- Index/TTL configuration: redeploy the last known-good reviewed
+  `firestore.indexes.json`; removing a TTL policy is a separate data-retention
+  decision and must not be used as an application rollback shortcut.
