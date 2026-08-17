@@ -101,6 +101,37 @@ describe('bounded canonical Life Tracker state', () => {
     ]));
   });
 
+  it('honors persisted goal allocation and Session contribution weights', async () => {
+    const repository = new InMemoryRepository();
+    repository.seed(UID, 'goals', [
+      { id: 'goal-weighted-a', title: 'Primary' },
+      { id: 'goal-weighted-b', title: 'Secondary' },
+    ]);
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'weighted-block',
+      goalIds: ['goal-weighted-a', 'goal-weighted-b'],
+      goalAllocation: { 'goal-weighted-a': 90, 'goal-weighted-b': 10 },
+      startTime: '2026-08-18T08:00:00.000Z',
+      endTime: '2026-08-18T09:00:00.000Z',
+      status: 'planned',
+    }]);
+    repository.seed(UID, 'sessions', [{
+      id: 'weighted-session',
+      timeBlockId: 'weighted-block',
+      goalIds: ['goal-weighted-a', 'goal-weighted-b'],
+      goalContribution: { 'goal-weighted-a': 25, 'goal-weighted-b': 75 },
+      startTime: '2026-08-18T08:00:00.000Z',
+      endTime: '2026-08-18T09:00:00.000Z',
+      duration: 3_600,
+      status: 'completed',
+    }]);
+    const alignment = await new ReadService(repository).goalAlignment(context(), RANGE);
+    expect(alignment.goals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ goalId: 'goal-weighted-a', plannedMinutes: 54, actualMinutes: 15 }),
+      expect.objectContaining({ goalId: 'goal-weighted-b', plannedMinutes: 6, actualMinutes: 45 }),
+    ]));
+  });
+
   it('clips planned, Session, and explicit actual intervals to the requested range', async () => {
     const repository = new InMemoryRepository();
     repository.seed(UID, 'timeBlocks', [
@@ -169,6 +200,27 @@ describe('bounded canonical Life Tracker state', () => {
       items: [],
       truncated: false,
     });
+  });
+
+  it('calculates canonical-state KPIs from the full bounded range, not the truncated display page', async () => {
+    const repository = seededRepository();
+    repository.seed(UID, 'habitLogs', Array.from({ length: 30 }, (_, index) => ({
+      id: `bounded-log-${index}`,
+      habitId: 'habit-1',
+      date: `2026-08-${String(17 + (index % 7)).padStart(2, '0')}T12:00:00.000Z`,
+      completed: true,
+    })));
+    const service = new ReadService(repository, () => new Date('2026-08-19T12:00:00.000Z'));
+    const state = await service.state(context(), {
+      scope: 'range',
+      ...RANGE,
+      perCollectionLimit: 5,
+      includeNotes: false,
+    });
+
+    expect(state.authoritative.habitLogs?.items).toHaveLength(5);
+    expect(state.authoritative.habitLogs?.truncated).toBe(true);
+    expect(state.calculated.kpis.completedHabitLogs).toBe(31);
   });
 
   it('fails closed instead of scanning an unbounded filtered collection', async () => {

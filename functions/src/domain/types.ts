@@ -156,6 +156,8 @@ export interface ChangeSnapshot {
   readonly uid: string;
   readonly planId: string;
   readonly createdAt: string;
+  /** Firestore TTL field; extended to rollback expiry on apply. */
+  readonly purgeAt?: string;
   readonly entries: readonly SnapshotEntry[];
   readonly scopes: readonly ValidationScopeSnapshot[];
   readonly planningPreferencesHash: string | null;

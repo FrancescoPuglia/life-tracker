@@ -245,6 +245,77 @@ describe('Goal Architect deterministic backend adapter', () => {
       projectId: 'project-original',
     });
   });
+
+  it('preserves the GAI marker and normalizes completedAt across focused status changes', async () => {
+    const { repository, domain } = harness([
+      'plan-task-complete',
+      'execution-task-complete',
+      'plan-task-reopen',
+      'execution-task-reopen',
+    ]);
+    repository.seed(UID, 'goals', [{
+      id: 'goal-existing', title: 'Existing goal', domainId: 'domain-1', status: 'active', priority: 'high',
+    }]);
+    repository.seed(UID, 'projects', [{
+      id: 'project-existing', name: 'Existing project', goalId: 'goal-existing', domainId: 'domain-1',
+    }]);
+    repository.seed(UID, 'tasks', [{
+      id: 'task-existing',
+      title: 'Existing task',
+      description: 'Original description\n\nGAI_KEY: task:0123456789abcdef01234567',
+      projectId: 'project-existing',
+      goalId: 'goal-existing',
+      domainId: 'domain-1',
+      status: 'pending',
+      priority: 'high',
+      estimatedMinutes: 45,
+    }]);
+    const base = {
+      action: 'update' as const,
+      id: 'task-existing',
+      title: 'Existing task',
+      priority: 'high' as const,
+      projectId: 'project-existing',
+      goalId: 'goal-existing',
+      domainId: 'domain-1',
+      dueDate: null,
+      estimatedMinutes: 45,
+    };
+
+    const complete = await domain.goalArchitect.previewTaskChange(context(UID, 'task-complete'), {
+      ...base,
+      description: 'Completed safely GAI_KEY: task:ffffffffffffffffffffffff',
+      status: 'completed',
+      reason: 'Complete through deterministic Task normalization.',
+    });
+    await domain.changePlans.applyPlan(context(UID, 'task-complete-apply'), {
+      planId: complete.id,
+      approvalCapability: complete.approval.capability,
+      idempotencyKey: 'focused-task-complete-key-01',
+    });
+    expect(await repository.getEntity(UID, 'tasks', 'task-existing')).toMatchObject({
+      description: 'Completed safely\n\nGAI_KEY: task:0123456789abcdef01234567',
+      status: 'completed',
+      completedAt: '2026-08-16T12:00:00.000Z',
+    });
+
+    const reopen = await domain.goalArchitect.previewTaskChange(context(UID, 'task-reopen'), {
+      ...base,
+      description: 'Reopened safely',
+      status: 'pending',
+      reason: 'Reopen through deterministic Task normalization.',
+    });
+    await domain.changePlans.applyPlan(context(UID, 'task-reopen-apply'), {
+      planId: reopen.id,
+      approvalCapability: reopen.approval.capability,
+      idempotencyKey: 'focused-task-reopen-key-001',
+    });
+    expect(await repository.getEntity(UID, 'tasks', 'task-existing')).toMatchObject({
+      description: 'Reopened safely\n\nGAI_KEY: task:0123456789abcdef01234567',
+      status: 'pending',
+      completedAt: null,
+    });
+  });
 });
 
 function harness(ids: readonly string[] = ['plan-default', 'execution-default']) {

@@ -71,10 +71,10 @@ function detectOverlaps(
       for (let j = i + 1; j < sorted.length; j++) {
         const a = sorted[i];
         const b = sorted[j];
-        const aS = timeToMinutes(a.startTime);
-        const aE = timeToMinutes(a.endTime);
-        const bS = timeToMinutes(b.startTime);
-        const bE = timeToMinutes(b.endTime);
+        const aS = blockInstantOrWallMinutes(a, 'start');
+        const aE = blockInstantOrWallMinutes(a, 'end');
+        const bS = blockInstantOrWallMinutes(b, 'start');
+        const bE = blockInstantOrWallMinutes(b, 'end');
         // Once b starts after a ends, no further j can overlap (sorted).
         if (bS >= aE) break;
         if (Math.max(aS, bS) < Math.min(aE, bE)) {
@@ -110,7 +110,8 @@ function detectInsufficientBuffers(
       const previous = sorted[index - 1];
       const current = sorted[index];
       if (!previous || !current) continue;
-      const gap = timeToMinutes(current.startTime) - timeToMinutes(previous.endTime);
+      const gap = blockInstantOrWallMinutes(current, 'start')
+        - blockInstantOrWallMinutes(previous, 'end');
       // Overlaps have their own stronger error; this validator covers only a
       // non-negative gap that is shorter than the persisted user constraint.
       if (gap < 0 || gap >= required) continue;
@@ -323,8 +324,20 @@ function groupByDay(
 
 function sortByStart(blocks: ReadonlyArray<DraftTimeBlock>): DraftTimeBlock[] {
   return [...blocks].sort(
-    (a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime),
+    (a, b) => blockInstantOrWallMinutes(a, 'start') - blockInstantOrWallMinutes(b, 'start'),
   );
+}
+
+function blockInstantOrWallMinutes(
+  block: DraftTimeBlock,
+  edge: 'start' | 'end',
+): number {
+  const instant = edge === 'start' ? block.startInstant : block.endInstant;
+  if (instant) {
+    const value = Date.parse(instant);
+    if (Number.isFinite(value)) return value / 60_000;
+  }
+  return timeToMinutes(edge === 'start' ? block.startTime : block.endTime);
 }
 
 function uniq(xs: ReadonlyArray<string>): string[] {

@@ -111,9 +111,7 @@ export class GoalArchitectService {
       .update(JSON.stringify([args.domainId, args.goalId, args.projectId, normalizedTitle]))
       .digest('hex')
       .slice(0, 24)}`;
-    const description = args.action === 'create'
-      ? [args.description?.trim(), marker].filter(Boolean).join('\n\n')
-      : args.description;
+    const description = taskDescription(args.action, args.description, current, marker);
     const operation: ChangeOperation = {
       op: args.action,
       collection: 'tasks',
@@ -189,6 +187,23 @@ export class GoalArchitectService {
     } while (cursor);
     return output;
   }
+}
+
+const TASK_MARKER_PATTERN = /GAI_KEY: task:[a-f0-9]{24}/g;
+
+function taskDescription(
+  action: PreviewTaskChangeArgs['action'],
+  requested: string | null,
+  current: EntityRecord | null,
+  generatedMarker: string,
+): string | null {
+  const plain = requested?.replace(TASK_MARKER_PATTERN, '').trim() ?? '';
+  const existingMarker = typeof current?.description === 'string'
+    ? current.description.match(TASK_MARKER_PATTERN)?.[0] ?? null
+    : null;
+  const marker = action === 'create' ? generatedMarker : existingMarker;
+  const result = [plain, marker].filter((value): value is string => Boolean(value)).join('\n\n');
+  return result || null;
 }
 
 function goalArchitectValidation(

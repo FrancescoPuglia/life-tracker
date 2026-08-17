@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { capabilityHashMatches } from './capabilities';
+import { entityAfterCreate, entityAfterUpdate } from './entity-mutation';
 import { DomainError } from './errors';
 import {
   hashEntityState,
@@ -259,29 +260,27 @@ export class InMemoryRepository implements AuditableRepository {
         const reference = refKey(operation.collection, operation.id);
         if (operation.op === 'create') {
           if (current) throw new DomainError('CONFLICT', `Entity ${reference} now exists.`);
-          const created = {
-            id: operation.id,
-            ...structuredClone(operation.values),
-            userId: request.uid,
-            _version: 1,
-            createdAt: request.now,
-            updatedAt: request.now,
-          } as EntityRecord;
+          const created = entityAfterCreate(
+            request.uid,
+            operation.collection,
+            operation.id,
+            operation.values,
+            request.now,
+          );
           collection.set(operation.id, created);
           appliedVersions[reference] = 1;
           appliedStateHashes[reference] = hashEntityState(created);
         } else if (operation.op === 'update') {
           if (!current) throw new DomainError('CONFLICT', `Entity ${reference} was removed.`);
-          const version = current._version + 1;
-          const updatedRecord = {
-            ...current,
-            ...structuredClone(operation.values),
-            id: operation.id,
-            _version: version,
-            updatedAt: request.now,
-          };
+          const updatedRecord = entityAfterUpdate(
+            request.uid,
+            operation.collection,
+            current,
+            operation.values,
+            request.now,
+          );
           collection.set(operation.id, updatedRecord);
-          appliedVersions[reference] = version;
+          appliedVersions[reference] = updatedRecord._version;
           appliedStateHashes[reference] = hashEntityState(updatedRecord);
         } else {
           if (!current) throw new DomainError('CONFLICT', `Entity ${reference} was removed.`);

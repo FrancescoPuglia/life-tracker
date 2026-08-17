@@ -7,6 +7,8 @@ interface WpiBlock {
   day: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   startTime: string;
   endTime: string;
+  startInstant?: string;
+  endInstant?: string;
   durationMinutes: number;
   activityType: string;
   energyLevel: string;

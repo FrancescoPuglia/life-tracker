@@ -10,6 +10,7 @@ import {
   type Transaction,
 } from 'firebase-admin/firestore';
 import { capabilityHashMatches } from './capabilities';
+import { entityAfterCreate, entityAfterUpdate } from './entity-mutation';
 import { DomainError } from './errors';
 import {
   hashEntityState,
@@ -323,7 +324,10 @@ export class FirestoreRepository implements AuditableRepository {
         throw new DomainError('CONFLICT', 'Plan already exists.');
       }
       transaction.create(planRef, encodeServer(stored));
-      transaction.create(snapshotRef, encodeServer(snapshot));
+      transaction.create(snapshotRef, {
+        ...encodeServer(snapshot),
+        purgeAt: Timestamp.fromDate(new Date(plan.expiresAt)),
+      });
       transaction.create(approvalRef, encodeServer(approval));
       transaction.create(auditRef, encodeServer(audit));
     });
@@ -431,14 +435,26 @@ export class FirestoreRepository implements AuditableRepository {
         const key = refKey(operation.collection, operation.id);
         if (operation.op === 'create') {
           if (current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
-          const created = entityAfterCreate(request.uid, operation.id, operation.values, request.now);
+          const created = entityAfterCreate(
+            request.uid,
+            operation.collection,
+            operation.id,
+            operation.values,
+            request.now,
+          );
           transaction.create(entityRef, encodeEntity(created));
           appliedVersions[key] = created._version;
           appliedStateHashes[key] = hashEntityState(created);
           afterByKey.set(key, created);
         } else if (operation.op === 'update') {
           if (!current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
-          const updated = entityAfterUpdate(request.uid, current, operation.values, request.now);
+          const updated = entityAfterUpdate(
+            request.uid,
+            operation.collection,
+            current,
+            operation.values,
+            request.now,
+          );
           transaction.set(entityRef, encodeEntity(updated));
           appliedVersions[key] = updated._version;
           appliedStateHashes[key] = hashEntityState(updated);
@@ -516,6 +532,9 @@ export class FirestoreRepository implements AuditableRepository {
       );
 
       transaction.set(planRef, encodeServer(updatedPlan));
+      transaction.update(snapshotRef, {
+        purgeAt: Timestamp.fromDate(new Date(request.rollbackExpiresAt)),
+      });
       transaction.set(approvalRef, encodeServer({
         ...approval,
         status: 'consumed',
@@ -701,6 +720,9 @@ export class FirestoreRepository implements AuditableRepository {
       );
 
       transaction.set(planRef, encodeServer(updatedPlan));
+      transaction.update(snapshotRef, {
+        purgeAt: Timestamp.fromDate(new Date(request.now)),
+      });
       transaction.set(executionRef, encodeServer(updatedExecution));
       transaction.create(auditRef, encodeServer(audit));
       transaction.create(idempotencyRef, encodeServer({
@@ -1106,39 +1128,6 @@ function replayResult(
     result: { ...(result as unknown as PlanActionResult), idempotentReplay: true },
     replay: true,
   };
-}
-
-function entityAfterCreate(
-  uid: string,
-  id: string,
-  values: Readonly<Record<string, unknown>>,
-  now: string,
-): EntityRecord {
-  return {
-    ...clone(values),
-    id,
-    userId: uid,
-    _version: 1,
-    createdAt: now,
-    updatedAt: now,
-  } as EntityRecord;
-}
-
-function entityAfterUpdate(
-  uid: string,
-  current: EntityRecord,
-  values: Readonly<Record<string, unknown>>,
-  now: string,
-): EntityRecord {
-  return {
-    ...clone(current),
-    ...clone(values),
-    id: current.id,
-    userId: uid,
-    _version: current._version + 1,
-    createdAt: current.createdAt,
-    updatedAt: now,
-  } as EntityRecord;
 }
 
 function actionAudit(

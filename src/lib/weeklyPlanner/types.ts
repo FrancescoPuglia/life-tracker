@@ -230,6 +230,9 @@ export interface DraftTimeBlock {
   day: WeekDay;
   startTime: string;
   endTime: string;
+  /** Optional authoritative instants used for DST-safe elapsed geometry. */
+  startInstant?: string;
+  endInstant?: string;
   durationMinutes: number;
   activityType: ActivityType;
   energyLevel: EnergyLevel;

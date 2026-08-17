@@ -183,7 +183,10 @@ export class ReadService {
     const resolved = await Promise.all(entries.map(async ([name, promise]) => [name, await promise] as const));
     const authoritative = Object.fromEntries(resolved);
     const analytics = await this.analytics(context, range);
-    const kpis = calculateKpis(authoritative, analytics);
+    // The displayed entity slices are deliberately small, but KPI values must
+    // describe the full bounded range rather than masquerading as totals over
+    // a truncated page.
+    const kpis = await this.calculateKpiValues(context, range, analytics);
     const versionInput = { preferences, range, authoritative, analytics, kpis };
     return {
       generatedAt: now.toISOString(),
@@ -201,21 +204,29 @@ export class ReadService {
     args: AnalyticsArgs,
   ): Promise<Readonly<{ from: string; to: string; values: Readonly<Record<string, number | null>> }>> {
     assertAuthenticated(context);
+    const analytics = await this.analytics(context, args);
+    const values = await this.calculateKpiValues(context, args, analytics);
+    return { from: args.from, to: args.to, values };
+  }
+
+  private async calculateKpiValues(
+    context: AuthContext,
+    args: AnalyticsArgs,
+    analytics: AnalyticsResult,
+  ): Promise<Readonly<Record<string, number | null>>> {
     const ranged = { ...emptyFilter(), from: args.from, to: args.to };
-    const [analytics, sessions, habits, habitLogs, keyResults] = await Promise.all([
-      this.analytics(context, args),
+    const [sessions, habits, habitLogs, keyResults] = await Promise.all([
       this.readBounded(context.uid, 'sessions', ranged),
       this.readBounded(context.uid, 'habits', emptyFilter()),
       this.readBounded(context.uid, 'habitLogs', ranged),
       this.readBounded(context.uid, 'keyResults', emptyFilter()),
     ]);
-    const values = calculateKpis({
+    return calculateKpis({
       sessions: { items: sessions },
       habits: { items: habits },
       habitLogs: { items: habitLogs },
       keyResults: { items: keyResults },
     }, analytics);
-    return { from: args.from, to: args.to, values };
   }
 
   async detectScheduleConflicts(
@@ -441,47 +452,54 @@ function calculateKpis(
 function groupMinutesByGoal(
   records: readonly EntityRecord[],
   duration: (record: EntityRecord) => number,
-  resolveGoalIds: (record: EntityRecord) => readonly string[] = directGoalIds,
+  resolveGoalShares: (record: EntityRecord) => readonly GoalShare[] = directGoalShares,
 ): Map<string, number> {
   const output = new Map<string, number>();
   for (const record of records) {
-    const ids = resolveGoalIds(record);
-    if (!ids.length) continue;
-    const each = duration(record) / ids.length;
-    for (const id of ids) output.set(id, (output.get(id) ?? 0) + each);
+    const shares = resolveGoalShares(record);
+    if (!shares.length) continue;
+    const minutes = duration(record);
+    for (const { goalId, share } of shares) {
+      output.set(goalId, (output.get(goalId) ?? 0) + minutes * share);
+    }
   }
   return output;
+}
+
+interface GoalShare {
+  readonly goalId: string;
+  readonly share: number;
 }
 
 function createGoalResolver(
   blocks: readonly EntityRecord[],
   tasks: readonly EntityRecord[],
   projects: readonly EntityRecord[],
-): (record: EntityRecord) => readonly string[] {
+): (record: EntityRecord) => readonly GoalShare[] {
   const blocksById = new Map(blocks.map((record) => [record.id, record]));
   const tasksById = new Map(tasks.map((record) => [record.id, record]));
   const projectsById = new Map(projects.map((record) => [record.id, record]));
   return (record) => {
-    const direct = directGoalIds(record);
+    const direct = directGoalShares(record);
     if (direct.length) return direct;
     const linkedBlock = typeof record.timeBlockId === 'string'
       ? blocksById.get(record.timeBlockId)
       : null;
     if (linkedBlock) {
-      const linkedGoals = directGoalIds(linkedBlock);
+      const linkedGoals = directGoalShares(linkedBlock);
       if (linkedGoals.length) return linkedGoals;
       const linkedTask = typeof linkedBlock.taskId === 'string'
         ? tasksById.get(linkedBlock.taskId)
         : null;
-      const linkedTaskGoals = linkedTask ? directGoalIds(linkedTask) : [];
+      const linkedTaskGoals = linkedTask ? directGoalShares(linkedTask) : [];
       if (linkedTaskGoals.length) return linkedTaskGoals;
     }
     const task = typeof record.taskId === 'string' ? tasksById.get(record.taskId) : null;
     if (task) {
-      const taskGoals = directGoalIds(task);
+      const taskGoals = directGoalShares(task);
       if (taskGoals.length) return taskGoals;
       const taskProject = typeof task.projectId === 'string' ? projectsById.get(task.projectId) : null;
-      const taskProjectGoals = taskProject ? directGoalIds(taskProject) : [];
+      const taskProjectGoals = taskProject ? directGoalShares(taskProject) : [];
       if (taskProjectGoals.length) return taskProjectGoals;
     }
     const projectId = typeof record.projectId === 'string'
@@ -490,8 +508,41 @@ function createGoalResolver(
         ? linkedBlock.projectId
         : null;
     const project = projectId ? projectsById.get(projectId) : null;
-    return project ? directGoalIds(project) : [];
+    return project ? directGoalShares(project) : [];
   };
+}
+
+function directGoalShares(record: EntityRecord): readonly GoalShare[] {
+  const ids = directGoalIds(record);
+  if (!ids.length) return [];
+  const allocation = asFiniteAllocation(record.goalContribution) ?? asFiniteAllocation(record.goalAllocation);
+  if (allocation) {
+    const entries = ids
+      .map((goalId) => ({ goalId, share: (allocation[goalId] ?? 0) / 100 }))
+      .filter(({ share }) => share > 0);
+    const total = entries.reduce((sum, entry) => sum + entry.share, 0);
+    if (entries.length && total <= 1.000_001) return entries;
+  }
+  const share = 1 / ids.length;
+  return ids.map((goalId) => ({ goalId, share }));
+}
+
+function asFiniteAllocation(value: unknown): Readonly<Record<string, number>> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (!entries.length || entries.length > 100) return null;
+  const result: Record<string, number> = {};
+  for (const [goalId, allocation] of entries) {
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(goalId)
+      || typeof allocation !== 'number'
+      || !Number.isFinite(allocation)
+      || allocation < 0
+      || allocation > 100
+    ) return null;
+    result[goalId] = allocation;
+  }
+  return result;
 }
 
 function directGoalIds(record: EntityRecord): readonly string[] {

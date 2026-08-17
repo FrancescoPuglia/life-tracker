@@ -623,6 +623,8 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     expect(rolledBack.status).toBe('rolled_back');
     expect(rolledBack.verified).toBe(true);
     expect((await firestore.doc(`users/${owner}/timeBlocks/block-1`).get()).data()?.title).toBe('Original block');
+    expect((await firestore.doc(`aiSnapshots/${owner}_${preview.id}`).get()).data()?.purgeAt.toDate().toISOString())
+      .toBe(START);
 
     const replay = await service.rollbackExecution(context(owner, 'rollback-retry'), {
       executionId: applied.executionId,

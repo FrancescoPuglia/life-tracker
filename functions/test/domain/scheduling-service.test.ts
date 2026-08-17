@@ -535,6 +535,70 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     });
   });
 
+  it('enforces buffers by elapsed instants across the Europe/Rome spring-forward gap', async () => {
+    const { repository, domain } = harness();
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '00:00', end: '23:59' },
+      maxDailyPlannedMinutes: 600,
+      maxWeeklyPlannedMinutes: 3_000,
+      minBufferMinutes: 15,
+      maxConsecutiveHighEnergyBlocks: 3,
+    });
+    const plan = await domain.scheduling.replaceDaySchedule(context(UID, 'dst-buffer-preview'), {
+      date: '2026-03-29',
+      timezone: 'Europe/Rome',
+      blocks: [
+        block({
+          id: 'before-spring-gap',
+          start: '2026-03-29T00:00:00.000Z',
+          end: '2026-03-29T00:55:00.000Z',
+        }),
+        block({
+          id: 'after-spring-gap',
+          start: '2026-03-29T01:05:00.000Z',
+          end: '2026-03-29T02:05:00.000Z',
+        }),
+      ],
+      reason: 'A 10-minute elapsed gap must not look like a 70-minute wall-clock gap.',
+    });
+    expect(plan.conflicts.some((message) => /10 minuti su 15/i.test(message))).toBe(true);
+  });
+
+  it('does not invent an overlap across the Europe/Rome repeated fallback hour', async () => {
+    const { repository, domain } = harness();
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '00:00', end: '23:59' },
+      maxDailyPlannedMinutes: 600,
+      maxWeeklyPlannedMinutes: 3_000,
+      minBufferMinutes: 15,
+      maxConsecutiveHighEnergyBlocks: 3,
+    });
+    const plan = await domain.scheduling.replaceDaySchedule(context(UID, 'dst-repeat-preview'), {
+      date: '2026-10-25',
+      timezone: 'Europe/Rome',
+      blocks: [
+        block({
+          id: 'before-repeat',
+          start: '2026-10-25T00:00:00.000Z',
+          end: '2026-10-25T00:55:00.000Z',
+        }),
+        block({
+          id: 'after-repeat',
+          start: '2026-10-25T01:10:00.000Z',
+          end: '2026-10-25T02:10:00.000Z',
+        }),
+      ],
+      reason: 'A repeated local hour must retain its 15-minute elapsed buffer.',
+    });
+    expect(plan.conflicts).toEqual([]);
+  });
+
   it('rejects timezone and cross-user hierarchy references rather than trusting model input', async () => {
     const { domain } = harness();
     await expect(domain.scheduling.replaceDaySchedule(context(UID, 'timezone-mismatch'), {

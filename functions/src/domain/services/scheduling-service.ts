@@ -519,6 +519,8 @@ function buildWpiDraft(
       // values preserve geometry for WPI's pure half-open overlap detector.
       startTime: `${String(start.hour).padStart(2, '0')}:${String(start.minute).padStart(2, '0')}`,
       endTime: `${String(end.hour).padStart(2, '0')}:${String(end.minute).padStart(2, '0')}`,
+      startInstant: block.input.start,
+      endInstant: block.input.end,
       durationMinutes: Math.round((block.endMs - block.startMs) / 60_000),
       activityType: block.input.activityType,
       energyLevel: block.input.energyLevel,
@@ -622,6 +624,8 @@ function protectedWpiBlocks(
           // WPI does not accept 24:00. Exact overlap protection remains in
           // detectProtectedConflicts; 23:59 is only its calendar display edge.
           endTime: Temporal.Instant.compare(segmentEnd, nextMidnight) === 0 ? '23:59' : hhmm(localEnd),
+          startInstant: cursor.toString(),
+          endInstant: segmentEnd.toString(),
           durationMinutes: Math.max(1, Math.round(segmentEnd.since(cursor).total({ unit: 'minutes' }))),
           activityType: 'maintenance',
           energyLevel: 'low',
