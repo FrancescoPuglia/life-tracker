@@ -9,6 +9,7 @@ import {
   hashResultState,
   hashValidationScopeRecords,
   validationScopeKey,
+  verifySnapshotPlanBinding,
   verifyStoredPlan,
 } from './integrity';
 import type {
@@ -401,6 +402,7 @@ export class InMemoryRepository implements AuditableRepository {
       const snapshot = this.snapshots.get(key);
       if (!plan || !snapshot) throw new DomainError('NOT_FOUND', 'Change plan not found.');
       verifyStoredPlan(plan);
+      verifySnapshotPlanBinding(plan, snapshot);
       if (plan.uid !== request.uid || snapshot.uid !== request.uid) {
         throw new DomainError('FORBIDDEN', 'Plan ownership mismatch.');
       }

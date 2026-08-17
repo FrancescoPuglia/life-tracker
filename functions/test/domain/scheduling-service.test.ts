@@ -298,6 +298,53 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect(plan.assumptions).toEqual([]);
   });
 
+  it('grounds a day preview in the full persisted week and binds that capacity scope', async () => {
+    const { repository, domain } = harness(['plan-full-week-capacity', 'execution-full-week-capacity']);
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '07:00', end: '22:00' },
+      maxDailyPlannedMinutes: 600,
+      maxWeeklyPlannedMinutes: 300,
+      minBufferMinutes: 0,
+      maxConsecutiveHighEnergyBlocks: 4,
+    });
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'tuesday-existing-capacity',
+      title: 'Existing Tuesday workload',
+      domainId: 'domain-1',
+      startTime: '2026-08-18T07:00:00.000Z',
+      endTime: '2026-08-18T11:00:00.000Z',
+      status: 'planned',
+      type: 'deep',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+    }]);
+
+    const plan = await domain.scheduling.replaceDaySchedule(context(UID, 'full-week-capacity-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'monday-capacity',
+        start: '2026-08-17T07:00:00.000Z',
+        end: '2026-08-17T09:00:00.000Z',
+      })],
+      reason: 'A day preview must account for the rest of the week.',
+    });
+    expect(plan.warnings.some((message) => /settimana sovraccarica|weekly overload/i.test(message))).toBe(true);
+    expect(plan.operations.some((operation) => operation.entityId === 'tuesday-existing-capacity')).toBe(false);
+
+    repository.mutateForTest(UID, 'timeBlocks', 'tuesday-existing-capacity', { title: 'Human changed Tuesday' });
+    await expect(domain.changePlans.applyPlan(context(UID, 'full-week-capacity-apply'), {
+      planId: plan.id,
+      approvalCapability: plan.approval.capability,
+      idempotencyKey: 'full-week-capacity-key-001',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect(await repository.getEntity(UID, 'timeBlocks', 'monday-capacity')).toBeNull();
+  });
+
   it('enforces the persisted minimum buffer through the shared WPI validator', async () => {
     const { repository, domain } = harness();
     repository.setPlanningPreferencesForTest(UID, {

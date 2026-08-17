@@ -733,6 +733,32 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     expect((await firestore.doc(`aiApprovals/${uid}_${preview.id}`).get()).data()?.status).toBe('pending');
   }, 30_000);
 
+  it('refuses rollback when a server-owned snapshot is narrowed after apply', async () => {
+    const uid = uniqueUid('rollback-snapshot-binding');
+    await seedSchedule(firestore, uid);
+    const { service } = serviceFor(firestore, ['plan-rollback-binding', 'execution-rollback-binding']);
+    const preview = await previewTitle(service, uid, 'Applied before snapshot corruption');
+    const applied = await service.applyPlan(context(uid, 'rollback-binding-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'rollback-binding-apply-key-01',
+    });
+    const snapshotRef = firestore.doc(`aiSnapshots/${uid}_${preview.id}`);
+    const snapshot = await snapshotRef.get();
+    expect((snapshot.data()?.scopes as readonly unknown[]).length).toBeGreaterThan(0);
+    // Removing a dependency scope leaves every remaining entry internally
+    // valid, but must still break the complete plan-to-snapshot hash binding.
+    await snapshotRef.update({ scopes: [] });
+
+    await expect(service.rollbackExecution(context(uid, 'rollback-binding-action'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'rollback-binding-rollback-key',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?.title)
+      .toBe('Applied before snapshot corruption');
+  }, 30_000);
+
   it('includes point records exactly at a bounded range lower edge', async () => {
     const uid = uniqueUid('point-boundary');
     const repository = new FirestoreRepository(firestore);

@@ -187,7 +187,6 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const [actionKeysVersion, setActionKeysVersion] = useState(0);
   const [hydratedUid, setHydratedUid] = useState<string | null>(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
-  const sessionOwnerUidRef = useRef<string | null>(null);
 
   const status: AIStatus = authStatus === 'unknown'
     ? 'checking'
@@ -201,11 +200,6 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   useEffect(() => {
     if (authStatus === 'unknown') return;
     const uid = user?.uid ?? null;
-    const previousUid = sessionOwnerUidRef.current;
-    if (previousUid && previousUid !== uid && typeof window !== 'undefined') {
-      window.sessionStorage.removeItem(actionStorageKey(previousUid));
-    }
-    sessionOwnerUidRef.current = uid;
     if (!uid) {
       planActionKeysRef.current.clear();
       setMessages([]);

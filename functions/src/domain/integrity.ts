@@ -56,6 +56,26 @@ export function hashSnapshotState(
   })).digest('hex');
 }
 
+/**
+ * A rollback snapshot is immutable plan state, not an independently mutable
+ * bag of entries. Verify the complete binding again at rollback time so a
+ * server-side corruption that removes a dependency/scope cannot narrow the
+ * safety checks while leaving per-entry hashes internally consistent.
+ */
+export function verifySnapshotPlanBinding(
+  plan: Pick<ImmutableChangePlan, 'uid' | 'id' | 'snapshotId' | 'baseStateHash'>,
+  snapshot: ChangeSnapshot,
+): void {
+  if (
+    snapshot.uid !== plan.uid
+    || snapshot.id !== plan.snapshotId
+    || snapshot.planId !== plan.id
+    || hashSnapshotState(snapshot) !== plan.baseStateHash
+  ) {
+    throw new DomainError('CONFLICT', 'Change snapshot binding check failed.');
+  }
+}
+
 export function hashValidationScopeRecords(records: readonly EntityRecord[]): string {
   return createHash('sha256').update(canonicalJson(
     records

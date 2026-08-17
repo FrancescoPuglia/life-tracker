@@ -19,6 +19,7 @@ import {
   hashSnapshotState,
   hashValidationScopeRecords,
   validationScopeKey,
+  verifySnapshotPlanBinding,
   verifyStoredPlan,
 } from './integrity';
 import { assertEntityId } from './policy';
@@ -624,6 +625,7 @@ export class FirestoreRepository implements AuditableRepository {
       const snapshot = decodeOwnedServerDocument<ChangeSnapshot>(beforeSnapshot, request.uid);
       assertSnapshotIntegrity(snapshot);
       verifyStoredPlan(plan);
+      verifySnapshotPlanBinding(plan, snapshot);
       if (plan.status !== 'applied' || !plan.appliedStateHashes) {
         throw new DomainError('APPROVAL_REPLAYED', 'Execution was already actioned.');
       }
@@ -955,6 +957,7 @@ function assertPreviewRelationships(
   audit: AuditEvent,
 ): void {
   assertUid(plan.uid);
+  verifySnapshotPlanBinding(plan, snapshot);
   if (
     plan.uid !== snapshot.uid ||
     plan.uid !== approval.uid ||
@@ -964,8 +967,7 @@ function assertPreviewRelationships(
     plan.id !== approval.planId ||
     plan.id !== audit.planId ||
     plan.hash !== approval.planHash ||
-    plan.baseStateHash !== approval.baseStateHash ||
-    plan.baseStateHash !== hashSnapshotState(snapshot)
+    plan.baseStateHash !== approval.baseStateHash
   ) {
     throw new DomainError('FORBIDDEN', 'Preview ownership or integrity mismatch.');
   }

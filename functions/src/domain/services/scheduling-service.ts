@@ -100,6 +100,7 @@ export class SchedulingService {
     }
     const date = start.toZonedDateTimeISO(args.timezone).toPlainDate();
     const range = instantRange(date, date.add({ days: 1 }), args.timezone);
+    const capacityRange = weekInstantRange(date, args.timezone);
     const proposed = normalizeBlock(
       args.block,
       args.timezone,
@@ -108,6 +109,9 @@ export class SchedulingService {
       'preview_timeblock_change',
     );
     const existing = await this.readExisting(context.uid, range.from, range.to);
+    const capacityExisting = capacityRange.from === range.from && capacityRange.to === range.to
+      ? existing
+      : await this.readExisting(context.uid, capacityRange.from, capacityRange.to);
     // A move may cross a calendar-day boundary, so the target entity cannot
     // be discovered solely through the proposed day's bounded schedule scan.
     // Resolve it directly through the same UID-scoped repository path.
@@ -151,15 +155,18 @@ export class SchedulingService {
       }
       if (sourceDate.toString() !== date.toString()) {
         const sourceRange = instantRange(sourceDate, sourceDate.add({ days: 1 }), args.timezone);
-        additionalValidationRanges.push({
-          existing: await this.readExisting(context.uid, sourceRange.from, sourceRange.to),
-          from: sourceRange.from,
-          to: sourceRange.to,
-        });
+        if (sourceRange.from !== capacityRange.from || sourceRange.to !== capacityRange.to) {
+          additionalValidationRanges.push({
+            existing: await this.readExisting(context.uid, sourceRange.from, sourceRange.to),
+            from: sourceRange.from,
+            to: sourceRange.to,
+          });
+        }
       }
     }
 
     const commitments = existing.filter((record) => record.id !== proposed.id);
+    const capacityCommitments = capacityExisting.filter((record) => record.id !== proposed.id);
     const protectedCommitments = commitments.filter(isProtectedTimeBlock);
     const mutableCommitments = commitments.filter((record) => !isProtectedTimeBlock(record));
     const conflicts = [
@@ -174,7 +181,7 @@ export class SchedulingService {
       date,
       args.timezone,
       [proposed],
-      commitments,
+      capacityCommitments,
     );
     const wpi = validateWithWeeklyPlanningIntelligence(draft, {
       earliestHour: preferences.workingHours?.start ?? '07:00',
@@ -202,9 +209,9 @@ export class SchedulingService {
         assumptions: preferenceAssumptions(preferences),
         expectedImpact: [`${args.action} TimeBlock '${args.block.title}' within ${args.timezone}.`],
         validation: scheduleValidation(
-          existing,
-          range.from,
-          range.to,
+          capacityExisting,
+          capacityRange.from,
+          capacityRange.to,
           preferences,
           additionalValidationRanges,
         ),
@@ -225,6 +232,10 @@ export class SchedulingService {
     const range = instantRange(startDate, endDate, timezone);
     const normalized = inputs.map((input) => normalizeBlock(input, timezone, startDate, endDate, tool));
     const existing = await this.readExisting(context.uid, range.from, range.to);
+    const capacityRange = weekInstantRange(startDate, timezone);
+    const capacityExisting = capacityRange.from === range.from && capacityRange.to === range.to
+      ? existing
+      : await this.readExisting(context.uid, capacityRange.from, capacityRange.to);
     const existingById = new Map(existing.map((record) => [record.id, record]));
     const protectedBlocks = existing.filter(isProtectedTimeBlock);
     const mutableBlocks = existing.filter((record) => !isProtectedTimeBlock(record));
@@ -246,7 +257,10 @@ export class SchedulingService {
       }
     }
 
-    const draft = buildWpiDraft(tool, startDate, timezone, normalized, protectedBlocks);
+    const targetIds = new Set(existing.map((record) => record.id));
+    const unchangedCapacityCommitments = capacityExisting.filter((record) =>
+      isProtectedTimeBlock(record) || !targetIds.has(record.id));
+    const draft = buildWpiDraft(tool, startDate, timezone, normalized, unchangedCapacityCommitments);
     const wpi = validateWithWeeklyPlanningIntelligence(draft, {
       earliestHour: preferences.workingHours?.start ?? '07:00',
       latestHour: preferences.workingHours?.end ?? '22:00',
@@ -296,7 +310,12 @@ export class SchedulingService {
         reason,
         assumptions: preferenceAssumptions(preferences),
         expectedImpact: [`Replace ${tool === 'replace_day_schedule' ? 'one day' : 'one week'} within ${timezone}.`],
-        validation: scheduleValidation(existing, range.from, range.to, preferences),
+        validation: scheduleValidation(
+          capacityExisting,
+          capacityRange.from,
+          capacityRange.to,
+          preferences,
+        ),
       },
     );
   }
@@ -410,6 +429,14 @@ function instantRange(
   };
 }
 
+function weekInstantRange(
+  date: Temporal.PlainDate,
+  timezone: string,
+): Readonly<{ from: string; to: string }> {
+  const monday = date.subtract({ days: date.dayOfWeek - 1 });
+  return instantRange(monday, monday.add({ days: 7 }), timezone);
+}
+
 function normalizeBlock(
   input: ScheduleBlockInput,
   timezone: string,
@@ -504,7 +531,7 @@ function buildWpiDraft(
   rangeStart: Temporal.PlainDate,
   timezone: string,
   blocks: readonly NormalizedBlock[],
-  protectedBlocks: readonly EntityRecord[],
+  capacityCommitments: readonly EntityRecord[],
 ): WpiDraft {
   const monday = rangeStart.subtract({ days: rangeStart.dayOfWeek - 1 });
   const proposedWpiBlocks: WpiBlock[] = blocks.map((block) => {
@@ -545,13 +572,13 @@ function buildWpiDraft(
       isRoutine: block.input.activityType === 'routine',
     };
   });
-  // Fixed/completed/in-progress commitments are never emitted as operations,
-  // but they still consume real daily/weekly capacity. Include bounded,
-  // read-only representations in WPI conflict detection so a nearly-full week
-  // cannot appear feasible merely because its commitments are protected.
+  // Unchanged commitments are never emitted as operations, but they still
+  // consume real daily/weekly capacity. Include bounded, read-only
+  // representations in WPI validation so a day-level preview cannot make a
+  // nearly-full persisted week appear feasible.
   const wpiBlocks = [
     ...proposedWpiBlocks,
-    ...protectedBlocks.flatMap((record) => protectedWpiBlocks(record, timezone, monday)),
+    ...capacityCommitments.flatMap((record) => commitmentWpiBlocks(record, timezone, monday)),
   ];
   const parsedIntents = wpiBlocks.map((block) => ({
     id: block.intentId,
@@ -597,7 +624,7 @@ function buildWpiDraft(
   };
 }
 
-function protectedWpiBlocks(
+function commitmentWpiBlocks(
   record: EntityRecord,
   timezone: string,
   monday: Temporal.PlainDate,
@@ -645,7 +672,7 @@ function protectedWpiBlocks(
             intentId: `intent_${id}`,
             status: 'maintenance',
             confidence: 1,
-            reason: 'Authoritative protected Life Tracker commitment',
+            reason: 'Authoritative unchanged Life Tracker commitment',
             matchedKeywords: [],
           },
           confidence: 1,

@@ -378,7 +378,7 @@ describe('AIInputBarV2 secure client flow', () => {
     expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
   });
 
-  it('removes the previous user action session on account switch', async () => {
+  it('isolates an account switch without destroying the previous user recovery key', async () => {
     mocks.requestAIChat.mockResolvedValueOnce({
       message: 'Anteprima pronta',
       plan: minimalPlan(),
@@ -398,9 +398,15 @@ describe('AIInputBarV2 secure client flow', () => {
     view.rerender(<AIInputBarV2 />);
 
     await waitFor(() => {
-      expect(window.sessionStorage.getItem('life-tracker:secure-ai-actions:firebase-user')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Riconcilia applicazione' })).not.toBeInTheDocument();
     });
+    expect(window.sessionStorage.getItem('life-tracker:secure-ai-actions:firebase-user')).not.toBeNull();
     expect(screen.queryByText('Sessione di modifica sicura ripristinata.')).not.toBeInTheDocument();
+
+    mocks.authState.user = { uid: 'firebase-user' };
+    view.rerender(<AIInputBarV2 />);
+    expect(await screen.findByText('Sessione di modifica sicura ripristinata.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
   });
 
   it('reconciles a malformed 2xx action response with the same idempotency key', async () => {
