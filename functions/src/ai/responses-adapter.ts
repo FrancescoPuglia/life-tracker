@@ -198,6 +198,10 @@ export class OpenAIResponsesAdapter {
           controller,
           deadline,
         );
+        const providerModel = requireExpectedProviderModel(
+          response.model,
+          this.options.model,
+        );
         providerCalls += 1;
         addUsage(usage, response.usage);
         promptItems.push(...response.output);
@@ -207,7 +211,6 @@ export class OpenAIResponsesAdapter {
             throw new DomainError('INTERNAL', 'The AI response did not complete safely.');
           }
           const finalText = normalizeText(response);
-          const providerModel = normalizeProviderModel(response.model);
           const metadata = {
             providerResponseId: response.id,
             providerModel,
@@ -271,9 +274,12 @@ export class OpenAIResponsesAdapter {
   }
 }
 
-function normalizeProviderModel(value: unknown): string {
+function requireExpectedProviderModel(value: unknown, configuredModel: string): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
     throw new DomainError('INTERNAL', 'The AI provider response omitted safe model metadata.');
+  }
+  if (value !== configuredModel) {
+    throw new DomainError('PROVIDER_UNAVAILABLE', 'The AI provider response model did not match configuration.');
   }
   return value;
 }

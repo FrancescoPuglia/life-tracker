@@ -63,6 +63,42 @@ describe('bounded OpenAI Responses orchestration', () => {
     });
   });
 
+  it.each([
+    ['missing', null, 'INTERNAL'],
+    ['malformed', 'unsafe model\nname', 'INTERNAL'],
+    ['mismatched', 'other-model', 'PROVIDER_UNAVAILABLE'],
+  ] as const)(
+    'rejects %s model identity before executing an intermediate tool call',
+    async (_label, model, code) => {
+      const { adapter, repository } = setup([{
+        id: 'untrusted-tool-turn',
+        model,
+        output: [{
+          type: 'function_call',
+          call_id: 'call-untrusted-model',
+          name: 'preview_changes',
+          arguments: JSON.stringify({
+            operations: [{
+              op: 'update',
+              collection: 'domains',
+              id: 'domain-1',
+              patch: [{ field: 'name', value: 'Must not execute' }],
+            }],
+            reason: 'This tool turn lacks the configured provider identity.',
+          }),
+        }],
+      }]);
+      await expect(adapter.run({
+        auth: AUTH,
+        message: 'Plan my day',
+        mode: 'plan',
+        authenticatedContext: CONTEXT,
+      })).rejects.toMatchObject({ code });
+      expect(await repository.getPlan(UID, 'plan-1')).toBeNull();
+      expect(await repository.listAuditEventsForUser(UID)).toEqual([]);
+    },
+  );
+
   it('allows a proposal in plan mode but never sends the approval capability back to the model', async () => {
     const toolCall = {
       type: 'function_call',
