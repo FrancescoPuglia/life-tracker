@@ -50,15 +50,12 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
     e.preventDefault();
     const emailValue = (emailRef.current?.value ?? email).trim();
     const passValue = (passwordRef.current?.value ?? password);
-    console.log('AuthModal submit START', { mode, emailValue, hasPassword: !!passValue, loading });
     setLoading(true);
     setError(null);
     setMessage(null);
     try {
       if (mode === 'signin') {
-        console.log('AuthModal before signIn', { emailValue });
         await auth.signIn(emailValue, passValue);
-        console.log('AuthModal after signIn');
       } else if (mode === 'signup') {
         await auth.signUp(emailValue, passValue, displayName);
         setMessage('Account created! Please check your email to verify your account.');
@@ -70,14 +67,11 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'signin' }: A
       }
     } catch (err) {
       if (err && typeof err === 'object' && 'code' in err && 'message' in err) {
-        console.error('AuthModal error', { code: (err as any).code, message: (err as any).message });
         setError(typeof (err as any).message === 'string' ? (err as any).message : 'An error occurred');
       } else {
-        console.error('AuthModal error', err);
         setError(err instanceof Error ? err.message : 'An error occurred');
       }
     } finally {
-      console.log('AuthModal submit FINALLY');
       setLoading(false);
     }
   };

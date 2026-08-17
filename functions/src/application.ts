@@ -38,9 +38,11 @@ export class LifeTrackerApiApplication implements ApiApplication {
       idempotencyKey: request.idempotencyKey,
     });
     return {
-      message: result.idempotentReplay
-        ? 'This exact plan was already applied; the original verified receipt is returned.'
-        : 'Plan applied and verified against authoritative Firestore state.',
+      message: result.status === 'rolled_back'
+        ? 'This exact plan was already rolled back; the authoritative verified receipt is returned.'
+        : result.idempotentReplay
+          ? 'This exact plan was already applied; the original verified receipt is returned.'
+          : 'Plan applied and verified against authoritative Firestore state.',
       executionId: result.executionId,
       planId: result.planId,
       hash: result.hash,

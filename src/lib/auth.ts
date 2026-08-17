@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { auth } from './firebase';
 import { db } from './database';
+import { normalizeAuthError } from './authError';
 
 export interface AuthUser {
   uid: string;
@@ -191,42 +192,7 @@ class AuthManager {
   }
 
   private handleAuthError(error: AuthError): Error {
-    let message = 'An authentication error occurred';
-    
-    switch (error.code) {
-      case 'auth/user-not-found':
-        message = 'No user found with this email address';
-        break;
-      case 'auth/wrong-password':
-        message = 'Incorrect password';
-        break;
-      case 'auth/email-already-in-use':
-        message = 'An account already exists with this email address';
-        break;
-      case 'auth/weak-password':
-        message = 'Password should be at least 6 characters';
-        break;
-      case 'auth/invalid-email':
-        message = 'Invalid email address';
-        break;
-      case 'auth/too-many-requests':
-        message = 'Too many failed attempts. Try again later';
-        break;
-      case 'auth/popup-closed-by-user':
-        message = 'Sign-in popup was closed';
-        break;
-      case 'auth/cancelled-popup-request':
-        message = 'Sign-in was cancelled';
-        break;
-      case 'auth/network-request-failed':
-        message = 'Network error. Check your internet connection';
-        break;
-      default:
-        message = error.message || 'Authentication failed';
-    }
-    
-    console.error('Auth Error:', error);
-    return new Error(message);
+    return normalizeAuthError(error);
   }
 
   isSignedIn(): boolean {
