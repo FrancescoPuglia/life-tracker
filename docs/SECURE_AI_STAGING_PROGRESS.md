@@ -300,6 +300,15 @@ tool processing. The expanded focused suite passed 21/21, the complete
 Functions unit suite passed 161/161, Functions typecheck/build passed, and the
 generated backend source fingerprint is
 `sha256:6994a8f1bf82fdfddb023e1e5e050b27dbf3b5927062c471d85a852fdca57da1`.
+Security follow-up commit
+`3a30e0cb27bf573782c3df75cc2e189a85b8d369` also binds each browser bearer
+token to the same Firebase project used to derive the canonical backend URL.
+The client obtains `getIdTokenResult()`, requires both `aud` and `iss` to match
+the configured project, and refuses network access on mismatch or missing
+claims. Focused client tests passed 21/21, the full root suite passed 600/600,
+root typecheck and the static security scan passed, and the full real Auth +
+Firestore + Functions emulator browser boundary passed 3/3 with SDK-issued
+emulator tokens. No token value is decoded manually, logged, or persisted.
 At exact source checkpoint `08f26fa94f070c1f9d0fb1f30f275fe6e6d5e1fb`,
 the fresh production static export and output-inclusive scan passed, static
 browser E2E passed 1/1, and the full isolated Auth + Firestore + Functions
