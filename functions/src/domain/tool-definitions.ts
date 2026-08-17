@@ -138,7 +138,7 @@ const goalArchitectTask = strictObject({
   id,
   title: string(240, { minLength: 1 }),
   description: nullableDescription,
-  estimatedHours: { type: 'number', minimum: 0.0166666667, maximum: 24_000 },
+  estimatedHours: { type: 'number', minimum: 0.0166666667, maximum: 24 },
   dueDateISO: nullableDate,
   priority,
   parentProjectId: id,

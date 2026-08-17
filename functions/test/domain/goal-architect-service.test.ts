@@ -284,7 +284,7 @@ describe('Goal Architect deterministic backend adapter', () => {
 
     const complete = await domain.goalArchitect.previewTaskChange(context(UID, 'task-complete'), {
       ...base,
-      description: 'Completed safely\nGAI_KEY: task:ffffffffffffffffffffffff',
+      description: 'Completed safely GAI_KEY: task:ffffffffffffffffffffffff',
       status: 'completed',
       reason: 'Complete through deterministic Task normalization.',
     });
@@ -332,7 +332,7 @@ describe('Goal Architect deterministic backend adapter', () => {
       ...draft,
       goal: {
         ...draft.goal,
-        description: 'Legitimate outcome text\nGAI_KEY: forged:model:authority',
+        description: 'Legitimate outcome text GAI_KEY: forged:model:authority',
       },
     });
     const description = String(preview.diff.find((item) => item.entityType === 'goals')?.after?.description ?? '');

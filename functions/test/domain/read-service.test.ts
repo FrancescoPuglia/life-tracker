@@ -78,7 +78,14 @@ describe('bounded canonical Life Tracker state', () => {
   });
 
   it('does not fabricate actual time from completed plan status and avoids double counting a linked Session', async () => {
-    const service = new ReadService(seededRepository());
+    const repository = seededRepository();
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'executed-overrun-count',
+      startTime: '2026-08-22T09:00:00.000Z',
+      endTime: '2026-08-22T10:00:00.000Z',
+      status: 'overrun',
+    }]);
+    const service = new ReadService(repository);
     const analytics = await service.analytics(context(), RANGE);
 
     // 30 minutes comes from persisted Session.duration (seconds); 15 from an
@@ -86,7 +93,7 @@ describe('bounded canonical Life Tracker state', () => {
     expect(analytics.sessions.totalMinutes).toBe(30);
     expect(analytics.actual.timeBlockActualMinutes).toBe(15);
     expect(analytics.actual.totalMinutes).toBe(45);
-    expect(analytics.timeBlocks.completedCount).toBe(1);
+    expect(analytics.timeBlocks.completedCount).toBe(2);
   });
 
   it('attributes normal Session records through TimeBlock and hierarchy links', async () => {

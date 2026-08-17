@@ -132,6 +132,21 @@ describe('detectConflicts', () => {
     expect(conflicts.some((c) => c.type === 'invalid_time')).toBe(true);
   });
 
+  it('accepts a positive interval across the Europe/Rome repeated fallback hour', () => {
+    const { conflicts } = detectConflicts(
+      [block({
+        startTime: '02:50',
+        endTime: '02:10',
+        startInstant: '2026-10-25T00:50:00.000Z',
+        endInstant: '2026-10-25T01:10:00.000Z',
+        durationMinutes: 20,
+      })],
+      [],
+      { ...DEFAULT_PLANNING_CONSTRAINTS, earliestHour: '00:00', latestHour: '23:59' },
+    );
+    expect(conflicts.some((c) => c.type === 'invalid_time')).toBe(false);
+  });
+
   it('flags routine_collision when two routine blocks overlap', () => {
     const { conflicts } = detectConflicts(
       [

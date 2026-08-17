@@ -549,9 +549,13 @@ export default function MainApp({ buildId }: MainAppProps) {
                         <p className="text-gray-600">Il tuo assistente intelligente che vede tutto e ti aiuta a ottimizzare la produttività</p>
                       </div>
                       
-                      <AIInputBarV2
-                        className="w-full"
-                      />
+                      <button
+                        type="button"
+                        onClick={() => setAiDrawerOpen(true)}
+                        className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        Apri l’assistente sicuro
+                      </button>
                     </div>
                   </div>
                 )}

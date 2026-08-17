@@ -20,6 +20,7 @@ import {
   allWeekDays,
   createStableId,
   emptyDailyRecord,
+  instantIntervalIsPositive,
   timeToMinutes,
   weekdayName,
 } from './timeUtils';
@@ -172,7 +173,8 @@ function detectInvalidTimes(
   for (const b of blocks) {
     const s = timeToMinutes(b.startTime);
     const e = timeToMinutes(b.endTime);
-    if (e <= s) {
+    const instantGeometry = instantIntervalIsPositive(b.startInstant, b.endInstant);
+    if (instantGeometry === false || (instantGeometry === null && e <= s)) {
       out.push({
         id: createStableId('conflict', `invalid_time:${b.id}`, 0),
         type: 'invalid_time',

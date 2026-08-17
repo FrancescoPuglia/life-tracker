@@ -1,4 +1,5 @@
 import { DomainError } from './errors';
+import { assertExecutionActive } from './policy';
 import type { ToolRegistry } from './registry';
 import type { AuthContext } from './types';
 
@@ -8,6 +9,7 @@ export class ToolExecutor {
   constructor(private readonly registry: ToolRegistry) {}
 
   async execute(name: string, rawArgs: unknown, context: AuthContext): Promise<unknown> {
+    assertExecutionActive(context);
     const tool = this.registry.resolve(name);
     if (!tool) throw new DomainError('UNKNOWN_TOOL', `Unknown tool '${name}'.`);
     const parsed = tool.contract.schema.safeParse(rawArgs);
@@ -20,6 +22,7 @@ export class ToolExecutor {
       });
     }
     const output = await tool.handler(parsed.data, context);
+    assertExecutionActive(context);
     if (Buffer.byteLength(JSON.stringify(output), 'utf8') > MAX_TOOL_OUTPUT_BYTES) {
       throw new DomainError('LIMIT_EXCEEDED', `Tool '${name}' output exceeds the safe limit.`);
     }

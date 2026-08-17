@@ -246,7 +246,7 @@ export function gaiKey(
 function appendGaiKey(description: string | undefined, key: string): string {
   const trimmed = (description ?? '').trim();
   const marker = `${GAI_KEY_PREFIX} ${key}`;
-  if (trimmed.includes(marker)) return trimmed;
+  if (descriptionContainsGaiKey(trimmed, key)) return trimmed;
   return trimmed.length === 0 ? marker : `${trimmed}\n\n${marker}`;
 }
 
@@ -255,7 +255,8 @@ function descriptionContainsGaiKey(
   key: string,
 ): boolean {
   if (!description) return false;
-  return description.includes(`${GAI_KEY_PREFIX} ${key}`);
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\r?\\n)[ \\t]*${GAI_KEY_PREFIX}\\s*${escaped}[ \\t]*(?:\\r?\\n|$)`).test(description);
 }
 
 // ============================================================================

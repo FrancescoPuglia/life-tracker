@@ -186,6 +186,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const planActionKeysRef = useRef(new Map<string, string>());
   const [actionKeysVersion, setActionKeysVersion] = useState(0);
   const [hydratedUid, setHydratedUid] = useState<string | null>(null);
+  const [clockNowMs, setClockNowMs] = useState(() => Date.now());
 
   const status: AIStatus = authStatus === 'unknown'
     ? 'checking'
@@ -218,8 +219,16 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   useEffect(() => {
     const uid = user?.uid;
     if (!uid || hydratedUid !== uid) return;
-    persistActionSession(uid, messages, planActionKeysRef.current);
-  }, [actionKeysVersion, hydratedUid, messages, user?.uid]);
+    persistActionSession(uid, messages, planActionKeysRef.current, clockNowMs);
+  }, [actionKeysVersion, clockNowMs, hydratedUid, messages, user?.uid]);
+
+  useEffect(() => {
+    const nextExpiry = nextActionExpiry(messages, clockNowMs);
+    if (nextExpiry === null) return;
+    const delay = Math.max(1, Math.min(nextExpiry - Date.now() + 1, 60_000));
+    const timer = window.setTimeout(() => setClockNowMs(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [clockNowMs, messages]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -401,6 +410,10 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       ].includes(errorCode);
       const recoveryPending = errorCode === null || [
         'committed_unverified',
+        // This code is raised only after a successful 2xx action response
+        // cannot be parsed or bound. The mutation outcome is therefore
+        // uncertain and must be reconciled with the exact same key.
+        'invalid_response',
         'unavailable',
         'session_expired',
       ].includes(errorCode);
@@ -459,16 +472,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const currentMode = MODE_CONFIG[mode];
   const statusConfig = STATUS_CONFIG[status];
   const hasProtectedActionState = messages.some((message) => (
-    Boolean(message.actionStatus || message.actionRecoveryPending)
-    || Boolean(
-      message.plan
-      && !message.planRejected
-      && !message.planStale
-      && (
-        message.plan.status === 'previewed'
-        || (message.plan.status === 'applied' && message.execution?.receipt.rollbackAvailable)
-      )
-    )
+    messageNeedsProtectedStorage(message, clockNowMs)
   ));
 
   return (
@@ -522,6 +526,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
                     actionRecoveryPending={message.actionRecoveryPending}
                     rejected={message.planRejected}
                     stale={message.planStale}
+                    nowMs={clockNowMs}
                     onAction={runPlanAction}
                     onReject={rejectPlan}
                   />
@@ -695,6 +700,7 @@ function PlanPreviewCard({
   actionRecoveryPending,
   rejected,
   stale,
+  nowMs,
   onAction,
   onReject,
 }: {
@@ -706,6 +712,7 @@ function PlanPreviewCard({
   actionRecoveryPending?: boolean;
   rejected?: boolean;
   stale?: boolean;
+  nowMs: number;
   onAction: (
     messageId: string,
     plan: AIPlanPreview,
@@ -714,7 +721,7 @@ function PlanPreviewCard({
   ) => Promise<void>;
   onReject: (messageId: string) => void;
 }) {
-  const expired = Date.parse(plan.expiresAt) <= Date.now();
+  const expired = Date.parse(plan.expiresAt) <= nowMs;
   const applied = plan.status === 'applied';
   const rolledBack = plan.status === 'rolled_back';
   const hasConflicts = plan.conflicts.length > 0;
@@ -723,7 +730,7 @@ function PlanPreviewCard({
     && execution?.receipt.rollbackAvailable === true
     && Boolean(execution.rollback);
   const rollbackUnexpired = rollbackAvailable
-    && Date.parse(execution!.rollback!.expiresAt) > Date.now();
+    && Date.parse(execution!.rollback!.expiresAt) > nowMs;
 
   return (
     <div
@@ -976,19 +983,11 @@ function persistActionSession(
   uid: string,
   messages: readonly Message[],
   actionKeys: ReadonlyMap<string, string>,
+  nowMs: number,
 ): void {
   if (typeof window === 'undefined') return;
   const entries = messages
-    .filter((message) => (
-      message.plan
-      && !message.planRejected
-      && !message.planStale
-      && (
-        message.plan.status === 'previewed'
-        || message.actionRecoveryPending
-        || (message.plan.status === 'applied' && message.execution?.receipt.rollbackAvailable)
-      )
-    ))
+    .filter((message) => messageNeedsProtectedStorage(message, nowMs))
     .slice(-MAX_PERSISTED_ACTIONS)
     .map((message) => ({
       plan: message.plan,
@@ -1021,6 +1020,7 @@ function restoreActionSession(uid: string): {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid');
     const record = value as Record<string, unknown>;
     if (record.version !== ACTION_SESSION_VERSION || !Array.isArray(record.entries)) throw new Error('invalid');
+    const nowMs = Date.now();
     const messages = record.entries.slice(-MAX_PERSISTED_ACTIONS).map((entry, index) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('invalid');
       const stored = entry as Record<string, unknown>;
@@ -1043,7 +1043,7 @@ function restoreActionSession(uid: string): {
             }
           : {}),
       };
-    });
+    }).filter((message) => messageNeedsProtectedStorage(message, nowMs));
     const allowedActionIds = new Set(messages.flatMap((message) => [
       `apply:${message.plan!.id}`,
       ...(message.execution ? [`rollback:${message.execution.executionId}`] : []),
@@ -1069,4 +1069,27 @@ function restoreActionSession(uid: string): {
     window.sessionStorage.removeItem(key);
     return { messages: [], actionKeys: new Map() };
   }
+}
+
+function messageNeedsProtectedStorage(message: Message, nowMs: number): boolean {
+  const plan = message.plan;
+  if (!plan) return false;
+  if (message.actionStatus || message.actionRecoveryPending) return true;
+  if (message.planRejected || message.planStale) return false;
+  if (plan.status === 'previewed') return Date.parse(plan.expiresAt) > nowMs;
+  if (plan.status !== 'applied') return false;
+  const rollback = message.execution?.rollback;
+  return message.execution?.receipt.rollbackAvailable === true
+    && Boolean(rollback)
+    && Date.parse(rollback!.expiresAt) > nowMs;
+}
+
+function nextActionExpiry(messages: readonly Message[], nowMs: number): number | null {
+  const expirations = messages.flatMap((message) => {
+    if (!message.plan) return [];
+    const values = [Date.parse(message.plan.expiresAt)];
+    if (message.execution?.rollback) values.push(Date.parse(message.execution.rollback.expiresAt));
+    return values.filter((value) => Number.isFinite(value) && value > nowMs);
+  });
+  return expirations.length ? Math.min(...expirations) : null;
 }

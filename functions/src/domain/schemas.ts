@@ -140,7 +140,7 @@ const goalArchitectTaskSchema = z.object({
   id: idSchema,
   title: z.string().trim().min(1).max(240),
   description: nullableDescriptionSchema,
-  estimatedHours: z.number().min(1 / 60).max(24_000),
+  estimatedHours: z.number().min(1 / 60).max(24),
   dueDateISO: nullableCalendarOrInstantSchema,
   priority: draftPrioritySchema,
   parentProjectId: idSchema,
@@ -169,7 +169,22 @@ const goalArchitectKeyResultSchema = z.object({
   currentValue: z.number().finite(),
   unit: z.enum(['percent', 'hours', 'days', 'sessions', 'courses', 'videos', 'studies', 'tasks', 'books', 'custom']),
   customUnit: z.string().trim().min(1).max(64).nullable(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.unit === 'custom' && !value.customUnit) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['customUnit'],
+      message: 'customUnit is required when unit is custom.',
+    });
+  }
+  if (value.unit !== 'custom' && value.customUnit !== null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['customUnit'],
+      message: 'customUnit must be null for a standard unit.',
+    });
+  }
+});
 
 export const previewGoalArchitectureArgsSchema = z.object({
   domainId: idSchema,

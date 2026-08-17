@@ -21,6 +21,13 @@ export function assertAuthenticated(context: AuthContext): void {
   }
 }
 
+export function assertExecutionActive(context: AuthContext): void {
+  const control = context.executionControl;
+  if (control && (control.signal.aborted || Date.now() >= control.deadlineAtMs)) {
+    throw new DomainError('INTERNAL', 'AI request timed out.');
+  }
+}
+
 export function assertEntityId(id: string): void {
   if (!ENTITY_ID.test(id) || id.includes('/')) {
     throw new DomainError('INVALID_ARGUMENT', 'Invalid entity identifier.');

@@ -348,6 +348,41 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect(plan.warnings.some((message) => /150 minuti.*120/i.test(message))).toBe(true);
   });
 
+  it('clips a long-running protected commitment to the requested WPI week for capacity', async () => {
+    const { repository, domain } = harness();
+    repository.setPlanningPreferencesForTest(UID, {
+      source: 'persisted',
+      defaultsApplied: [],
+      timezone: 'Europe/Rome',
+      workingHours: { start: '00:00', end: '23:59' },
+      maxDailyPlannedMinutes: 120,
+      maxWeeklyPlannedMinutes: 600,
+      minBufferMinutes: 0,
+      maxConsecutiveHighEnergyBlocks: 3,
+    });
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'long-protected',
+      title: 'Long protected commitment',
+      domainId: 'domain-1',
+      startTime: '2026-08-01T00:00:00.000Z',
+      endTime: '2026-08-17T07:30:00.000Z',
+      status: 'planned',
+      type: 'meeting',
+      locked: true,
+    }]);
+    const preview = await domain.scheduling.replaceDaySchedule(context(UID, 'long-protected-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'post-long-commitment',
+        start: '2026-08-17T08:00:00.000Z',
+        end: '2026-08-17T09:00:00.000Z',
+      })],
+      reason: 'Count the overlapping portion of a long protected commitment.',
+    });
+    expect(preview.warnings.some((message) => /sovraccarico|overload/i.test(message))).toBe(true);
+  });
+
   it('rejects incompatible Task/Project hierarchy references', async () => {
     const { repository, domain } = harness();
     repository.seed(UID, 'projects', [{
@@ -504,7 +539,7 @@ describe('Weekly Planning Intelligence backend adapter', () => {
         title: 'WPI origin',
         start: '2026-08-17T08:00:00.000Z',
         end: '2026-08-17T09:00:00.000Z',
-        notes: 'Updated note\nWPI_KEY: wpi:forged-draft:forged-block',
+        notes: 'Updated note WPI_KEY: wpi:forged-draft:forged-block',
       }),
       reason: 'Keep the original semantic replay key.',
     });

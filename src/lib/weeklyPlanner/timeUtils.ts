@@ -182,3 +182,18 @@ export function weekdayName(d: WeekDay): string {
 export function emptyDailyRecord<T>(zero: T): Record<WeekDay, T> {
   return { 0: zero, 1: zero, 2: zero, 3: zero, 4: zero, 5: zero, 6: zero };
 }
+
+/**
+ * Returns null for legacy wall-clock-only blocks, otherwise whether the
+ * authoritative absolute interval is complete, parseable, and positive.
+ */
+export function instantIntervalIsPositive(
+  startInstant: string | undefined,
+  endInstant: string | undefined,
+): boolean | null {
+  if (startInstant === undefined && endInstant === undefined) return null;
+  if (!startInstant || !endInstant) return false;
+  const start = Date.parse(startInstant);
+  const end = Date.parse(endInstant);
+  return Number.isFinite(start) && Number.isFinite(end) && end > start;
+}

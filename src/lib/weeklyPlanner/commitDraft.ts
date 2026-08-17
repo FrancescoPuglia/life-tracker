@@ -21,7 +21,7 @@ import type {
   WeeklyPlanDraft,
   WeekDay,
 } from './types';
-import { timeToMinutes } from './timeUtils';
+import { instantIntervalIsPositive, timeToMinutes } from './timeUtils';
 
 // ============================================================================
 // I/O TYPES (kept minimal so they don't couple this module to `@/types`)
@@ -262,7 +262,8 @@ function classifyBlock(
       blockedReasonType: 'invalid_time',
     };
   }
-  if (endMin <= startMin) {
+  const instantGeometry = instantIntervalIsPositive(block.startInstant, block.endInstant);
+  if (instantGeometry === false || (instantGeometry === null && endMin <= startMin)) {
     return {
       kind: 'skip',
       skipReason: 'invalid',
@@ -484,7 +485,7 @@ export function isDuplicateDraftBlock(
 
   // Cheap path 1: WPI_KEY already in an existing block's notes.
   for (const existing of existingTimeBlocks) {
-    if (existing.notes && existing.notes.includes(key)) return true;
+    if (containsCanonicalWpiKey(existing.notes, key)) return true;
   }
 
   // Cheap path 2: structural — same entity link + same date + same start/end.
@@ -510,6 +511,12 @@ export function isDuplicateDraftBlock(
   }
 
   return false;
+}
+
+function containsCanonicalWpiKey(notes: string | undefined, key: string): boolean {
+  if (!notes) return false;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\r?\\n)[ \\t]*WPI_KEY:\\s*${escaped}[ \\t]*(?:\\r?\\n|$)`).test(notes);
 }
 
 function toIsoDate(v: Date | string): string {

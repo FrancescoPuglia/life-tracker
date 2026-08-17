@@ -100,6 +100,8 @@ export class OpenAIResponsesAdapter {
       : new Set<'read' | 'proposal'>(['read']);
     const definitions = this.registry.definitions(allowedKinds);
     const allowedNames = new Set(this.registry.names(allowedKinds));
+    const controller = new AbortController();
+    const deadline = Date.now() + this.timeoutMs;
     const toolContext: AuthContext = {
       ...input.auth,
       orchestration: {
@@ -107,9 +109,11 @@ export class OpenAIResponsesAdapter {
         promptVersion: this.options.promptVersion,
         schemaVersion: this.options.schemaVersion,
       },
+      executionControl: {
+        deadlineAtMs: deadline,
+        signal: controller.signal,
+      },
     };
-    const controller = new AbortController();
-    const deadline = Date.now() + this.timeoutMs;
     const serializedContext = JSON.stringify(input.authenticatedContext);
     if (Buffer.byteLength(serializedContext, 'utf8') > 128_000) {
       throw new DomainError('LIMIT_EXCEEDED', 'Authenticated AI context exceeds the safe limit.');

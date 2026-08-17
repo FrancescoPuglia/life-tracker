@@ -35,6 +35,11 @@ export interface AuthContext {
   readonly requestId: string;
   /** Added only inside the server-side Responses tool loop. */
   readonly orchestration?: AiOrchestrationMetadata;
+  /** Non-serializable server runtime control; never derived from client input. */
+  readonly executionControl?: Readonly<{
+    readonly deadlineAtMs: number;
+    readonly signal: AbortSignal;
+  }>;
 }
 
 export interface EntityRecord {
@@ -57,6 +62,10 @@ export interface ReadFilter {
   readonly projectId: string | null;
   readonly goalId: string | null;
   readonly taskId: string | null;
+  /** Internal exact-reference filters; model-facing schemas do not expose them. */
+  readonly entityId?: string | null;
+  readonly timeBlockId?: string | null;
+  readonly habitId?: string | null;
 }
 
 export interface ReadPageRequest {
@@ -279,6 +288,8 @@ export interface StoredExecution {
   readonly auditId: string;
   readonly rollbackAuditId?: string;
   readonly idempotencyKeyHash: string;
+  /** Present after rollback so either action retry can heal verification. */
+  readonly rollbackIdempotencyKeyHash?: string;
   readonly createdAt: string;
   readonly status: 'applied' | 'rolled_back';
   readonly verified: boolean;

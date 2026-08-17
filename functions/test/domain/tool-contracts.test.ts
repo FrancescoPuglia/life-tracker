@@ -274,6 +274,25 @@ describe('strict domain tool contracts', () => {
     expect(1 + Number(parameters.projects?.maxItems) + Number(parameters.tasks?.maxItems)
       + Number(parameters.keyResults?.maxItems)).toBe(100);
   });
+
+  it('aligns Goal Architect task duration and custom-unit invariants with persistence', () => {
+    const goalArchitect = TOOL_CONTRACTS.find((contract) => contract.name === 'preview_goal_architecture');
+    const valid = validByName.preview_goal_architecture as Record<string, unknown>;
+    const tasks = valid.tasks as readonly Record<string, unknown>[];
+    const keyResults = valid.keyResults as readonly Record<string, unknown>[];
+    expect(goalArchitect?.schema.safeParse({
+      ...valid,
+      tasks: [{ ...tasks[0], estimatedHours: 24.01 }],
+    }).success).toBe(false);
+    expect(goalArchitect?.schema.safeParse({
+      ...valid,
+      keyResults: [{ ...keyResults[0], unit: 'custom', customUnit: null }, keyResults[1]],
+    }).success).toBe(false);
+    expect(goalArchitect?.schema.safeParse({
+      ...valid,
+      keyResults: [{ ...keyResults[0], unit: 'custom', customUnit: 'chapters' }, keyResults[1]],
+    }).success).toBe(true);
+  });
 });
 
 function assertStrictObjects(schema: JsonSchema, path: string): void {

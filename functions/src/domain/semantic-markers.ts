@@ -6,7 +6,10 @@ export function stripSemanticMarkerLines(
   marker: 'WPI_KEY' | 'GAI_KEY',
 ): string {
   if (!value) return '';
-  const pattern = new RegExp(`^[ \\t]*${marker}:[^\\r\\n]*(?:\\r?\\n|$)`, 'gim');
+  // Reserved semantic markers are server metadata. Remove the token and the
+  // remainder of its line even when hostile input embeds it inline; valid
+  // authoritative markers are extracted separately before this sanitizer.
+  const pattern = new RegExp(`${marker}\\s*:[^\\r\\n]*`, 'gi');
   return value
     .replace(pattern, '')
     .replace(/\n{3,}/g, '\n\n')

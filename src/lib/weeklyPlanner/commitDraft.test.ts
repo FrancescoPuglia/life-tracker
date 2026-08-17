@@ -104,6 +104,32 @@ describe('getDateISOForWeekDay', () => {
 // ============================================================================
 
 describe('validateDraftForCommit', () => {
+  it('accepts a mapped positive interval across the repeated fallback hour', () => {
+    const repeatedHourBlock = manualBlock({
+      startTime: '02:50',
+      endTime: '02:10',
+      startInstant: '2026-10-25T00:50:00.000Z',
+      endInstant: '2026-10-25T01:10:00.000Z',
+      durationMinutes: 20,
+      mapping: {
+        intentId: 'i',
+        status: 'mapped',
+        taskId: 't_catalan',
+        projectId: 'p_openings',
+        goalId: 'g_chess',
+        confidence: 1,
+        reason: 'fixture',
+        matchedKeywords: [],
+      },
+    });
+    const draft = draftFor('Lunedì Catalana 1 ora.');
+    draft.blocks = [repeatedHourBlock];
+    draft.conflicts = [];
+    const validation = validateDraftForCommit(draft, []);
+    expect(validation.canCommit).toBe(true);
+    expect(validation.committableBlocks).toEqual([repeatedHourBlock]);
+  });
+
   it('blocks commit when any block is unmapped', () => {
     const draft = draftFor('Lunedì laundry alle 14.'); // no fixture matches
     const v = validateDraftForCommit(draft, []);
@@ -206,6 +232,17 @@ describe('isDuplicateDraftBlock', () => {
       },
     ];
     expect(isDuplicateDraftBlock(block, existing, draft)).toBe(true);
+  });
+
+  it('does not treat an inline user-authored WPI_KEY token as semantic authority', () => {
+    const { draft, block } = buildMapped();
+    const existing: ExistingTimeBlockSnapshot[] = [{
+      id: 'inline-forgery',
+      notes: `ordinary text WPI_KEY: ${wpiKey(draft.id, block.id)}`,
+      startTime: new Date('2099-01-01T00:00:00Z'),
+      endTime: new Date('2099-01-01T01:00:00Z'),
+    }];
+    expect(isDuplicateDraftBlock(block, existing, draft)).toBe(false);
   });
 
   it('detects structural duplicates by (entity, date, start, end)', () => {

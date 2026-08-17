@@ -133,6 +133,25 @@ describe('authenticated AI client', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('distinguishes rejected Firebase credentials from a network outage', async () => {
+    setCurrentUser(vi.fn().mockRejectedValue({ code: 'auth/user-token-expired' }));
+
+    await expect(requestAIChat({ message: 'Ciao', mode: 'ask' })).rejects.toMatchObject({
+      code: 'session_expired',
+      status: 401,
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps Firebase token network failures recoverable as unavailable', async () => {
+    setCurrentUser(vi.fn().mockRejectedValue({ code: 'auth/network-request-failed' }));
+
+    await expect(requestAIChat({ message: 'Ciao', mode: 'ask' })).rejects.toMatchObject({
+      code: 'unavailable',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     [403, 'forbidden'],
     [409, 'conflict'],

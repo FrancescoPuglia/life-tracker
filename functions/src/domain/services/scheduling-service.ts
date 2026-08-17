@@ -604,8 +604,16 @@ function protectedWpiBlocks(
 ): readonly WpiBlock[] {
   if (typeof record.startTime !== 'string' || typeof record.endTime !== 'string') return [];
   try {
-    const end = Temporal.Instant.from(record.endTime);
-    let cursor = Temporal.Instant.from(record.startTime);
+    const weekStart = monday
+      .toZonedDateTime({ timeZone: timezone, plainTime: Temporal.PlainTime.from('00:00') })
+      .toInstant();
+    const weekEnd = monday.add({ days: 7 })
+      .toZonedDateTime({ timeZone: timezone, plainTime: Temporal.PlainTime.from('00:00') })
+      .toInstant();
+    const recordStart = Temporal.Instant.from(record.startTime);
+    const recordEnd = Temporal.Instant.from(record.endTime);
+    let cursor = Temporal.Instant.compare(recordStart, weekStart) < 0 ? weekStart : recordStart;
+    const end = Temporal.Instant.compare(recordEnd, weekEnd) > 0 ? weekEnd : recordEnd;
     const output: WpiBlock[] = [];
     let segment = 0;
     while (Temporal.Instant.compare(cursor, end) < 0 && segment < 8) {

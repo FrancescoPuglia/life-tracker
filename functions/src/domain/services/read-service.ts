@@ -121,7 +121,8 @@ export class ReadService {
       },
       timeBlocks: {
         count: timeBlocks.length,
-        completedCount: timeBlocks.filter((item) => item.status === 'completed').length,
+        completedCount: timeBlocks.filter((item) =>
+          item.status === 'completed' || item.status === 'overrun').length,
         plannedMinutes: blockMinutes,
       },
       actual: {

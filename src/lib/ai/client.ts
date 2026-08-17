@@ -260,10 +260,24 @@ async function authenticatedRequest(
     }
   } catch (error) {
     if (error instanceof AIClientError) throw error;
+    if (isFirebaseSessionCredentialError(error)) {
+      throw new AIClientError('session_expired', 401);
+    }
     throw new AIClientError('unavailable');
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isFirebaseSessionCredentialError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && new Set([
+    'auth/id-token-expired',
+    'auth/invalid-user-token',
+    'auth/user-disabled',
+    'auth/user-token-expired',
+  ]).has(code);
 }
 
 function sendRequest(

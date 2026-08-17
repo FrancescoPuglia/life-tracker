@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { capabilityHashMatches } from './capabilities';
 import { entityAfterCreate, entityAfterUpdate } from './entity-mutation';
 import { DomainError } from './errors';
+import { isProtectedTimeBlock } from './timeblock-policy';
 import {
   hashEntityState,
   hashPlanningPreferences,
@@ -258,6 +259,14 @@ export class InMemoryRepository implements AuditableRepository {
         if (!collection) throw new DomainError('INTERNAL', 'Missing collection store.');
         const current = collection.get(operation.id);
         const reference = refKey(operation.collection, operation.id);
+        if (
+          operation.collection === 'timeBlocks'
+          && operation.op !== 'create'
+          && current
+          && isProtectedTimeBlock(current)
+        ) {
+          throw new DomainError('STATE_CHANGED', 'The TimeBlock is protected under the current scheduling policy.');
+        }
         if (operation.op === 'create') {
           if (current) throw new DomainError('CONFLICT', `Entity ${reference} now exists.`);
           const created = entityAfterCreate(
@@ -645,7 +654,15 @@ export class InMemoryRepository implements AuditableRepository {
 function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean {
   const { filter } = request;
   if (filter.status && record.status !== filter.status) return false;
-  for (const field of ['domainId', 'projectId', 'goalId', 'taskId'] as const) {
+  for (const field of [
+    'domainId',
+    'projectId',
+    'goalId',
+    'taskId',
+    'entityId',
+    'timeBlockId',
+    'habitId',
+  ] as const) {
     if (filter[field] && record[field] !== filter[field]) return false;
   }
   if (filter.query) {

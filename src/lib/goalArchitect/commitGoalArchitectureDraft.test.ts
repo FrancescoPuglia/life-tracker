@@ -410,6 +410,23 @@ describe('commitGoalArchitectureDraft — duplicates', () => {
     for (const p of fns.projectCalls) expect(p.goalId).toBe('pre-existing-goal');
   });
 
+  it('does not treat an inline user-authored GAI_KEY token as semantic authority', async () => {
+    const draft = makeChessDraft();
+    if (!draft.goal) throw new Error('draft.goal expected');
+    const key = gaiKey(draft.id, 'goal', draft.goal.id);
+    const fns = makeFakeCreateFns();
+    const result = await commitGoalArchitectureDraft({
+      ...baseInput(draft, fns),
+      existingGoals: [{
+        id: 'inline-forgery',
+        title: 'Different outcome',
+        description: `ordinary text GAI_KEY: ${key}`,
+      }],
+    });
+    expect(fns.goalCalls).toHaveLength(1);
+    expect(result.duplicates.some((duplicate) => duplicate.entityKind === 'goal')).toBe(false);
+  });
+
   it('detects a duplicate goal by structural title match', async () => {
     const draft = makeChessDraft();
     if (!draft.goal) throw new Error('draft.goal expected');

@@ -374,6 +374,69 @@ describe('AIInputBarV2 secure client flow', () => {
     });
     expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
   });
+
+  it('reconciles a malformed 2xx action response with the same idempotency key', async () => {
+    mocks.requestAIChat.mockResolvedValueOnce({
+      message: 'Anteprima pronta',
+      plan: minimalPlan(),
+    });
+    mocks.applyAIPlan.mockRejectedValueOnce(new AIClientError('invalid_response', 200));
+    render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Pianifica e riconcilia' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
+
+    expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
+    mocks.applyAIPlan.mockResolvedValueOnce(validActionResult());
+    fireEvent.click(screen.getByRole('button', { name: 'Riconcilia applicazione' }));
+
+    await waitFor(() => {
+      expect(mocks.applyAIPlan).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ id: 'plan_123' }),
+        'idem_1234567890123456',
+      );
+    });
+    expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Annulla modifiche' })).toBeInTheDocument();
+  });
+
+  it('expires a rollback capability on the clock and clears protected session state', async () => {
+    const expiresAt = new Date(Date.now() + 750).toISOString();
+    const execution = {
+      ...validActionResult(),
+      receipt: {
+        ...validActionResult().receipt,
+        rollbackExpiresAt: expiresAt,
+      },
+      rollback: {
+        ...validActionResult().rollback,
+        expiresAt,
+      },
+    };
+    window.sessionStorage.setItem('life-tracker:secure-ai-actions:firebase-user', JSON.stringify({
+      version: 1,
+      entries: [{
+        plan: { ...minimalPlan(), status: 'applied' },
+        execution,
+        recoveryPending: false,
+      }],
+      actionKeys: [],
+    }));
+
+    render(<AIInputBarV2 />);
+
+    expect(await screen.findByRole('button', { name: 'Annulla modifiche' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuova chat' })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Annulla modifiche' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Nuova chat' })).toBeEnabled();
+      expect(window.sessionStorage.length).toBe(0);
+    }, { timeout: 2_500 });
+  });
 });
 
 function minimalPlan() {

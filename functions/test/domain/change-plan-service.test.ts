@@ -27,6 +27,35 @@ describe('ChangePlanService authorization and lifecycle', () => {
     });
   });
 
+  it('does not persist a proposal after the Responses execution is aborted', async () => {
+    const harness = createHarness(['plan-aborted']);
+    const controller = new AbortController();
+    const capture = harness.repository.captureSnapshot.bind(harness.repository);
+    vi.spyOn(harness.repository, 'captureSnapshot').mockImplementation(async (...args) => {
+      const snapshot = await capture(...args);
+      controller.abort();
+      return snapshot;
+    });
+    const controlledContext: AuthContext = {
+      ...context(UID, 'aborted-preview'),
+      executionControl: {
+        deadlineAtMs: Date.now() + 60_000,
+        signal: controller.signal,
+      },
+    };
+
+    await expect(harness.service.previewChanges(controlledContext, {
+      operations: [{
+        op: 'update',
+        collection: 'timeBlocks',
+        id: 'block-1',
+        patch: [{ field: 'title', value: 'Must never persist' }],
+      }],
+      reason: 'Abort between snapshot and preview persistence.',
+    })).rejects.toMatchObject({ code: 'INTERNAL' });
+    expect(await harness.repository.getPlan(UID, 'plan-aborted')).toBeNull();
+  });
+
   it('applies atomically once and makes same-key network/concurrent retries idempotent', async () => {
     const harness = createHarness(['plan-1', 'execution-a', 'execution-b']);
     const preview = await updateTitlePreview(harness.service, UID, 'Applied title');

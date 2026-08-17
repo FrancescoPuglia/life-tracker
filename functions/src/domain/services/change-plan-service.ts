@@ -12,6 +12,7 @@ import {
 } from '../integrity';
 import {
   assertAuthenticated,
+  assertExecutionActive,
   normalizePublicOperation,
   REFERENCE_FIELDS,
   validateWritableField,
@@ -118,6 +119,7 @@ export class ChangePlanService {
     metadata: PreviewMetadata = {},
   ): Promise<PublicChangePlan> {
     assertAuthenticated(context);
+    assertExecutionActive(context);
     if (!operations.length || operations.length > MAX_OPERATIONS) {
       throw new DomainError('LIMIT_EXCEEDED', `A preview must contain 1-${MAX_OPERATIONS} operations.`);
     }
@@ -144,6 +146,7 @@ export class ChangePlanService {
       createdAt,
       validation,
     );
+    assertExecutionActive(context);
     // Close the validation-to-snapshot race. Service-specific scope hashes are
     // checked inside captureSnapshot; generic references/scopes are recomputed
     // once after capture and must describe the identical state.
@@ -200,6 +203,7 @@ export class ChangePlanService {
       MAX_PUBLIC_PREVIEW_BYTES,
       'Public preview',
     );
+    assertExecutionActive(context);
     const stored = await this.repository.savePreview({
       plan,
       snapshot,
@@ -536,17 +540,12 @@ export class ChangePlanService {
       const page = await this.repository.listEntities(uid, childCollection, {
         filter: {
           ...filter,
-          ...(field === 'domainId' || field === 'goalId' || field === 'projectId' || field === 'taskId'
-            ? { [field]: id }
-            : {}),
+          [field]: id,
         },
         cursor: null,
         limit: 1,
       });
-      const exactItems = field === 'entityId' || field === 'timeBlockId' || field === 'habitId'
-        ? page.items.filter((item) => item[field] === id)
-        : page.items;
-      if (exactItems.length) {
+      if (page.items.length) {
         throw new DomainError('CONFLICT', `Cannot delete referenced ${collection}/${id}.`);
       }
       const scope: ValidationScopeExpectation = {

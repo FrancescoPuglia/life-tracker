@@ -22,6 +22,7 @@ import {
   verifyStoredPlan,
 } from './integrity';
 import { assertEntityId } from './policy';
+import { isProtectedTimeBlock } from './timeblock-policy';
 import type {
   ApplyPlanRequest,
   AuditableRepository,
@@ -130,11 +131,15 @@ export class FirestoreRepository implements AuditableRepository {
     let exhausted = false;
     const items: EntityRecord[] = [];
     const collectionRef = this.firestore.collection(`users/${uid}/${collection}`);
+    const exactFilter = firstExactReferenceFilter(request);
 
     while (items.length < request.limit && scanned < MAX_SCAN_PER_PAGE && !exhausted) {
       const remainingScan = MAX_SCAN_PER_PAGE - scanned;
       const batchSize = Math.min(SCAN_BATCH_SIZE, remainingScan);
-      let query = collectionRef.orderBy(FieldPath.documentId()).limit(batchSize);
+      let query: Query<DocumentData> = exactFilter
+        ? collectionRef.where(exactFilter[0], '==', exactFilter[1])
+        : collectionRef;
+      query = query.orderBy(FieldPath.documentId()).limit(batchSize);
       if (lastId) query = query.startAfter(lastId);
       const snapshot = await query.get();
       exhausted = snapshot.size < batchSize;
@@ -433,6 +438,14 @@ export class FirestoreRepository implements AuditableRepository {
           : null;
         if (!operation || !entityRef) throw new DomainError('INTERNAL', 'Plan operation mismatch.');
         const key = refKey(operation.collection, operation.id);
+        if (
+          operation.collection === 'timeBlocks'
+          && operation.op !== 'create'
+          && current
+          && isProtectedTimeBlock(current)
+        ) {
+          throw new DomainError('STATE_CHANGED', 'The TimeBlock is protected under the current scheduling policy.');
+        }
         if (operation.op === 'create') {
           if (current) throw new DomainError('STATE_CHANGED', 'The preview is stale.');
           const created = entityAfterCreate(
@@ -555,7 +568,13 @@ export class FirestoreRepository implements AuditableRepository {
       return { result, replay: false };
     });
 
-    return this.verifyAndMark(request.uid, transactionResult.result, transactionResult.replay, request.idempotencyKeyHash);
+    return this.verifyAndMark(
+      request.uid,
+      transactionResult.result,
+      transactionResult.replay,
+      'apply',
+      request.idempotencyKeyHash,
+    );
   }
 
   async rollbackExecutionAtomically(request: RollbackExecutionRequest): Promise<PlanActionResult> {
@@ -703,6 +722,7 @@ export class FirestoreRepository implements AuditableRepository {
         status: 'rolled_back',
         verified: false,
         rollbackConsumedAt: request.now,
+        rollbackIdempotencyKeyHash: request.idempotencyKeyHash,
         restoredStateHashes,
         result: withoutReplay(result),
       };
@@ -740,7 +760,13 @@ export class FirestoreRepository implements AuditableRepository {
       return { result, replay: false };
     });
 
-    return this.verifyAndMark(request.uid, transactionResult.result, transactionResult.replay, request.idempotencyKeyHash);
+    return this.verifyAndMark(
+      request.uid,
+      transactionResult.result,
+      transactionResult.replay,
+      'rollback',
+      request.idempotencyKeyHash,
+    );
   }
 
   async getExecution(uid: string, executionId: string): Promise<StoredExecution | null> {
@@ -772,6 +798,7 @@ export class FirestoreRepository implements AuditableRepository {
     uid: string,
     result: PlanActionResult,
     replay: boolean,
+    originatingAction: 'apply' | 'rollback',
     idempotencyKeyHash: string,
   ): Promise<PlanActionResult> {
     if (result.verified) return { ...result, idempotentReplay: replay || result.idempotentReplay };
@@ -797,7 +824,7 @@ export class FirestoreRepository implements AuditableRepository {
       const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(execution.uid, execution.id));
       const idempotencyRef = this.idempotencyRef(
         execution.uid,
-        result.status === 'applied' ? 'apply' : 'rollback',
+        originatingAction,
         idempotencyKeyHash,
       );
       const auditRef = this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${execution.uid}_${execution.auditId}`);
@@ -813,7 +840,19 @@ export class FirestoreRepository implements AuditableRepository {
           'apply',
           execution.idempotencyKeyHash,
         );
-        batch.update(originalApplyRef, { result: encodeServer(withoutRollback(verified)) });
+        if (originalApplyRef.path !== idempotencyRef.path) {
+          batch.update(originalApplyRef, { result: encodeServer(withoutRollback(verified)) });
+        }
+        if (execution.rollbackIdempotencyKeyHash) {
+          const originalRollbackRef = this.idempotencyRef(
+            execution.uid,
+            'rollback',
+            execution.rollbackIdempotencyKeyHash,
+          );
+          if (originalRollbackRef.path !== idempotencyRef.path) {
+            batch.update(originalRollbackRef, { result: encodeServer(withoutRollback(verified)) });
+          }
+        }
       }
       batch.update(auditRef, { 'metadata.verified': true });
       await batch.commit();
@@ -1264,7 +1303,15 @@ function decodeFirestore(value: unknown): unknown {
 function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean {
   const { filter } = request;
   if (filter.status && record.status !== filter.status) return false;
-  for (const field of ['domainId', 'projectId', 'goalId', 'taskId'] as const) {
+  for (const field of [
+    'domainId',
+    'projectId',
+    'goalId',
+    'taskId',
+    'entityId',
+    'timeBlockId',
+    'habitId',
+  ] as const) {
     if (filter[field] && record[field] !== filter[field]) return false;
   }
   if (filter.query) {
@@ -1289,6 +1336,30 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
     if (filter.to && start >= Date.parse(filter.to)) return false;
   }
   return true;
+}
+
+function firstExactReferenceFilter(
+  request: ReadPageRequest,
+): readonly [
+  'domainId' | 'projectId' | 'goalId' | 'taskId' | 'entityId' | 'timeBlockId' | 'habitId',
+  string,
+] | null {
+  for (const field of [
+    'domainId',
+    'projectId',
+    'goalId',
+    'taskId',
+    'entityId',
+    'timeBlockId',
+    'habitId',
+  ] as const) {
+    const value = request.filter[field];
+    if (value) {
+      assertEntityId(value);
+      return [field, value];
+    }
+  }
+  return null;
 }
 
 function matchesValidationScope(record: EntityRecord, scope: ValidationScopeQuery): boolean {

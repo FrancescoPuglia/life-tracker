@@ -91,10 +91,20 @@ function parseLifePlanActionResponse(value) {
     || result.status !== receipt.status
     || result.verified !== receipt.verified
   ) invalid('response receipt consistency');
+  if (!result.verified) invalid('response.verified');
   if (result.status === 'applied' && receipt.rollbackAvailable !== Boolean(rollback)) {
     invalid('response.rollback');
   }
-  if (result.status === 'rolled_back' && rollback) invalid('response.rollback');
+  if (
+    result.status === 'applied'
+    && (rollback
+      ? receipt.rollbackExpiresAt !== rollback.expiresAt
+      : receipt.rollbackExpiresAt !== null)
+  ) invalid('response.rollback expiry');
+  if (
+    result.status === 'rolled_back'
+    && (rollback || receipt.rollbackAvailable || receipt.rollbackExpiresAt !== null)
+  ) invalid('response.rollback');
   return result;
 }
 

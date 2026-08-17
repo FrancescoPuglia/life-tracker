@@ -42,6 +42,29 @@ describe('shared Life Tracker AI contract', () => {
       planId: 'different-plan',
     })).toThrow();
   });
+
+  it('requires successful actions to be verified with an exactly bound rollback', () => {
+    const response = validActionResponse();
+    expect(() => parseLifePlanActionResponse({
+      ...response,
+      verified: false,
+      receipt: { ...response.receipt, verified: false },
+    })).toThrow();
+    expect(() => parseLifePlanActionResponse({
+      ...response,
+      receipt: { ...response.receipt, rollbackExpiresAt: '2030-01-09T09:01:00.000Z' },
+    })).toThrow();
+    expect(() => parseLifePlanActionResponse({
+      ...response,
+      status: 'rolled_back',
+      rollback: undefined,
+      receipt: {
+        ...response.receipt,
+        status: 'rolled_back',
+        rollbackAvailable: true,
+      },
+    })).toThrow();
+  });
 });
 
 function validPlan(): LifePlanPreview {

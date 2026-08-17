@@ -604,6 +604,16 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     await expect(service.rollbackExecution(context(uid, 'post-commit-rollback'), rollbackInput))
       .rejects.toMatchObject({ code: 'COMMITTED_UNVERIFIED' });
     expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?.title).toBe('Original block');
+    const applyObservedRollback = await service.applyPlan(
+      context(uid, 'post-commit-original-apply-retry'),
+      applyInput,
+    );
+    expect(applyObservedRollback).toMatchObject({
+      executionId: recovered.executionId,
+      status: 'rolled_back',
+      verified: true,
+      idempotentReplay: true,
+    });
     const rollbackRecovered = await service.rollbackExecution(
       context(uid, 'post-commit-rollback-retry'),
       rollbackInput,
@@ -671,6 +681,53 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     });
     expect(page.items.map((item) => item.id)).toEqual(['log-boundary']);
   }, 30_000);
+
+  it('uses an exact indexed reference filter beyond the bounded scan window', async () => {
+    const uid = uniqueUid('exact-reference');
+    const now = Timestamp.fromDate(new Date('2026-08-17T00:00:00.000Z'));
+    for (let offset = 0; offset < 501; offset += 400) {
+      const batch = firestore.batch();
+      for (let index = offset; index < Math.min(offset + 400, 501); index += 1) {
+        const id = `note-${String(index).padStart(4, '0')}`;
+        batch.set(firestore.doc(`users/${uid}/notes/${id}`), {
+          id,
+          userId: uid,
+          entityId: `unrelated-${index}`,
+          title: 'Unrelated',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await batch.commit();
+    }
+    await firestore.doc(`users/${uid}/notes/zz-target-note`).set({
+      id: 'zz-target-note',
+      userId: uid,
+      entityId: 'project-target',
+      title: 'Target',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const repository = new FirestoreRepository(firestore);
+    const page = await repository.listEntities(uid, 'notes', {
+      filter: {
+        query: null,
+        from: null,
+        to: null,
+        status: null,
+        domainId: null,
+        projectId: null,
+        goalId: null,
+        taskId: null,
+        entityId: 'project-target',
+      },
+      cursor: null,
+      limit: 1,
+    });
+
+    expect(page.items.map((item) => item.id)).toEqual(['zz-target-note']);
+  }, 60_000);
 
   it('rolls back once, verifies restoration, denies wrong-user rollback, and refuses newer edits', async () => {
     const owner = uniqueUid('rollback-owner');
