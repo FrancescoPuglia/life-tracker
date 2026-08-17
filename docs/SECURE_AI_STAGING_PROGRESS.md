@@ -283,16 +283,23 @@ The per-turn provider-identity checkpoint passed its focused adapter suite
 build, `git diff --check`, and the canonical static security scan. Its locally
 generated backend source fingerprint is
 `sha256:d4046d28fdb96b6c3b2454b1bfad91dfa89980a03b0727e8984c644b68caba24`.
+At exact source checkpoint `08f26fa94f070c1f9d0fb1f30f275fe6e6d5e1fb`,
+the fresh production static export and output-inclusive scan passed, static
+browser E2E passed 1/1, and the full isolated Auth + Firestore + Functions
+emulator browser suite passed 3/3 in 4.5 minutes. Those scenarios exercised
+grounded read, preview/reject, authenticated tool orchestration, apply, drift
+rejection, rollback, and mobile behavior with the fake Responses transport.
+No cloud project or real provider secret was used.
 
 The exact static export attested source
-`c1a837994680c808f23dea10e9d05fb1d3532ea3` and public AI backend state
+`08f26fa94f070c1f9d0fb1f30f275fe6e6d5e1fb` and public AI backend state
 `not-configured`; a configured production or staging export is required to
 attest its exact project-bound Function URL instead. The ignored Playwright
 status artifacts both reported `passed`. Screenshot SHA-256 evidence for the
 emulator conflict preview, applied receipt, and mobile grounded answer is,
-respectively, `2f287b927823a690bdac02bd99b2cf3b14a2ee984a1f5cb5e3c9eb14070e9bfd`,
-`7f79119f542df9fcedfd3487056592447f1d48d7027ec207b14522aca307a19d`,
-and `b9c881b1ee6aa59a22ba853eeb76e1898a783f9e1a5ca2078ea19b9ef459e47e`.
+respectively, `28149313590cc192153f6d1786a1c964af55f9acdb6207819f90f77800d2a13b`,
+`b419328e47721839ea234ef5819cc782b7674f4f81d01c4add4dca21f5549e7a`,
+and `8ce681d3b397a1f9f5755b3d679ea9de0f44950a72966e177ff1c39941467703`.
 This checkpoint is not yet deployed; production remains untouched.
 
 ## Exact external unblock
