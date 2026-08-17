@@ -99,6 +99,41 @@ describe('bounded OpenAI Responses orchestration', () => {
     },
   );
 
+  it.each(['failed', 'incomplete'] as const)(
+    'rejects an explicitly %s intermediate response before executing its tool call',
+    async (status) => {
+      const { adapter, repository } = setup([{
+        id: `unsafe-${status}-tool-turn`,
+        status,
+        output: [{
+          type: 'function_call',
+          call_id: `call-${status}`,
+          name: 'preview_changes',
+          arguments: JSON.stringify({
+            operations: [{
+              op: 'update',
+              collection: 'domains',
+              id: 'domain-1',
+              patch: [{ field: 'name', value: 'Must not execute' }],
+            }],
+            reason: `The provider marked this response ${status}.`,
+          }),
+        }],
+      }]);
+      await expect(adapter.run({
+        auth: AUTH,
+        message: 'Plan my day',
+        mode: 'plan',
+        authenticatedContext: CONTEXT,
+      })).rejects.toMatchObject({
+        code: 'INTERNAL',
+        message: 'The AI response did not complete safely.',
+      });
+      expect(await repository.getPlan(UID, 'plan-1')).toBeNull();
+      expect(await repository.listAuditEventsForUser(UID)).toEqual([]);
+    },
+  );
+
   it('allows a proposal in plan mode but never sends the approval capability back to the model', async () => {
     const toolCall = {
       type: 'function_call',

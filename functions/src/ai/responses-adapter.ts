@@ -202,14 +202,14 @@ export class OpenAIResponsesAdapter {
           response.model,
           this.options.model,
         );
+        if (response.status === 'failed' || response.status === 'incomplete') {
+          throw new DomainError('INTERNAL', 'The AI response did not complete safely.');
+        }
         providerCalls += 1;
         addUsage(usage, response.usage);
         promptItems.push(...response.output);
         const calls = response.output.filter(isFunctionCall);
         if (!calls.length) {
-          if (response.status === 'failed' || response.status === 'incomplete') {
-            throw new DomainError('INTERNAL', 'The AI response did not complete safely.');
-          }
           const finalText = normalizeText(response);
           const metadata = {
             providerResponseId: response.id,
