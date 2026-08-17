@@ -90,6 +90,12 @@ export function requireFrontendBuildCommit(actual: string | null, expected: stri
   }
 }
 
+export function requireFrontendAIBackend(actual: string | null, expected: string): void {
+  if (!expected || actual !== expected) {
+    throw new Error('Staging frontend AI backend marker does not match the reviewed Function endpoint.');
+  }
+}
+
 /**
  * Response checks deliberately throw fixed classifications. Never let an
  * assertion framework serialize a body that can contain an approval or

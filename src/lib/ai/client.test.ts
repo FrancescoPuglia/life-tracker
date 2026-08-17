@@ -9,7 +9,7 @@ import {
   type AIPlanPreview,
 } from './client';
 
-const API_BASE_URL = 'https://ai.example.test/life-tracker';
+const API_BASE_URL = 'https://europe-west1-life-tracker-12000.cloudfunctions.net/lifeTrackerAiApi';
 
 function setCurrentUser(getIdToken: ReturnType<typeof vi.fn> | null) {
   (auth as unknown as { currentUser: unknown }).currentUser = getIdToken
@@ -33,8 +33,10 @@ describe('authenticated AI client', () => {
 
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_AI_API_BASE_URL;
+    delete process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR;
     setCurrentUser(null);
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -48,12 +50,17 @@ describe('authenticated AI client', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('allows plain HTTP only for loopback development backends', () => {
-    process.env.NEXT_PUBLIC_AI_API_BASE_URL = 'http://api.example.test';
+  it('rejects arbitrary HTTPS hosts and allows only the exact emulator path in explicit development', () => {
+    process.env.NEXT_PUBLIC_AI_API_BASE_URL = 'https://attacker.example/lifeTrackerAiApi';
     expect(getAIBackendBaseUrl()).toBeNull();
 
-    process.env.NEXT_PUBLIC_AI_API_BASE_URL = 'http://127.0.0.1:5001/local-api/';
-    expect(getAIBackendBaseUrl()).toBe('http://127.0.0.1:5001/local-api');
+    vi.stubEnv('NODE_ENV', 'development');
+    process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR = 'true';
+    process.env.NEXT_PUBLIC_AI_API_BASE_URL =
+      'http://127.0.0.1:5001/life-tracker-12000/europe-west1/lifeTrackerAiApi/';
+    expect(getAIBackendBaseUrl()).toBe(
+      'http://127.0.0.1:5001/life-tracker-12000/europe-west1/lifeTrackerAiApi',
+    );
   });
 
   it('requires a signed-in Firebase user before making a request', async () => {

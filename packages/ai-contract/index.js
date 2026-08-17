@@ -7,6 +7,56 @@ const ENTITY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const FIELD = /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const CAPABILITY = /^[A-Za-z0-9_-]{32,512}$/;
+const FIREBASE_PROJECT_ID = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+const LIFE_TRACKER_FUNCTION_REGION = 'europe-west1';
+const LIFE_TRACKER_FUNCTION_NAME = 'lifeTrackerAiApi';
+
+/**
+ * Bind the browser's bearer-token destination to the same Firebase project
+ * that issued the token. A mutable build variable may select only the exact
+ * canonical Function URL; explicit local development may select only the
+ * corresponding Functions emulator path.
+ */
+function resolveLifeTrackerAiBackendBaseUrl(configured, projectId, allowEmulator = false) {
+  if (typeof configured !== 'string' || typeof projectId !== 'string') return null;
+  const value = configured.trim();
+  const ownerProject = projectId.trim();
+  if (!value || !FIREBASE_PROJECT_ID.test(ownerProject)) return null;
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password || url.search || url.hash) return null;
+  const path = url.pathname.endsWith('/') && url.pathname.length > 1
+    ? url.pathname.slice(0, -1)
+    : url.pathname;
+
+  const expectedFunctionPath = `/${LIFE_TRACKER_FUNCTION_NAME}`;
+  const expectedFunctionHost = `${LIFE_TRACKER_FUNCTION_REGION}-${ownerProject}.cloudfunctions.net`;
+  if (
+    url.protocol === 'https:'
+    && url.hostname === expectedFunctionHost
+    && !url.port
+    && path === expectedFunctionPath
+  ) {
+    return `${url.origin}${path}`;
+  }
+
+  const expectedEmulatorPath = `/${ownerProject}/${LIFE_TRACKER_FUNCTION_REGION}/${LIFE_TRACKER_FUNCTION_NAME}`;
+  if (
+    allowEmulator === true
+    && url.protocol === 'http:'
+    && ['127.0.0.1', 'localhost'].includes(url.hostname)
+    && url.port === '5001'
+    && path === expectedEmulatorPath
+  ) {
+    return `${url.origin}${path}`;
+  }
+  return null;
+}
 
 function parseLifePlanPreview(value) {
   assertPayloadSize(value, 'plan');
@@ -295,6 +345,7 @@ function invalid(path) {
 module.exports = {
   LIFE_PLAN_ACTIONS,
   LIFE_PLAN_STATUSES,
+  resolveLifeTrackerAiBackendBaseUrl,
   parseLifePlanPreview,
   parseLifePlanActionResponse,
 };

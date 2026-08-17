@@ -20,6 +20,7 @@ interface ResponseOutputItem {
 
 interface ResponseLike {
   readonly id: string;
+  readonly model?: string;
   readonly status?: string;
   readonly output: readonly ResponseOutputItem[];
   readonly output_text?: string;
@@ -59,6 +60,7 @@ export interface NormalizedAiResponse {
   readonly plan?: PublicChangePlan;
   readonly metadata: Readonly<{
     readonly providerResponseId: string;
+    readonly providerModel: string;
     readonly model: string;
     readonly reasoningEffort: string;
     readonly promptVersion: string;
@@ -205,8 +207,10 @@ export class OpenAIResponsesAdapter {
             throw new DomainError('INTERNAL', 'The AI response did not complete safely.');
           }
           const finalText = normalizeText(response);
+          const providerModel = normalizeProviderModel(response.model);
           const metadata = {
             providerResponseId: response.id,
+            providerModel,
             model: this.options.model,
             reasoningEffort: this.options.reasoningEffort ?? 'provider_default',
             promptVersion: this.options.promptVersion,
@@ -265,6 +269,13 @@ export class OpenAIResponsesAdapter {
       controller.abort();
     }
   }
+}
+
+function normalizeProviderModel(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+    throw new DomainError('INTERNAL', 'The AI provider response omitted safe model metadata.');
+  }
+  return value;
 }
 
 async function callProviderSafely(

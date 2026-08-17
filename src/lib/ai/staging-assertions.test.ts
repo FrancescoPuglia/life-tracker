@@ -5,6 +5,7 @@ import {
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
+  requireFrontendAIBackend,
   requireFrontendBuildCommit,
   requireStagingHttpStatus,
   stagingHttpFailureEvidence,
@@ -199,5 +200,13 @@ describe('secret-safe staging evidence assertions', () => {
     expect(() => requireFrontendBuildCommit('b'.repeat(40), expected))
       .toThrow('Staging frontend source marker does not match the clean committed checkout.');
     expect(() => requireFrontendBuildCommit(null, expected)).toThrow();
+  });
+
+  it('fails closed when the frontend bearer-token destination is not the reviewed Function', () => {
+    const expected = 'https://europe-west1-life-tracker-staging.cloudfunctions.net/lifeTrackerAiApi';
+    expect(() => requireFrontendAIBackend(expected, expected)).not.toThrow();
+    expect(() => requireFrontendAIBackend('https://attacker.example', expected))
+      .toThrow('Staging frontend AI backend marker does not match the reviewed Function endpoint.');
+    expect(() => requireFrontendAIBackend(null, expected)).toThrow();
   });
 });

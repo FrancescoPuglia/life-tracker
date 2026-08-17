@@ -1,4 +1,5 @@
 import { auth } from '@/lib/firebase';
+import { getConfiguredAIBackendBaseUrl } from '@/lib/ai/backendConfig';
 import {
   parseLifePlanActionResponse,
   parseLifePlanPreview,
@@ -77,18 +78,7 @@ export class AIClientError extends Error {
  * same-origin Next.js route that does not exist at runtime.
  */
 export function getAIBackendBaseUrl(): string | null {
-  const configured = process.env.NEXT_PUBLIC_AI_API_BASE_URL?.trim();
-  if (!configured) return null;
-
-  try {
-    const url = new URL(configured);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-    if (url.protocol === 'http:' && !isLoopbackHostname(url.hostname)) return null;
-    if (url.username || url.password || url.search || url.hash) return null;
-    return url.toString().replace(/\/$/, '');
-  } catch {
-    return null;
-  }
+  return getConfiguredAIBackendBaseUrl();
 }
 
 export function isAIBackendConfigured(): boolean {
@@ -401,11 +391,4 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '[::1]'
-    || hostname === '::1';
 }

@@ -1,6 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { resolveLifeTrackerAiBackendBaseUrl } = require('../packages/ai-contract');
 
 const root = resolve(new URL('..', import.meta.url).pathname);
 const includeOutput = process.argv.includes('--include-output');
@@ -125,31 +129,15 @@ if (findings.length > 0) {
 function validateConfiguredBackend() {
   const configured = process.env.NEXT_PUBLIC_AI_API_BASE_URL?.trim();
   if (!configured) return;
-
-  try {
-    const url = new URL(configured);
-    if (!['https:', 'http:'].includes(url.protocol)) throw new Error();
-    if (url.username || url.password || url.search || url.hash) throw new Error();
-    const loopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname);
-    if (url.protocol === 'http:' && !loopback) {
-      findings.push({
-        file: 'NEXT_PUBLIC_AI_API_BASE_URL',
-        label: 'non-loopback backend URLs must use HTTPS',
-      });
-    }
-    if (
-      process.env.GITHUB_PAGES === 'true'
-      && (url.protocol !== 'https:' || loopback)
-    ) {
-      findings.push({
-        file: 'NEXT_PUBLIC_AI_API_BASE_URL',
-        label: 'GitHub Pages backend URL must be a public HTTPS URL',
-      });
-    }
-  } catch {
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim()
+    || 'life-tracker-12000';
+  const allowEmulator = process.env.GITHUB_PAGES !== 'true'
+    && process.env.NODE_ENV !== 'production'
+    && process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === 'true';
+  if (!resolveLifeTrackerAiBackendBaseUrl(configured, projectId, allowEmulator)) {
     findings.push({
       file: 'NEXT_PUBLIC_AI_API_BASE_URL',
-      label: 'backend URL must be an absolute HTTP(S) URL without credentials, query, or fragment',
+      label: 'backend URL must be the exact project-bound lifeTrackerAiApi Function endpoint',
     });
   }
 }

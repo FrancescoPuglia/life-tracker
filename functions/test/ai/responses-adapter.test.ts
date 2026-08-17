@@ -45,6 +45,24 @@ describe('bounded OpenAI Responses orchestration', () => {
     expect(request.parallel_tool_calls).toBe(false);
   });
 
+  it('fails closed when the provider omits a safe model identity', async () => {
+    const { adapter } = setup([{
+      id: 'response-without-model',
+      model: null,
+      output: [],
+      output_text: 'Unattested answer',
+    }]);
+    await expect(adapter.run({
+      auth: AUTH,
+      message: 'Analyze my data',
+      mode: 'analyze',
+      authenticatedContext: CONTEXT,
+    })).rejects.toMatchObject({
+      code: 'INTERNAL',
+      message: 'The AI provider response omitted safe model metadata.',
+    });
+  });
+
   it('allows a proposal in plan mode but never sends the approval capability back to the model', async () => {
     const toolCall = {
       type: 'function_call',
@@ -104,6 +122,7 @@ describe('bounded OpenAI Responses orchestration', () => {
     });
     expect(result.metadata).toEqual({
       providerResponseId: 'response-final',
+      providerModel: 'test-model',
       model: 'test-model',
       reasoningEffort: 'provider_default',
       promptVersion: 'prompt-v1',
@@ -520,7 +539,10 @@ function setup(
   const requests: Readonly<Record<string, unknown>>[] = [];
   const create = vi.fn(async (request: Readonly<Record<string, unknown>>) => {
     requests.push(request);
-    return responses[Math.min(index++, responses.length - 1)] as never;
+    return {
+      model: 'test-model',
+      ...responses[Math.min(index++, responses.length - 1)],
+    } as never;
   });
   const client: ResponsesClientLike = { responses: { create } };
   const adapter = new OpenAIResponsesAdapter(client, domain.registry, domain.executor, {

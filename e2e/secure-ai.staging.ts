@@ -9,6 +9,7 @@ import {
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
+  requireFrontendAIBackend,
   requireFrontendBuildCommit,
   requireStagingHttpStatus,
   stagingHttpFailureEvidence,
@@ -66,6 +67,7 @@ interface SmokeRecord {
   readonly status: 'PASS';
   readonly requestId?: string;
   readonly providerResponseId?: string;
+  readonly providerModel?: string;
   readonly providerCalls?: number;
   readonly toolCalls?: number;
   readonly toolNames?: readonly string[];
@@ -81,6 +83,8 @@ interface SmokeRecord {
 test.describe.serial('real secure AI staging boundary', () => {
   test('authenticated grounded reads, hostile data, preview/reject/apply/replay/drift/undo, and cross-user denial', async ({ page }, testInfo) => {
     const runId = `stg-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${randomBytes(3).toString('hex')}`;
+    assertCleanSource();
+    const sourceCommit = currentSourceCommit();
     const records: SmokeRecord[] = [];
     const consoleFailures: string[] = [];
     const directOpenAiRequests: string[] = [];
@@ -129,8 +133,7 @@ test.describe.serial('real secure AI staging boundary', () => {
     });
 
     try {
-      assertCleanSource();
-      await verifyHealthAndCors(page, records);
+      await verifyHealthAndCors(page, records, sourceCommit);
       failureStage = 'create_staging_identity_a';
       const activeA = accountA = await createStagingIdentity(`${runId}-a`);
       failureStage = 'create_staging_identity_b';
@@ -727,6 +730,17 @@ test.describe.serial('real secure AI staging boundary', () => {
       },
     ]);
     const completed = new Set(records.map((record) => record.name));
+    try {
+      assertCleanSource();
+      if (currentSourceCommit() !== sourceCommit) {
+        throw new Error('Staging source commit changed during the verification run.');
+      }
+    } catch (error) {
+      if (primaryFailure === undefined) {
+        primaryFailure = error;
+        failureStage = 'source_changed_during_run';
+      }
+    }
     const overallStatus = primaryFailure === undefined && cleanup.userAndAuthCleanupComplete ? 'PASS' : 'FAIL';
     await persistEvidence(testInfo, {
       overallStatus,
@@ -739,7 +753,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       failure: stagingHttpFailureEvidence(primaryFailure),
       runId,
       generatedAt: new Date().toISOString(),
-      sourceCommit: currentSourceCommit(),
+      sourceCommit,
       stagingProjectId: staging.projectId,
       productionProjectId: 'life-tracker-12000',
       productionTouched: false,
@@ -765,11 +779,16 @@ test.describe.serial('real secure AI staging boundary', () => {
   });
 });
 
-async function verifyHealthAndCors(page: Page, records: SmokeRecord[]): Promise<void> {
-  const sourceCommit = currentSourceCommit();
+async function verifyHealthAndCors(
+  page: Page,
+  records: SmokeRecord[],
+  sourceCommit: string,
+): Promise<void> {
   await page.goto(staging.appOrigin, { waitUntil: 'domcontentloaded', timeout: 45_000 });
   const frontendBuildCommit = await page.locator('body').getAttribute('data-life-tracker-build');
   requireFrontendBuildCommit(frontendBuildCommit, sourceCommit);
+  const frontendAIBackend = await page.locator('body').getAttribute('data-life-tracker-ai-backend');
+  requireFrontendAIBackend(frontendAIBackend, staging.aiApiBaseUrl);
 
   const expectedReleaseId = await expectedBackendReleaseId();
   const expectedRuntimeConfigId = runtimeConfigId();
@@ -806,6 +825,7 @@ async function verifyHealthAndCors(page: Page, records: SmokeRecord[]): Promise<
       backendReleaseId: expectedReleaseId,
       runtimeConfigId: expectedRuntimeConfigId,
       frontendBuildCommit,
+      frontendAIBackend,
     },
   });
 }
@@ -891,7 +911,11 @@ function chatRecord(
   detail?: Readonly<Record<string, string | number | boolean | null>>,
 ): SmokeRecord {
   const metadata = record(response.body.metadata, 'metadata');
-  if (metadata.model !== EXPECTED_MODEL || metadata.reasoningEffort !== EXPECTED_REASONING) {
+  if (
+    metadata.model !== EXPECTED_MODEL
+    || metadata.providerModel !== EXPECTED_MODEL
+    || metadata.reasoningEffort !== EXPECTED_REASONING
+  ) {
     throw new Error('The staging response did not report the reviewed model configuration.');
   }
   const toolNames = arrayOfStrings(metadata.toolNames);
@@ -899,11 +923,13 @@ function chatRecord(
     throw new Error('The staging response did not execute every required bounded domain tool.');
   }
   const providerResponseId = stringOrUndefined(metadata.providerResponseId);
+  const providerModel = stringOrUndefined(metadata.providerModel);
   const providerCalls = numberOrUndefined(metadata.providerCalls);
   const toolCalls = numberOrUndefined(metadata.toolCalls);
   const totalTokens = numberOrUndefined(metadata.totalTokens);
   if (
     !providerResponseId
+    || !providerModel
     || providerCalls === undefined
     || providerCalls < 1
     || toolCalls === undefined
@@ -918,6 +944,7 @@ function chatRecord(
     status: 'PASS',
     requestId: response.requestId ?? undefined,
     providerResponseId,
+    providerModel,
     providerCalls,
     toolCalls,
     toolNames,

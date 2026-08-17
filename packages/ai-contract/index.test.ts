@@ -2,10 +2,39 @@ import { describe, expect, it } from 'vitest';
 import {
   parseLifePlanActionResponse,
   parseLifePlanPreview,
+  resolveLifeTrackerAiBackendBaseUrl,
   type LifePlanPreview,
 } from './index';
 
 describe('shared Life Tracker AI contract', () => {
+  it('binds the bearer-token backend to the exact Firebase project Function', () => {
+    const projectId = 'life-tracker-12000';
+    const canonical = 'https://europe-west1-life-tracker-12000.cloudfunctions.net/lifeTrackerAiApi';
+    expect(resolveLifeTrackerAiBackendBaseUrl(`${canonical}/`, projectId)).toBe(canonical);
+    expect(resolveLifeTrackerAiBackendBaseUrl('https://attacker.example/lifeTrackerAiApi', projectId)).toBeNull();
+    expect(resolveLifeTrackerAiBackendBaseUrl(
+      'https://europe-west1-other-project.cloudfunctions.net/lifeTrackerAiApi',
+      projectId,
+    )).toBeNull();
+    expect(resolveLifeTrackerAiBackendBaseUrl(`${canonical}?redirect=attacker`, projectId)).toBeNull();
+  });
+
+  it('allows only the project-bound Functions emulator path when explicitly enabled', () => {
+    const emulator = 'http://127.0.0.1:5001/life-tracker-test/europe-west1/lifeTrackerAiApi';
+    expect(resolveLifeTrackerAiBackendBaseUrl(emulator, 'life-tracker-test')).toBeNull();
+    expect(resolveLifeTrackerAiBackendBaseUrl(emulator, 'life-tracker-test', true)).toBe(emulator);
+    expect(resolveLifeTrackerAiBackendBaseUrl(
+      'http://127.0.0.1:5001/other/europe-west1/lifeTrackerAiApi',
+      'life-tracker-test',
+      true,
+    )).toBeNull();
+    expect(resolveLifeTrackerAiBackendBaseUrl(
+      'http://attacker.example:5001/life-tracker-test/europe-west1/lifeTrackerAiApi',
+      'life-tracker-test',
+      true,
+    )).toBeNull();
+  });
+
   it('accepts the exact immutable preview returned by the backend', () => {
     const plan = validPlan();
     expect(parseLifePlanPreview(plan)).toEqual(plan);

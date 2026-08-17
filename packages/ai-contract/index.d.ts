@@ -75,5 +75,10 @@ export interface LifePlanActionResponse {
 
 export declare const LIFE_PLAN_ACTIONS: readonly LifePlanAction[];
 export declare const LIFE_PLAN_STATUSES: readonly LifePlanStatus[];
+export declare function resolveLifeTrackerAiBackendBaseUrl(
+  configured: string | undefined,
+  projectId: string | undefined,
+  allowEmulator?: boolean,
+): string | null;
 export declare function parseLifePlanPreview(value: unknown): LifePlanPreview;
 export declare function parseLifePlanActionResponse(value: unknown): LifePlanActionResponse;
