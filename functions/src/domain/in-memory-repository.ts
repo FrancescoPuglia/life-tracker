@@ -656,12 +656,17 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
       .toLocaleLowerCase('en-US');
     if (!haystack.includes(filter.query.toLocaleLowerCase('en-US'))) return false;
   }
-  const start = typeof record.startTime === 'string'
-    ? Date.parse(record.startTime)
-    : Date.parse(record.updatedAt);
-  const end = typeof record.endTime === 'string' ? Date.parse(record.endTime) : start;
-  if (filter.from && end <= Date.parse(filter.from)) return false;
-  if (filter.to && start >= Date.parse(filter.to)) return false;
+  const point = [record.startTime, record.date, record.updatedAt, record.createdAt]
+    .find((value): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value)));
+  const start = point ? Date.parse(point) : Number.NaN;
+  const end = typeof record.endTime === 'string' ? Date.parse(record.endTime) : Number.NaN;
+  if (Number.isFinite(start) && Number.isFinite(end) && start < end) {
+    if (filter.from && end <= Date.parse(filter.from)) return false;
+    if (filter.to && start >= Date.parse(filter.to)) return false;
+  } else {
+    if (filter.from && start < Date.parse(filter.from)) return false;
+    if (filter.to && start >= Date.parse(filter.to)) return false;
+  }
   return true;
 }
 

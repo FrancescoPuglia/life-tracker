@@ -94,13 +94,24 @@ interface TransactionResult {
   readonly replay: boolean;
 }
 
+/** Injectable verification seam used by emulator failure-injection tests. */
+export interface FirestoreRepositoryVerificationHooks {
+  readonly beforeVerification?: (
+    action: PlanActionResult['status'],
+    executionId: string,
+  ) => void | Promise<void>;
+}
+
 /**
  * Production persistence adapter. Every public method derives document paths
  * from the verified UID and allowlisted collection type; callers cannot pass
  * arbitrary Firestore paths or collection names.
  */
 export class FirestoreRepository implements AuditableRepository {
-  constructor(private readonly firestore: Firestore) {}
+  constructor(
+    private readonly firestore: Firestore,
+    private readonly verificationHooks: FirestoreRepositoryVerificationHooks = {},
+  ) {}
 
   async listEntities(
     uid: string,
@@ -299,6 +310,7 @@ export class FirestoreRepository implements AuditableRepository {
   async savePreview(request: SavePreviewRequest): Promise<StoredChangePlan> {
     const { plan, snapshot, approval, audit } = request;
     assertPreviewRelationships(plan, snapshot, approval, audit);
+    assertSnapshotIntegrity(snapshot);
     const planRef = this.firestore.doc(SERVER_ONLY_PATHS.changePlan(plan.uid, plan.id));
     const snapshotRef = this.firestore.doc(SERVER_ONLY_PATHS.snapshot(plan.uid, plan.id));
     const approvalRef = this.firestore.doc(SERVER_ONLY_PATHS.approval(plan.uid, plan.id));
@@ -572,6 +584,7 @@ export class FirestoreRepository implements AuditableRepository {
       if (auditSnapshot.exists) throw new DomainError('CONFLICT', 'Audit identifier already exists.');
       const plan = decodeOwnedServerDocument<StoredChangePlan>(planSnapshot, request.uid);
       const snapshot = decodeOwnedServerDocument<ChangeSnapshot>(beforeSnapshot, request.uid);
+      assertSnapshotIntegrity(snapshot);
       verifyStoredPlan(plan);
       if (plan.status !== 'applied' || !plan.appliedStateHashes) {
         throw new DomainError('APPROVAL_REPLAYED', 'Execution was already actioned.');
@@ -740,17 +753,18 @@ export class FirestoreRepository implements AuditableRepository {
     idempotencyKeyHash: string,
   ): Promise<PlanActionResult> {
     if (result.verified) return { ...result, idempotentReplay: replay || result.idempotentReplay };
-    const execution = await this.getExecution(uid, result.executionId);
-    if (!execution) {
-      throw new DomainError('COMMITTED_UNVERIFIED', 'Execution verification record is unavailable.');
-    }
-    const expected = result.status === 'applied'
-      ? (await this.getPlan(execution.uid, execution.planId))?.appliedStateHashes
-      : execution.restoredStateHashes;
-    if (!expected) {
-      throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state is missing verification metadata.');
-    }
     try {
+      await this.verificationHooks.beforeVerification?.(result.status, result.executionId);
+      const execution = await this.getExecution(uid, result.executionId);
+      if (!execution) {
+        throw new DomainError('COMMITTED_UNVERIFIED', 'Execution verification record is unavailable.');
+      }
+      const expected = result.status === 'applied'
+        ? (await this.getPlan(execution.uid, execution.planId))?.appliedStateHashes
+        : execution.restoredStateHashes;
+      if (!expected) {
+        throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state is missing verification metadata.');
+      }
       await this.verifyExpectedHashes(execution.uid, expected);
       const verified: PlanActionResult = {
         ...result,
@@ -903,6 +917,7 @@ function validateApply(
   approval: ApprovalRecord,
 ): void {
   verifyStoredPlan(plan);
+  assertSnapshotIntegrity(snapshot);
   assertPreviewRelationships(plan, snapshot, approval, {
     id: 'validation-only',
     uid: request.uid,
@@ -925,6 +940,26 @@ function validateApply(
   if (plan.conflicts.length) throw new DomainError('CONFLICT', 'Plan has unresolved conflicts.');
   if (!capabilityHashMatches(request.approvalCapabilityHash, approval.capabilityHash)) {
     throw new DomainError('APPROVAL_REQUIRED', 'Approval does not match this plan.');
+  }
+}
+
+function assertSnapshotIntegrity(snapshot: ChangeSnapshot): void {
+  for (const entry of snapshot.entries) {
+    if (!entry.existed) {
+      if (entry.value !== null || entry.version !== null || entry.contentHash !== null) {
+        throw new DomainError('CONFLICT', 'Change snapshot integrity check failed.');
+      }
+      continue;
+    }
+    if (
+      !entry.value
+      || entry.value.id !== entry.id
+      || entry.value.userId !== snapshot.uid
+      || entry.value._version !== entry.version
+      || hashEntityState(entry.value) !== entry.contentHash
+    ) {
+      throw new DomainError('CONFLICT', 'Change snapshot integrity check failed.');
+    }
   }
 }
 
@@ -1253,13 +1288,17 @@ function matchesFilter(record: EntityRecord, request: ReadPageRequest): boolean 
   const start = typeof record.startTime === 'string'
     ? Date.parse(record.startTime)
     : recordTimestamp(record);
-  const end = typeof record.endTime === 'string'
-    ? Date.parse(record.endTime)
-    : start;
-  // TimeBlocks and Sessions are half-open intervals. Select every record that
-  // overlaps [from,to), including commitments that started before the range.
-  if (filter.from && end <= Date.parse(filter.from)) return false;
-  if (filter.to && start >= Date.parse(filter.to)) return false;
+  const end = typeof record.endTime === 'string' ? Date.parse(record.endTime) : Number.NaN;
+  if (Number.isFinite(start) && Number.isFinite(end) && start < end) {
+    // TimeBlocks and Sessions are half-open intervals. Select every record
+    // that overlaps [from,to), including one that started before the range.
+    if (filter.from && end <= Date.parse(filter.from)) return false;
+    if (filter.to && start >= Date.parse(filter.to)) return false;
+  } else {
+    // Point-in-time records (for example HabitLogs) include the lower bound.
+    if (filter.from && start < Date.parse(filter.from)) return false;
+    if (filter.to && start >= Date.parse(filter.to)) return false;
+  }
   return true;
 }
 

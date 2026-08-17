@@ -6,6 +6,7 @@ import { assertAuthenticated } from '../policy';
 import type { Repository } from '../repository';
 import type { AnalyticsArgs, ReadArgs, StateArgs } from '../schemas-internal';
 import { sanitizeEntity } from '../sanitize';
+import { isProtectedTimeBlock } from '../timeblock-policy';
 import type { AuthContext, EntityCollection, EntityRecord, ReadFilter } from '../types';
 
 const MAX_ANALYTICS_RECORDS = 5_000;
@@ -508,7 +509,7 @@ function mergeGoalMinutes(target: Map<string, number>, source: ReadonlyMap<strin
 }
 
 function isLocked(record: EntityRecord): boolean {
-  return record.protected === true || record.locked === true || record.flexibility === 'fixed';
+  return isProtectedTimeBlock(record);
 }
 
 function earlierInstant(first: string, second: string): string {

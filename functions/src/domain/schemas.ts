@@ -106,7 +106,7 @@ export const publicChangeOperationSchema = z
 
 export const previewChangesArgsSchema = z
   .object({
-    operations: z.array(publicChangeOperationSchema).min(1).max(100),
+    operations: z.array(publicChangeOperationSchema).min(1).max(10),
     reason: z.string().trim().min(1).max(500),
   })
   .strict();
@@ -176,7 +176,9 @@ export const previewGoalArchitectureArgsSchema = z.object({
   reason: z.string().trim().min(1).max(500),
   goal: goalArchitectGoalSchema,
   projects: z.array(goalArchitectProjectSchema).min(1).max(20),
-  tasks: z.array(goalArchitectTaskSchema).min(1).max(80),
+  // 1 Goal + 20 Projects + 74 Tasks + 5 Key Results = 100 operations,
+  // matching the transactional lifecycle's hard plan bound.
+  tasks: z.array(goalArchitectTaskSchema).min(1).max(74),
   keyResults: z.array(goalArchitectKeyResultSchema).min(2).max(5),
 }).strict();
 

@@ -183,7 +183,11 @@ export class OpenAIResponsesAdapter {
           if (!allowedNames.has(call.name)) {
             throw new DomainError('UNKNOWN_TOOL', `Tool '${call.name}' is not allowed in this mode.`);
           }
-          const result = await this.executor.executeJson(call.name, call.arguments, toolContext);
+          const result = await withDeadline(
+            this.executor.executeJson(call.name, call.arguments, toolContext),
+            deadline,
+            controller,
+          );
           if (isPublicPlan(result)) lastPlan = result;
           const serializedOutput = JSON.stringify(modelVisibleToolOutput(result));
           toolOutputBytes += Buffer.byteLength(serializedOutput, 'utf8');

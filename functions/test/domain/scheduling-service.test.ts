@@ -74,6 +74,46 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     expect((await repository.getEntity(UID, 'timeBlocks', 'locked-block'))?.startTime).toBe('2026-08-17T08:00:00.000Z');
   });
 
+  it('preserves executed overrun blocks and rejects focused AI changes to them', async () => {
+    const { repository, domain } = harness();
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'executed-overrun',
+      title: 'Executed session history',
+      domainId: 'domain-1',
+      startTime: '2026-08-17T08:00:00.000Z',
+      endTime: '2026-08-17T09:00:00.000Z',
+      status: 'overrun',
+      type: 'deep',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+    }]);
+
+    const replacement = await domain.scheduling.replaceDaySchedule(context(UID, 'overrun-replace'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({
+        id: 'later-block',
+        start: '2026-08-17T10:00:00.000Z',
+        end: '2026-08-17T11:00:00.000Z',
+      })],
+      reason: 'Executed history must survive replanning.',
+    });
+    expect(replacement.operations.some((operation) => operation.entityId === 'executed-overrun')).toBe(false);
+    expect(replacement.warnings.some((warning) => /Preserved 1/i.test(warning))).toBe(true);
+
+    await expect(domain.scheduling.previewTimeBlockChange(context(UID, 'overrun-move'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: block({
+        id: 'executed-overrun',
+        start: '2026-08-17T09:00:00.000Z',
+        end: '2026-08-17T10:00:00.000Z',
+      }),
+      reason: 'Attempt to move executed history.',
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('persists an approved fixed proposal as a protected commitment for later replanning', async () => {
     const { repository, domain } = harness(['plan-fixed-create', 'execution-fixed-create', 'plan-replan']);
     const first = await domain.scheduling.replaceDaySchedule(context(UID, 'fixed-create'), {

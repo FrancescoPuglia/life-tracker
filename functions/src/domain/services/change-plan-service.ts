@@ -17,6 +17,7 @@ import {
 } from '../policy';
 import type { Repository } from '../repository';
 import { sanitizeEntity } from '../sanitize';
+import { isProtectedTimeBlock } from '../timeblock-policy';
 import type { PreviewChangesArgs } from '../schemas';
 import type {
   AuditEvent,
@@ -362,6 +363,7 @@ export class ChangePlanService {
     const refs = new Set<string>();
     const existingByRef = new Map<string, EntityRecord | null>();
     const dependencyRefs = new Map<string, EntityReference>();
+    const dependencyRecords = new Map<string, EntityRecord | null>();
     const validationScopes = new Map<string, ValidationScopeExpectation>();
     for (const operation of operations) {
       const key = refKey(operation.collection, operation.id);
@@ -430,7 +432,9 @@ export class ChangePlanService {
     const resolve = async (collection: EntityCollection, id: string): Promise<EntityRecord | null> => {
       const key = refKey(collection, id);
       if (mergedByRef.has(key)) return mergedByRef.get(key) ?? null;
+      if (dependencyRecords.has(key)) return dependencyRecords.get(key) ?? null;
       const entity = await this.repository.getEntity(uid, collection, id);
+      dependencyRecords.set(key, entity);
       dependencyRefs.set(key, { collection, id });
       return entity;
     };
@@ -551,16 +555,6 @@ function assertTemporalGeometry(collection: EntityCollection, current: EntityRec
   if (!mapped && !UNMAPPED_TIMEBLOCK_TYPES.has(String(current.type))) {
     throw new DomainError('CONFLICT', 'A productive time block requires a Goal, Project, or Task mapping.');
   }
-}
-
-function isProtectedTimeBlock(record: EntityRecord): boolean {
-  return record.protected === true
-    || record.locked === true
-    || record.isLocked === true
-    || record.fixed === true
-    || record.flexibility === 'fixed'
-    || record.status === 'completed'
-    || record.status === 'in_progress';
 }
 
 type EntityResolver = (collection: EntityCollection, id: string) => Promise<EntityRecord | null>;

@@ -320,6 +320,41 @@ describe('bounded OpenAI Responses orchestration', () => {
     })).rejects.toMatchObject({ code: 'INTERNAL', message: 'AI request timed out.' });
   });
 
+  it('applies the same end-to-end deadline to domain tool execution', async () => {
+    const toolCall = {
+      id: 'response-slow-tool',
+      output: [{
+        type: 'function_call',
+        call_id: 'slow-tool-call',
+        name: 'get_goals',
+        arguments: JSON.stringify({
+          filter: {
+            query: null,
+            from: null,
+            to: null,
+            status: null,
+            domainId: null,
+            projectId: null,
+            goalId: null,
+            taskId: null,
+          },
+          cursor: null,
+          limit: 1,
+        }),
+      }],
+    };
+    const slow = setup([toolCall], { timeoutMs: 10 });
+    vi.spyOn(slow.domain.executor, 'executeJson').mockImplementationOnce(
+      () => new Promise<never>(() => undefined),
+    );
+    await expect(slow.adapter.run({
+      auth: AUTH,
+      message: 'Read with a bounded deadline',
+      mode: 'ask',
+      authenticatedContext: CONTEXT,
+    })).rejects.toMatchObject({ code: 'INTERNAL', message: 'AI request timed out.' });
+  });
+
   it('normalizes provider failures and preserves typed domain tool failures', async () => {
     const provider = setup([{ id: 'unused', output: [] }]);
     provider.create.mockRejectedValueOnce(new Error('provider secret detail'));

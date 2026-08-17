@@ -19,6 +19,7 @@ import type {
   UserPlanningPreferences,
   PreviewValidationRequirements,
 } from '../types';
+import { isProtectedTimeBlock } from '../timeblock-policy';
 import type { WpiBlock, WpiDraft } from '../scheduling/wpi-adapter';
 import { validateWithWeeklyPlanningIntelligence } from '../scheduling/wpi-adapter';
 import { ChangePlanService } from './change-plan-service';
@@ -116,8 +117,8 @@ export class SchedulingService {
     if (args.action !== 'create' && !current) {
       throw new DomainError('NOT_FOUND', 'The TimeBlock is unavailable for this user.');
     }
-    if (current && isProtected(current)) {
-      throw new DomainError('FORBIDDEN', 'Completed, in-progress, fixed, or locked TimeBlocks cannot be changed by AI.');
+    if (current && isProtectedTimeBlock(current)) {
+      throw new DomainError('FORBIDDEN', 'Executed, in-progress, fixed, or locked TimeBlocks cannot be changed by AI.');
     }
     if (
       args.action === 'move'
@@ -135,9 +136,30 @@ export class SchedulingService {
       throw new DomainError('INVALID_ARGUMENT', 'Changing TimeBlock times requires the explicit move action.');
     }
 
+    const additionalValidationRanges: ScheduleValidationRange[] = [];
+    if (args.action === 'move' && current) {
+      let sourceDate: Temporal.PlainDate;
+      try {
+        if (typeof current.startTime !== 'string') throw new Error('missing start');
+        sourceDate = Temporal.Instant.from(current.startTime)
+          .toZonedDateTimeISO(args.timezone)
+          .toPlainDate();
+      } catch {
+        throw new DomainError('CONFLICT', 'The existing TimeBlock has an invalid source interval.');
+      }
+      if (sourceDate.toString() !== date.toString()) {
+        const sourceRange = instantRange(sourceDate, sourceDate.add({ days: 1 }), args.timezone);
+        additionalValidationRanges.push({
+          existing: await this.readExisting(context.uid, sourceRange.from, sourceRange.to),
+          from: sourceRange.from,
+          to: sourceRange.to,
+        });
+      }
+    }
+
     const commitments = existing.filter((record) => record.id !== proposed.id);
-    const protectedCommitments = commitments.filter(isProtected);
-    const mutableCommitments = commitments.filter((record) => !isProtected(record));
+    const protectedCommitments = commitments.filter(isProtectedTimeBlock);
+    const mutableCommitments = commitments.filter((record) => !isProtectedTimeBlock(record));
     const conflicts = [
       ...detectProtectedConflicts([proposed], protectedCommitments),
       ...detectExistingConflicts([proposed], mutableCommitments),
@@ -177,7 +199,13 @@ export class SchedulingService {
         reason: args.reason,
         assumptions: preferenceAssumptions(preferences),
         expectedImpact: [`${args.action} TimeBlock '${args.block.title}' within ${args.timezone}.`],
-        validation: scheduleValidation(existing, range.from, range.to, preferences),
+        validation: scheduleValidation(
+          existing,
+          range.from,
+          range.to,
+          preferences,
+          additionalValidationRanges,
+        ),
       },
     );
   }
@@ -196,8 +224,8 @@ export class SchedulingService {
     const normalized = inputs.map((input) => normalizeBlock(input, timezone, startDate, endDate, tool));
     const existing = await this.readExisting(context.uid, range.from, range.to);
     const existingById = new Map(existing.map((record) => [record.id, record]));
-    const protectedBlocks = existing.filter(isProtected);
-    const mutableBlocks = existing.filter((record) => !isProtected(record));
+    const protectedBlocks = existing.filter(isProtectedTimeBlock);
+    const mutableBlocks = existing.filter((record) => !isProtectedTimeBlock(record));
     const warnings: string[] = protectedBlocks.length
       ? [`Preserved ${protectedBlocks.length} completed, in-progress, or protected time block(s).`]
       : [];
@@ -210,7 +238,7 @@ export class SchedulingService {
         conflicts.push(`Productive block '${block.input.title}' requires a Goal, Project, or Task mapping.`);
       }
       const protectedMatch = existingById.get(block.id);
-      if (protectedMatch && isProtected(protectedMatch)) {
+      if (protectedMatch && isProtectedTimeBlock(protectedMatch)) {
         conflicts.push(`Protected time block '${block.id}' cannot be replaced.`);
       }
     }
@@ -236,7 +264,7 @@ export class SchedulingService {
     }
     for (const block of normalized) {
       const current = existingById.get(block.id);
-      if (current && isProtected(current)) continue;
+      if (current && isProtectedTimeBlock(current)) continue;
       const generatedNotes = wpi.generatedNotes[block.id];
       const values = scheduleValues(block.input, generatedNotes);
       operations.push({
@@ -312,23 +340,33 @@ export class SchedulingService {
   }
 }
 
+interface ScheduleValidationRange {
+  readonly existing: readonly EntityRecord[];
+  readonly from: string;
+  readonly to: string;
+}
+
 function scheduleValidation(
   existing: readonly EntityRecord[],
   from: string,
   to: string,
   preferences: UserPlanningPreferences,
+  additionalRanges: readonly ScheduleValidationRange[] = [],
 ): PreviewValidationRequirements {
   return {
     refs: [],
-    scopes: [{
-      collection: 'timeBlocks',
-      field: null,
-      value: null,
-      from,
-      to,
-      maxItems: MAX_EXISTING_BLOCKS,
-      expectedStateHash: hashValidationScopeRecords(existing),
-    }],
+    scopes: [
+      { existing, from, to },
+      ...additionalRanges,
+    ].map((range) => ({
+        collection: 'timeBlocks' as const,
+        field: null,
+        value: null,
+        from: range.from,
+        to: range.to,
+        maxItems: MAX_EXISTING_BLOCKS,
+        expectedStateHash: hashValidationScopeRecords(range.existing),
+      })),
     planningPreferencesHash: hashPlanningPreferences(preferences),
   };
 }
@@ -645,16 +683,6 @@ function preferenceAssumptions(preferences: UserPlanningPreferences): readonly s
   return [preferences.source === 'product_default'
     ? 'No persisted planning preferences were found; explicit Life Tracker product defaults were used.'
     : `Invalid or missing persisted planning fields used explicit product defaults: ${preferences.defaultsApplied.join(', ')}.`];
-}
-
-function isProtected(record: EntityRecord): boolean {
-  return record.protected === true ||
-    record.locked === true ||
-    record.isLocked === true ||
-    record.fixed === true ||
-    record.flexibility === 'fixed' ||
-    record.status === 'completed' ||
-    record.status === 'in_progress';
 }
 
 function deterministicBlockId(tool: string, input: ScheduleBlockInput): string {

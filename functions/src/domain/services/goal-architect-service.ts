@@ -85,6 +85,20 @@ export class GoalArchitectService {
     if (args.action === 'update' && !current) {
       throw new DomainError('NOT_FOUND', 'Task is unavailable for this user.');
     }
+    if (args.action === 'update' && current) {
+      const effectiveGoalId = typeof current.goalId === 'string' ? current.goalId : project.goalId;
+      const effectiveDomainId = typeof current.domainId === 'string' ? current.domainId : project.domainId;
+      if (
+        current.projectId !== args.projectId
+        || effectiveGoalId !== args.goalId
+        || effectiveDomainId !== args.domainId
+      ) {
+        throw new DomainError(
+          'CONFLICT',
+          'Focused Task updates cannot change Goal Architect hierarchy; use a dedicated deterministic reparenting workflow.',
+        );
+      }
+    }
 
     const existing = await this.readAll(context.uid, 'tasks', args.domainId);
     const normalizedTitle = normalizeGoalArchitectTitle(args.title);

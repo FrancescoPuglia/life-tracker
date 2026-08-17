@@ -32,7 +32,7 @@ const OPENAI_REASONING_EFFORT = defineString('OPENAI_REASONING_EFFORT', {
 });
 const OPENAI_BASE_URL = defineString('OPENAI_BASE_URL', {
   default: 'https://api.openai.com/v1',
-  description: 'Backend-only OpenAI-compatible base URL. Plain HTTP is accepted only on loopback for local tests.',
+  description: 'Backend-only official OpenAI base URL. Loopback is accepted only by the Functions emulator.',
 });
 const AI_ALLOWED_ORIGINS = defineString('AI_ALLOWED_ORIGINS', {
   default: 'https://francescopuglia.github.io,http://localhost:3000,http://127.0.0.1:3000',
@@ -108,7 +108,10 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
   const apiKey = OPENAI_API_KEY.value();
   if (!apiKey) throw new DomainError('INTERNAL', 'OpenAI secret is unavailable.');
   cachedResponses = new OpenAIResponsesAdapter(
-    createProductionResponsesClient(apiKey, { baseURL: OPENAI_BASE_URL.value() }),
+    createProductionResponsesClient(apiKey, {
+      baseURL: OPENAI_BASE_URL.value(),
+      allowLoopback: process.env.FUNCTIONS_EMULATOR === 'true',
+    }),
     domain.registry,
     domain.executor,
     {

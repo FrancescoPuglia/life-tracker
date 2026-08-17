@@ -231,7 +231,7 @@ export const TOOL_CONTRACTS: readonly ToolContract[] = [
     kind: 'proposal',
     schema: previewChangesArgsSchema,
     parameters: strictObject({
-      operations: { type: 'array', items: publicOperation, minItems: 1, maxItems: 100 },
+      operations: { type: 'array', items: publicOperation, minItems: 1, maxItems: 10 },
       reason: string(500, { minLength: 1 }),
     }),
   },
@@ -277,7 +277,7 @@ export const TOOL_CONTRACTS: readonly ToolContract[] = [
       reason: string(500, { minLength: 1 }),
       goal: goalArchitectGoal,
       projects: { type: 'array', items: goalArchitectProject, minItems: 1, maxItems: 20 },
-      tasks: { type: 'array', items: goalArchitectTask, minItems: 1, maxItems: 80 },
+      tasks: { type: 'array', items: goalArchitectTask, minItems: 1, maxItems: 74 },
       keyResults: { type: 'array', items: goalArchitectKeyResult, minItems: 2, maxItems: 5 },
     }),
   },

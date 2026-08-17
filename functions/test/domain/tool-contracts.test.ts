@@ -205,6 +205,13 @@ describe('strict domain tool contracts', () => {
     }
   });
 
+  it('caps the generic proposal surface to ten focused operations', () => {
+    const generic = TOOL_CONTRACTS.find((contract) => contract.name === 'preview_changes');
+    const properties = generic?.parameters.properties as Record<string, unknown> | undefined;
+    const operations = properties?.operations as Record<string, unknown> | undefined;
+    expect(operations?.maxItems).toBe(10);
+  });
+
   it.each(TOOL_CONTRACTS)('$name accepts a valid fixture and rejects unknown identity fields', (contract) => {
     const valid = validByName[contract.name];
     expect(valid, `missing valid fixture for ${contract.name}`).toBeDefined();
@@ -256,6 +263,16 @@ describe('strict domain tool contracts', () => {
       action: 'move',
       block: { ...(validTimeBlock.block as Record<string, unknown>), id: null },
     }).success).toBe(false);
+  });
+
+  it('keeps the maximum Goal Architect draft within the 100-operation transaction bound', () => {
+    const goalArchitect = TOOL_CONTRACTS.find((contract) => contract.name === 'preview_goal_architecture');
+    const parameters = goalArchitect?.parameters.properties as Record<string, Record<string, unknown>>;
+    expect(parameters.projects?.maxItems).toBe(20);
+    expect(parameters.tasks?.maxItems).toBe(74);
+    expect(parameters.keyResults?.maxItems).toBe(5);
+    expect(1 + Number(parameters.projects?.maxItems) + Number(parameters.tasks?.maxItems)
+      + Number(parameters.keyResults?.maxItems)).toBe(100);
   });
 });
 

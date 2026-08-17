@@ -206,6 +206,45 @@ describe('Goal Architect deterministic backend adapter', () => {
       description: expect.stringContaining('GAI_KEY: task:'),
     });
   });
+
+  it('rejects focused Task reparenting so existing dependent mappings cannot become inconsistent', async () => {
+    const { repository, domain } = harness();
+    repository.seed(UID, 'goals', [{
+      id: 'goal-existing', title: 'Existing goal', domainId: 'domain-1', status: 'active', priority: 'high',
+    }]);
+    repository.seed(UID, 'projects', [
+      { id: 'project-original', name: 'Original', goalId: 'goal-existing', domainId: 'domain-1' },
+      { id: 'project-target', name: 'Target', goalId: 'goal-existing', domainId: 'domain-1' },
+    ]);
+    repository.seed(UID, 'tasks', [{
+      id: 'task-existing',
+      title: 'Existing task',
+      projectId: 'project-original',
+      goalId: 'goal-existing',
+      domainId: 'domain-1',
+      status: 'pending',
+      priority: 'high',
+      estimatedMinutes: 45,
+    }]);
+
+    await expect(domain.goalArchitect.previewTaskChange(context(UID, 'task-reparent'), {
+      action: 'update',
+      id: 'task-existing',
+      title: 'Existing task',
+      description: null,
+      status: 'pending',
+      priority: 'high',
+      projectId: 'project-target',
+      goalId: 'goal-existing',
+      domainId: 'domain-1',
+      dueDate: null,
+      estimatedMinutes: 45,
+      reason: 'Attempt hierarchy mutation through a focused update.',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await repository.getEntity(UID, 'tasks', 'task-existing')).toMatchObject({
+      projectId: 'project-original',
+    });
+  });
 });
 
 function harness(ids: readonly string[] = ['plan-default', 'execution-default']) {

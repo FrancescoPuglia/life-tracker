@@ -2,7 +2,10 @@ import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CapabilityIssuer } from '../../src/domain/capabilities';
-import { FirestoreRepository } from '../../src/domain/firestore-repository';
+import {
+  FirestoreRepository,
+  type FirestoreRepositoryVerificationHooks,
+} from '../../src/domain/firestore-repository';
 import { createLifeTrackerDomain } from '../../src/domain/factory';
 import { ChangePlanService } from '../../src/domain/services/change-plan-service';
 import { FirestoreRateLimiter } from '../../src/http/rate-limiter';
@@ -379,6 +382,215 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     expect((await firestore.doc(`users/${uid}/timeBlocks/preference-guarded-block`).get()).exists).toBe(false);
   }, 30_000);
 
+  it('preserves an executed overrun TimeBlock through replacement and rejects a focused move', async () => {
+    const uid = uniqueUid('overrun-protection');
+    await seedHierarchy(firestore, uid);
+    await firestore.doc(`users/${uid}/timeBlocks/block-1`).update({ status: 'overrun' });
+    const { domain } = domainFor(firestore, ['plan-overrun', 'execution-overrun']);
+    const preview = await domain.scheduling.replaceDaySchedule(context(uid, 'overrun-preview'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [scheduleBlock({ id: 'overrun-safe-replacement' })],
+      reason: 'Executed history must not be deleted by replanning.',
+    });
+    expect(preview.operations.some((operation) => operation.entityId === 'block-1')).toBe(false);
+
+    await domain.changePlans.applyPlan(context(uid, 'overrun-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-overrun-apply-key-01',
+    });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()).toMatchObject({
+      status: 'overrun',
+      title: 'Original block',
+    });
+
+    await expect(domain.scheduling.previewTimeBlockChange(context(uid, 'overrun-move'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: 'block-1',
+        title: 'Original block',
+        start: '2026-08-17T10:00:00.000Z',
+        end: '2026-08-17T11:00:00.000Z',
+      }),
+      reason: 'Attempt to move executed history.',
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  }, 30_000);
+
+  it('binds a cross-day move to both calendar scopes and refuses unsafe rollback into a filled source slot', async () => {
+    const uid = uniqueUid('cross-day-rollback');
+    await seedHierarchy(firestore, uid);
+    const createdAt = Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z'));
+    await firestore.doc(`users/${uid}/timeBlocks/cross-day-block`).set({
+      id: 'cross-day-block',
+      userId: uid,
+      domainId: 'domain-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+      title: 'Cross-day block',
+      startTime: Timestamp.fromDate(new Date('2026-08-17T07:00:00.000Z')),
+      endTime: Timestamp.fromDate(new Date('2026-08-17T08:00:00.000Z')),
+      status: 'planned',
+      type: 'deep',
+      flexibility: 'flexible',
+      createdAt,
+      updatedAt: createdAt,
+    });
+    const { domain } = domainFor(firestore, ['plan-cross-day', 'execution-cross-day']);
+    const preview = await domain.scheduling.previewTimeBlockChange(context(uid, 'cross-day-preview'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: 'cross-day-block',
+        title: 'Cross-day block',
+        start: '2026-08-18T07:00:00.000Z',
+        end: '2026-08-18T08:00:00.000Z',
+      }),
+      reason: 'Move one block to tomorrow.',
+    });
+    const applied = await domain.changePlans.applyPlan(context(uid, 'cross-day-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'emulator-cross-day-apply-key',
+    });
+    await firestore.doc(`users/${uid}/timeBlocks/human-source-fill`).set({
+      id: 'human-source-fill',
+      userId: uid,
+      domainId: 'domain-1',
+      title: 'Human source-slot edit',
+      startTime: Timestamp.fromDate(new Date('2026-08-17T07:15:00.000Z')),
+      endTime: Timestamp.fromDate(new Date('2026-08-17T07:45:00.000Z')),
+      status: 'planned',
+      type: 'meeting',
+      locked: true,
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    await expect(domain.changePlans.rollbackExecution(context(uid, 'cross-day-rollback'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'emulator-cross-day-rollback-key',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/cross-day-block`).get()).data()?.startTime.toDate().toISOString())
+      .toBe('2026-08-18T07:00:00.000Z');
+    expect((await firestore.doc(`users/${uid}/timeBlocks/human-source-fill`).get()).exists).toBe(true);
+  }, 30_000);
+
+  it('recovers idempotently when apply and rollback commit before post-write verification fails', async () => {
+    const uid = uniqueUid('post-commit-recovery');
+    await seedSchedule(firestore, uid);
+    const failures = { applied: 1, rolled_back: 1 };
+    const hooks: FirestoreRepositoryVerificationHooks = {
+      beforeVerification: (status) => {
+        if (failures[status] > 0) {
+          failures[status] -= 1;
+          throw new Error(`Injected ${status} verification outage.`);
+        }
+      },
+    };
+    const { service } = serviceFor(
+      firestore,
+      ['plan-post-commit', 'execution-post-commit', 'execution-retry'],
+      hooks,
+    );
+    const preview = await previewTitle(service, uid, 'Committed before verification');
+    const applyInput = {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'post-commit-apply-key-000001',
+    };
+
+    await expect(service.applyPlan(context(uid, 'post-commit-apply'), applyInput))
+      .rejects.toMatchObject({ code: 'COMMITTED_UNVERIFIED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()).toMatchObject({
+      title: 'Committed before verification',
+      _version: 1,
+    });
+    const recovered = await service.applyPlan(context(uid, 'post-commit-apply-retry'), applyInput);
+    const recoveredAgain = await service.applyPlan(context(uid, 'post-commit-apply-retry-2'), applyInput);
+    expect(recovered).toMatchObject({ verified: true, idempotentReplay: true });
+    expect(recoveredAgain.executionId).toBe(recovered.executionId);
+    expect(recoveredAgain.rollback?.capability).toBe(recovered.rollback?.capability);
+
+    const rollbackInput = {
+      executionId: recovered.executionId,
+      rollbackCapability: recovered.rollback?.capability ?? '',
+      idempotencyKey: 'post-commit-rollback-key-001',
+    };
+    await expect(service.rollbackExecution(context(uid, 'post-commit-rollback'), rollbackInput))
+      .rejects.toMatchObject({ code: 'COMMITTED_UNVERIFIED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?.title).toBe('Original block');
+    const rollbackRecovered = await service.rollbackExecution(
+      context(uid, 'post-commit-rollback-retry'),
+      rollbackInput,
+    );
+    expect(rollbackRecovered).toMatchObject({
+      executionId: recovered.executionId,
+      status: 'rolled_back',
+      verified: true,
+      idempotentReplay: true,
+    });
+    expect((await firestore.collection('aiExecutions').where('uid', '==', uid).get()).size).toBe(1);
+  }, 30_000);
+
+  it('fails closed when a server-owned rollback snapshot value no longer matches its hash', async () => {
+    const uid = uniqueUid('snapshot-integrity');
+    await seedSchedule(firestore, uid);
+    const { service } = serviceFor(firestore, ['plan-snapshot-integrity', 'execution-snapshot-integrity']);
+    const preview = await previewTitle(service, uid, 'Must not apply from a corrupt snapshot');
+    const snapshotRef = firestore.doc(`aiSnapshots/${uid}_${preview.id}`);
+    const snapshot = await snapshotRef.get();
+    const entries = (snapshot.data()?.entries as Array<Record<string, unknown>>).map((entry) =>
+      entry.id === 'block-1'
+        ? { ...entry, value: { ...(entry.value as Record<string, unknown>), title: 'Tampered snapshot' } }
+        : entry);
+    await snapshotRef.update({ entries });
+
+    await expect(service.applyPlan(context(uid, 'snapshot-integrity-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'snapshot-integrity-apply-key',
+    })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?.title).toBe('Original block');
+    expect((await firestore.doc(`aiApprovals/${uid}_${preview.id}`).get()).data()?.status).toBe('pending');
+  }, 30_000);
+
+  it('includes point records exactly at a bounded range lower edge', async () => {
+    const uid = uniqueUid('point-boundary');
+    const repository = new FirestoreRepository(firestore);
+    const from = '2026-08-17T00:00:00.000Z';
+    const before = Timestamp.fromDate(new Date('2026-08-16T23:59:59.000Z'));
+    const atBoundary = Timestamp.fromDate(new Date(from));
+    await Promise.all([
+      firestore.doc(`users/${uid}/habitLogs/log-before`).set({
+        id: 'log-before', userId: uid, habitId: 'habit-1', date: before,
+        completed: true, createdAt: before, updatedAt: before,
+      }),
+      firestore.doc(`users/${uid}/habitLogs/log-boundary`).set({
+        id: 'log-boundary', userId: uid, habitId: 'habit-1', date: atBoundary,
+        completed: true, createdAt: atBoundary, updatedAt: atBoundary,
+      }),
+    ]);
+    const page = await repository.listEntities(uid, 'habitLogs', {
+      filter: {
+        query: null,
+        from,
+        to: '2026-08-18T00:00:00.000Z',
+        status: null,
+        domainId: null,
+        projectId: null,
+        goalId: null,
+        taskId: null,
+      },
+      cursor: null,
+      limit: 10,
+    });
+    expect(page.items.map((item) => item.id)).toEqual(['log-boundary']);
+  }, 30_000);
+
   it('rolls back once, verifies restoration, denies wrong-user rollback, and refuses newer edits', async () => {
     const owner = uniqueUid('rollback-owner');
     const other = uniqueUid('rollback-other');
@@ -532,9 +744,13 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
   }, 30_000);
 });
 
-function serviceFor(firestore: Firestore, ids: readonly string[]) {
+function serviceFor(
+  firestore: Firestore,
+  ids: readonly string[],
+  verificationHooks: FirestoreRepositoryVerificationHooks = {},
+) {
   let index = 0;
-  const repository = new FirestoreRepository(firestore);
+  const repository = new FirestoreRepository(firestore, verificationHooks);
   const service = new ChangePlanService(repository, {
     clock: () => new Date(START),
     idFactory: () => ids[index++] ?? `fallback-${index}`,
