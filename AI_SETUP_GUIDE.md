@@ -53,8 +53,8 @@ After selecting the intended non-production/staging Firebase project, a human
 operator sets them interactively:
 
 ```bash
-firebase functions:secrets:set OPENAI_API_KEY
-firebase functions:secrets:set AI_CAPABILITY_SIGNING_SECRET
+firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
+firebase functions:secrets:set AI_CAPABILITY_SIGNING_SECRET --project life-tracker-staging
 ```
 
 Do not paste secret values into a command argument, tracked file, issue, log, or
@@ -174,6 +174,6 @@ Official references:
 ## Incident note
 
 A historical OpenAI key was exposed in an earlier revision of this guide. The
-current tree contains no usable value. Redaction does not revoke a credential:
-the owner must revoke/rotate the historical key before any live OpenAI test or
-deployment.
+current tree contains no usable value, and the owner confirmed on 2026-08-17
+that the historical key was revoked. Future staging and production credentials
+must remain separate, backend-only secrets.
