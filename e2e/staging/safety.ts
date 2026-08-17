@@ -1,6 +1,14 @@
+import { createHash } from 'node:crypto';
+
 const STAGING_ACKNOWLEDGEMENT = 'LIFE_TRACKER_STAGING_ONLY';
-const FORBIDDEN_PROJECT_IDS = new Set(['life-tracker-12000', 'life-tracker-test']);
-const PROJECT_ID_PATTERN = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+const EXPECTED_STAGING_CONFIG = Object.freeze({
+  projectId: 'life-tracker-staging',
+  firebaseApiKeySha256: '11293b9f69ba0d24f8e36a0e4cda50b9a0b103378116b569eca9a651a284b04b',
+  firebaseAuthDomain: 'life-tracker-staging.firebaseapp.com',
+  firebaseAppId: '1:675076431391:web:d82e711352456218d4ff2a',
+  firebaseMessagingSenderId: '675076431391',
+  firebaseStorageBucket: 'life-tracker-staging.firebasestorage.app',
+});
 
 export interface StagingEnvironment {
   readonly projectId: string;
@@ -31,27 +39,40 @@ export function readStagingEnvironment(
   }
 
   const projectId = required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_PROJECT_ID');
-  if (!PROJECT_ID_PATTERN.test(projectId) || FORBIDDEN_PROJECT_IDS.has(projectId)) {
-    throw new Error(`Refusing Firebase project '${projectId}': it is not an eligible dedicated staging project.`);
+  if (projectId !== EXPECTED_STAGING_CONFIG.projectId) {
+    throw new Error('Refusing live staging execution: Firebase project is not the reviewed dedicated staging project.');
   }
 
+  const firebaseApiKey = required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_API_KEY');
   const aiApiBaseUrl = validateApiBaseUrl(
     required(environment, 'LIFE_TRACKER_STAGING_AI_API_BASE_URL'),
     projectId,
   );
   const firebaseAuthDomain = required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_AUTH_DOMAIN');
-  if (!isSafeAuthDomain(firebaseAuthDomain, projectId)) {
-    throw new Error('The staging Firebase auth domain does not belong to the selected staging project.');
+  const firebaseAppId = required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_APP_ID');
+  const firebaseMessagingSenderId = required(
+    environment,
+    'LIFE_TRACKER_STAGING_FIREBASE_MESSAGING_SENDER_ID',
+  );
+  const firebaseStorageBucket = required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_STORAGE_BUCKET');
+  if (
+    createHash('sha256').update(firebaseApiKey).digest('hex')
+      !== EXPECTED_STAGING_CONFIG.firebaseApiKeySha256
+    || firebaseAuthDomain !== EXPECTED_STAGING_CONFIG.firebaseAuthDomain
+    || firebaseAppId !== EXPECTED_STAGING_CONFIG.firebaseAppId
+    || firebaseMessagingSenderId !== EXPECTED_STAGING_CONFIG.firebaseMessagingSenderId
+    || firebaseStorageBucket !== EXPECTED_STAGING_CONFIG.firebaseStorageBucket
+  ) {
+    throw new Error('Refusing live staging execution: Firebase Web configuration does not match the reviewed staging manifest.');
   }
 
   return {
     projectId,
-    firebaseApiKey: required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_API_KEY'),
+    firebaseApiKey,
     firebaseAuthDomain,
-    firebaseAppId: required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_APP_ID'),
-    firebaseMessagingSenderId: required(environment, 'LIFE_TRACKER_STAGING_FIREBASE_MESSAGING_SENDER_ID'),
-    firebaseStorageBucket: environment.LIFE_TRACKER_STAGING_FIREBASE_STORAGE_BUCKET?.trim()
-      || `${projectId}.firebasestorage.app`,
+    firebaseAppId,
+    firebaseMessagingSenderId,
+    firebaseStorageBucket,
     aiApiBaseUrl,
     appOrigin: 'http://127.0.0.1:3300',
   };
@@ -90,10 +111,4 @@ function validateApiBaseUrl(value: string, projectId: string): string {
     );
   }
   return url.toString().replace(/\/$/, '');
-}
-
-function isSafeAuthDomain(value: string, projectId: string): boolean {
-  const normalized = value.toLowerCase();
-  return normalized === `${projectId}.firebaseapp.com`
-    || normalized === `${projectId}.web.app`;
 }

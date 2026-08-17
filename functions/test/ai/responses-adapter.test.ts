@@ -417,6 +417,28 @@ describe('bounded OpenAI Responses orchestration', () => {
     });
     expect(JSON.stringify(onProviderError.mock.calls)).not.toContain('never-log');
 
+    const secretShapedObserver = vi.fn();
+    const secretShaped = setup([{ id: 'unused', output: [] }], {
+      onProviderError: secretShapedObserver,
+    });
+    secretShaped.create.mockRejectedValueOnce({
+      status: 401,
+      code: ['sk', 'proj', 'abcdefghijklmnopqrstuvwxyz123456'].join('-'),
+      type: 'eyJabcdefgh.eyJijklmnop.eyJqrstuvwx',
+      param: 'BearerSensitiveCredentialValue123456789',
+      requestID: 'AIzaSySensitiveCredentialValue1234567890',
+    });
+    await expect(secretShaped.adapter.run({
+      auth: AUTH,
+      message: 'Read',
+      mode: 'ask',
+      authenticatedContext: CONTEXT,
+    })).rejects.toMatchObject({ code: 'INTERNAL' });
+    expect(secretShapedObserver).toHaveBeenCalledWith({
+      requestId: AUTH.requestId,
+      providerStatus: 401,
+    });
+
     const toolCall = {
       id: 'response-tool-error',
       output: [{

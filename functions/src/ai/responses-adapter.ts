@@ -308,8 +308,14 @@ function safeProviderScalar(value: unknown, maxLength = 80): string | undefined 
     && value.length > 0
     && value.length <= maxLength
     && /^[A-Za-z0-9_.:/-]+$/.test(value)
+    && !containsCredentialMarker(value)
     ? value
     : undefined;
+}
+
+function containsCredentialMarker(value: string): boolean {
+  return /(?:sk-(?:proj|live|svcacct)-|AIza[A-Za-z0-9_-]{20,}|Bearer|gh[pousr]_[A-Za-z0-9]{20,})/i.test(value)
+    || /^eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$/.test(value);
 }
 
 function isFunctionCall(item: ResponseOutputItem): item is ResponseOutputItem & ResponseFunctionCall {
