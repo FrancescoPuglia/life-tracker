@@ -167,8 +167,16 @@ const STATUS_CONFIG: Record<AIStatus, {
   },
 };
 
+export function isAssistantSessionOwner(
+  authenticatedUid: string | null,
+  hydratedUid: string | null,
+): boolean {
+  return authenticatedUid !== null && authenticatedUid === hydratedUid;
+}
+
 export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const { user, status: authStatus } = useAuthContext();
+  const authenticatedUid = user?.uid ?? null;
   const configured = isAIBackendConfigured();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -187,6 +195,28 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const [actionKeysVersion, setActionKeysVersion] = useState(0);
   const [hydratedUid, setHydratedUid] = useState<string | null>(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
+  const hydratedUidRef = useRef<string | null>(null);
+  const messagesRef = useRef(messages);
+  const ownerReady = authStatus === 'signedIn'
+    && isAssistantSessionOwner(authenticatedUid, hydratedUid);
+  const ownerReadyRef = useRef(ownerReady);
+  const requestIdentityRef = useRef({
+    uid: authenticatedUid,
+    authStatus,
+    epoch: 0,
+  });
+  if (
+    requestIdentityRef.current.uid !== authenticatedUid
+    || requestIdentityRef.current.authStatus !== authStatus
+  ) {
+    requestIdentityRef.current = {
+      uid: authenticatedUid,
+      authStatus,
+      epoch: requestIdentityRef.current.epoch + 1,
+    };
+  }
+  messagesRef.current = messages;
+  ownerReadyRef.current = ownerReady;
 
   const status: AIStatus = authStatus === 'unknown'
     ? 'checking'
@@ -194,27 +224,51 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       ? 'not_configured'
       : !user
         ? 'signed_out'
-        : requestStatus ?? 'ready';
-  const canSend = status === 'ready';
+        : !ownerReady
+          ? 'checking'
+          : requestStatus ?? 'ready';
+  const canSend = ownerReady && status === 'ready';
 
   useEffect(() => {
     if (authStatus === 'unknown') return;
-    const uid = user?.uid ?? null;
-    if (!uid) {
-      planActionKeysRef.current.clear();
+    const uid = authenticatedUid;
+    const previousUid = hydratedUidRef.current;
+    if (previousUid !== uid) {
+      if (previousUid) {
+        // Preserve only mutation sessions that may need same-key recovery.
+        // Ordinary chat and drafts remain account-local volatile state.
+        persistActionSession(
+          previousUid,
+          messagesRef.current,
+          planActionKeysRef.current,
+          Date.now(),
+        );
+      }
+      recognitionRef.current?.abort?.();
+      planActionKeysRef.current = new Map();
       setMessages([]);
+      setInput('');
       setShowChat(false);
-      setHydratedUid(null);
+      setShowModeDropdown(false);
+      setRequestStatus(null);
+      setIsLoading(false);
+      setIsListening(false);
+      setMode('ask');
       setActionKeysVersion((version) => version + 1);
+    }
+    if (!uid) {
+      hydratedUidRef.current = null;
+      setHydratedUid(null);
       return;
     }
     const restored = restoreActionSession(uid);
     planActionKeysRef.current = restored.actionKeys;
     setMessages(restored.messages);
     setShowChat(restored.messages.length > 0);
+    hydratedUidRef.current = uid;
     setHydratedUid(uid);
     setActionKeysVersion((version) => version + 1);
-  }, [authStatus, user?.uid]);
+  }, [authStatus, authenticatedUid]);
 
   useEffect(() => {
     const uid = user?.uid;
@@ -242,6 +296,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
     recognition.interimResults = true;
     recognition.lang = getVoiceService()?.getLanguage() || 'it-IT';
     recognition.onresult = (event: any) => {
+      if (!ownerReadyRef.current) return;
       let transcript = '';
       for (let index = 0; index < event.results.length; index += 1) {
         transcript += event.results[index][0].transcript;
@@ -281,7 +336,11 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
 
   const sendMessage = async (text: string) => {
     const normalizedText = text.trim();
-    if (!normalizedText || isLoading || !canSend) return;
+    if (!normalizedText || isLoading || !canSend || !authenticatedUid) return;
+    const requestIdentity = requestIdentityRef.current;
+    const requestStillOwned = () => (
+      requestIdentityRef.current === requestIdentity && ownerReadyRef.current
+    );
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -313,6 +372,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
         mode,
         history,
       });
+      if (!requestStillOwned()) return;
       setMessages((previous) => previous.map((message) => (
         message.id === assistantMessageId
           ? {
@@ -332,6 +392,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
         voiceService.speakAIResponse(result.message);
       }
     } catch (error) {
+      if (!requestStillOwned()) return;
       const safeMessage = getSafeClientMessage(error);
       setRequestStatus(getRequestStatus(error));
       setMessages((previous) => previous.map((message) => (
@@ -340,7 +401,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           : message
       )));
     } finally {
-      setIsLoading(false);
+      if (requestStillOwned()) setIsLoading(false);
     }
   };
 
@@ -350,6 +411,11 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
     action: 'apply' | 'rollback',
     execution?: AIPlanActionResult,
   ) => {
+    if (!ownerReady || !authenticatedUid) return;
+    const requestIdentity = requestIdentityRef.current;
+    const requestStillOwned = () => (
+      requestIdentityRef.current === requestIdentity && ownerReadyRef.current
+    );
     const actionId = action === 'apply' ? plan.id : execution?.executionId;
     if (!actionId || (action === 'rollback' && !execution?.rollback)) return;
     const mapKey = `${action}:${actionId}`;
@@ -380,6 +446,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           idempotencyKey,
           { planId: plan.id, hash: plan.hash },
         );
+      if (!requestStillOwned()) return;
       const nextPlan: AIPlanPreview = {
         ...plan,
         status: action === 'apply' ? 'applied' : 'rolled_back',
@@ -400,6 +467,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       setActionKeysVersion((version) => version + 1);
       setRequestStatus(null);
     } catch (error) {
+      if (!requestStillOwned()) return;
       setRequestStatus(getRequestStatus(error));
       const errorCode = error instanceof AIClientError ? error.code : null;
       const planStale = errorCode !== null && [
@@ -436,6 +504,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   };
 
   const rejectPlan = (messageId: string) => {
+    if (!ownerReady || !authenticatedUid) return;
     const target = messages.find((message) => message.id === messageId);
     // An uncertain request may already have committed. Its exact key must be
     // retained until reconciliation; it is no longer safe to call this a
@@ -459,7 +528,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   };
 
   const toggleVoice = () => {
-    if (!recognitionRef.current) return;
+    if (!ownerReady || !recognitionRef.current) return;
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
@@ -476,7 +545,8 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
 
   const currentMode = MODE_CONFIG[mode];
   const statusConfig = STATUS_CONFIG[status];
-  const hasProtectedActionState = messages.some((message) => (
+  const visibleMessages = ownerReady ? messages : [];
+  const hasProtectedActionState = visibleMessages.some((message) => (
     messageNeedsProtectedStorage(message, clockNowMs)
   ));
 
@@ -503,9 +573,9 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
         )}
       </div>
 
-      {showChat && messages.length > 0 && (
+      {ownerReady && showChat && visibleMessages.length > 0 && (
         <div ref={chatRef} className="max-h-[400px] overflow-y-auto p-4 space-y-4 border-b border-gray-700">
-          {messages.map((message) => (
+          {visibleMessages.map((message) => (
             <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] px-4 py-3 rounded-2xl ${
                 message.role === 'user'
@@ -542,7 +612,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
         </div>
       )}
 
-      {!showChat && (
+      {(!ownerReady || !showChat) && (
         <div className="p-3 border-b border-gray-700">
           <div className="flex flex-wrap gap-2">
             {QUICK_PROMPTS[mode].map((prompt) => (
@@ -572,7 +642,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            sendMessage(input);
+            sendMessage(ownerReady ? input : '');
           }}
           className="flex items-end gap-3"
         >
@@ -589,7 +659,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
               <ChevronDown className={`w-4 h-4 transition-transform ${showModeDropdown ? 'rotate-180' : ''}`} />
             </button>
 
-            {showModeDropdown && (
+            {ownerReady && showModeDropdown && (
               <div className="absolute bottom-full left-0 mb-2 w-48 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden z-50">
                 {(Object.entries(MODE_CONFIG) as [AIChatMode, typeof MODE_CONFIG[AIChatMode]][]).map(([key, config]) => (
                   <button
@@ -615,8 +685,10 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           <div className="flex-1">
             <textarea
               ref={inputRef}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
+              value={ownerReady ? input : ''}
+              onChange={(event) => {
+                if (ownerReady) setInput(event.target.value);
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
@@ -671,7 +743,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
             <ShieldCheck className="w-3 h-3" />
             <span>Identità verificata dal backend; anteprima prima delle modifiche</span>
           </div>
-          {showChat && messages.length > 0 && (
+          {ownerReady && showChat && visibleMessages.length > 0 && (
             <button
               type="button"
               onClick={() => {

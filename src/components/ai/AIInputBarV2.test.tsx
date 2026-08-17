@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AIClientError } from '@/lib/ai/client';
-import AIInputBarV2 from './AIInputBarV2';
+import AIInputBarV2, { isAssistantSessionOwner } from './AIInputBarV2';
 
 const mocks = vi.hoisted(() => ({
   authState: {
@@ -46,6 +46,13 @@ describe('AIInputBarV2 secure client flow', () => {
     mocks.rollbackAIExecution.mockReset();
     mocks.createIdempotencyKey.mockReset();
     mocks.createIdempotencyKey.mockReturnValue('idem_1234567890123456');
+  });
+
+  it('fails closed until the hydrated assistant session matches the authenticated UID', () => {
+    expect(isAssistantSessionOwner('user-a', 'user-a')).toBe(true);
+    expect(isAssistantSessionOwner('user-a', 'user-b')).toBe(false);
+    expect(isAssistantSessionOwner('user-a', null)).toBe(false);
+    expect(isAssistantSessionOwner(null, 'user-a')).toBe(false);
   });
 
   it('disables cloud AI clearly for signed-out users', () => {
@@ -409,6 +416,87 @@ describe('AIInputBarV2 secure client flow', () => {
     expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
   });
 
+  it('clears volatile drafts and ignores an in-flight chat result after an account switch', async () => {
+    const firstResponse = deferred<{ message: string }>();
+    mocks.requestAIChat
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockResolvedValueOnce({ message: 'Risposta per B' });
+    const view = render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Contenuto privato di A' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    await waitFor(() => expect(mocks.requestAIChat).toHaveBeenCalledTimes(1));
+
+    mocks.authState.user = { uid: 'second-user' };
+    view.rerender(<AIInputBarV2 />);
+    expect(screen.queryByText('Contenuto privato di A')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Messaggio per l’assistente AI')).toHaveValue('');
+
+    await act(async () => {
+      firstResponse.resolve({ message: 'Risposta privata per A' });
+      await firstResponse.promise;
+    });
+    expect(screen.queryByText('Risposta privata per A')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Domanda di B' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    await waitFor(() => {
+      expect(mocks.requestAIChat).toHaveBeenLastCalledWith({
+        message: 'Domanda di B',
+        mode: 'ask',
+        history: [],
+      });
+    });
+    expect(await screen.findByText('Risposta per B')).toBeInTheDocument();
+  });
+
+  it('preserves an in-flight action for same-key recovery by its original owner only', async () => {
+    const firstApply = deferred<ReturnType<typeof validActionResult>>();
+    mocks.requestAIChat.mockResolvedValueOnce({
+      message: 'Anteprima privata di A',
+      plan: minimalPlan(),
+    });
+    mocks.applyAIPlan.mockReturnValueOnce(firstApply.promise);
+    const view = render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Pianifica per A' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
+    await waitFor(() => expect(mocks.applyAIPlan).toHaveBeenCalledTimes(1));
+
+    mocks.authState.user = { uid: 'second-user' };
+    view.rerender(<AIInputBarV2 />);
+    expect(screen.queryByText('Anteprima privata di A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Applica piano' })).not.toBeInTheDocument();
+
+    await act(async () => {
+      firstApply.resolve(validActionResult());
+      await firstApply.promise;
+    });
+    expect(screen.queryByText('Piano applicato')).not.toBeInTheDocument();
+
+    mocks.authState.user = { uid: 'firebase-user' };
+    view.rerender(<AIInputBarV2 />);
+    expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
+
+    mocks.applyAIPlan.mockResolvedValueOnce(validActionResult());
+    fireEvent.click(screen.getByRole('button', { name: 'Riconcilia applicazione' }));
+    await waitFor(() => {
+      expect(mocks.applyAIPlan).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ id: 'plan_123' }),
+        'idem_1234567890123456',
+      );
+    });
+    expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
+  });
+
   it('reconciles a malformed 2xx action response with the same idempotency key', async () => {
     const expiresAt = new Date(Date.now() + 750).toISOString();
     const originalKey = 'idem_original_1234567890123456';
@@ -601,4 +689,18 @@ function validActionResult() {
       expiresAt: '2099-01-08T00:00:01.000Z',
     },
   };
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
