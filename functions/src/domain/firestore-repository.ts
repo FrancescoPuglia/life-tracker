@@ -103,6 +103,11 @@ export interface FirestoreRepositoryVerificationHooks {
     action: PlanActionResult['status'],
     executionId: string,
   ) => void | Promise<void>;
+  /** Test seam after transactional verification reads and before receipt writes. */
+  readonly afterVerificationRead?: (
+    action: PlanActionResult['status'],
+    executionId: string,
+  ) => void | Promise<void>;
 }
 
 /**
@@ -806,59 +811,76 @@ export class FirestoreRepository implements AuditableRepository {
     if (result.verified) return { ...result, idempotentReplay: replay || result.idempotentReplay };
     try {
       await this.verificationHooks.beforeVerification?.(result.status, result.executionId);
-      const execution = await this.getExecution(uid, result.executionId);
-      if (!execution) {
-        throw new DomainError('COMMITTED_UNVERIFIED', 'Execution verification record is unavailable.');
-      }
-      const expected = result.status === 'applied'
-        ? (await this.getPlan(execution.uid, execution.planId))?.appliedStateHashes
-        : execution.restoredStateHashes;
-      if (!expected) {
-        throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state is missing verification metadata.');
-      }
-      await this.verifyExpectedHashes(execution.uid, expected);
-      const verified: PlanActionResult = {
-        ...result,
-        idempotentReplay: replay || result.idempotentReplay,
-        verified: true,
-        receipt: { ...result.receipt, verified: true },
-      };
-      const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(execution.uid, execution.id));
-      const idempotencyRef = this.idempotencyRef(
-        execution.uid,
-        originatingAction,
-        idempotencyKeyHash,
-      );
-      const auditRef = this.firestore.doc(`${SERVER_ONLY_PATHS.auditCollection}/${execution.uid}_${execution.auditId}`);
-      const batch = this.firestore.batch();
-      batch.update(executionRef, {
-        verified: true,
-        result: encodeServer(withoutReplay(verified)),
-      });
-      batch.update(idempotencyRef, { result: encodeServer(withoutRollback(verified)) });
-      if (result.status === 'rolled_back') {
-        const originalApplyRef = this.idempotencyRef(
-          execution.uid,
-          'apply',
-          execution.idempotencyKeyHash,
-        );
-        if (originalApplyRef.path !== idempotencyRef.path) {
-          batch.update(originalApplyRef, { result: encodeServer(withoutRollback(verified)) });
+      return await this.firestore.runTransaction(async (transaction) => {
+        const executionRef = this.firestore.doc(SERVER_ONLY_PATHS.execution(uid, result.executionId));
+        const executionSnapshot = await transaction.get(executionRef);
+        if (!executionSnapshot.exists) {
+          throw new DomainError('COMMITTED_UNVERIFIED', 'Execution verification record is unavailable.');
         }
+        const execution = decodeOwnedServerDocument<StoredExecution>(executionSnapshot, uid);
+        if (
+          execution.id !== result.executionId
+          || execution.result.executionId !== execution.id
+          || execution.result.planId !== execution.planId
+          || execution.result.status !== execution.status
+          || execution.result.receipt.status !== execution.status
+        ) {
+          throw new DomainError('COMMITTED_UNVERIFIED', 'Execution verification metadata is inconsistent.');
+        }
+
+        let expected: Readonly<Record<string, string | null>> | undefined;
+        if (execution.status === 'applied') {
+          const planRef = this.firestore.doc(SERVER_ONLY_PATHS.changePlan(uid, execution.planId));
+          const planSnapshot = await transaction.get(planRef);
+          if (!planSnapshot.exists) {
+            throw new DomainError('COMMITTED_UNVERIFIED', 'Committed plan is unavailable.');
+          }
+          const plan = decodeOwnedServerDocument<StoredChangePlan>(planSnapshot, uid);
+          if (plan.status !== 'applied') {
+            throw new DomainError('COMMITTED_UNVERIFIED', 'Committed plan status is inconsistent.');
+          }
+          expected = plan.appliedStateHashes;
+        } else {
+          expected = execution.restoredStateHashes;
+        }
+        if (!expected) {
+          throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state is missing verification metadata.');
+        }
+        await this.verifyExpectedHashes(execution.uid, expected, transaction);
+        await this.verificationHooks.afterVerificationRead?.(execution.status, execution.id);
+
+        const verified: PlanActionResult = {
+          ...clone(execution.result),
+          idempotentReplay: replay || result.idempotentReplay,
+          verified: true,
+          receipt: { ...clone(execution.result.receipt), verified: true },
+        };
+        const receiptRefs = new Map<string, DocumentReference>();
+        const addReceiptRef = (reference: DocumentReference): void => {
+          receiptRefs.set(reference.path, reference);
+        };
+        addReceiptRef(this.idempotencyRef(execution.uid, originatingAction, idempotencyKeyHash));
+        addReceiptRef(this.idempotencyRef(execution.uid, 'apply', execution.idempotencyKeyHash));
         if (execution.rollbackIdempotencyKeyHash) {
-          const originalRollbackRef = this.idempotencyRef(
+          addReceiptRef(this.idempotencyRef(
             execution.uid,
             'rollback',
             execution.rollbackIdempotencyKeyHash,
-          );
-          if (originalRollbackRef.path !== idempotencyRef.path) {
-            batch.update(originalRollbackRef, { result: encodeServer(withoutRollback(verified)) });
-          }
+          ));
         }
-      }
-      batch.update(auditRef, { 'metadata.verified': true });
-      await batch.commit();
-      return verified;
+        const auditRef = this.firestore.doc(
+          `${SERVER_ONLY_PATHS.auditCollection}/${execution.uid}_${execution.auditId}`,
+        );
+        transaction.update(executionRef, {
+          verified: true,
+          result: encodeServer(withoutReplay(verified)),
+        });
+        for (const receiptRef of receiptRefs.values()) {
+          transaction.update(receiptRef, { result: encodeServer(withoutRollback(verified)) });
+        }
+        transaction.update(auditRef, { 'metadata.verified': true });
+        return verified;
+      });
     } catch (error) {
       if (error instanceof DomainError && error.code === 'COMMITTED_UNVERIFIED') throw error;
       throw new DomainError('COMMITTED_UNVERIFIED', 'The committed change could not be verified yet.');
@@ -868,6 +890,7 @@ export class FirestoreRepository implements AuditableRepository {
   private async verifyExpectedHashes(
     uid: string,
     expected: Readonly<Record<string, string | null>>,
+    transaction: Transaction,
   ): Promise<void> {
     const entries = Object.entries(expected);
     const references = entries.map(([key]) => {
@@ -875,7 +898,7 @@ export class FirestoreRepository implements AuditableRepository {
       if (extra || !collection || !id) throw new DomainError('COMMITTED_UNVERIFIED', 'Invalid verification reference.');
       return this.entityRef(uid, collection as EntityCollection, id);
     });
-    const documents = await this.firestore.getAll(...references);
+    const documents = await transaction.getAll(...references);
     for (let index = 0; index < entries.length; index += 1) {
       const expectedHash = entries[index]?.[1];
       const document = documents[index];

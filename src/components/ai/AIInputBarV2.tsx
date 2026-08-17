@@ -215,6 +215,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       epoch: requestIdentityRef.current.epoch + 1,
     };
   }
+  const handledRequestIdentityRef = useRef(requestIdentityRef.current);
   messagesRef.current = messages;
   ownerReadyRef.current = ownerReady;
 
@@ -230,6 +231,11 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const canSend = ownerReady && status === 'ready';
 
   useEffect(() => {
+    if (handledRequestIdentityRef.current !== requestIdentityRef.current) {
+      handledRequestIdentityRef.current = requestIdentityRef.current;
+      recognitionRef.current?.abort?.();
+      getVoiceService()?.stopSpeech();
+    }
     if (authStatus === 'unknown') return;
     const uid = authenticatedUid;
     const previousUid = hydratedUidRef.current;
@@ -244,7 +250,6 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
           Date.now(),
         );
       }
-      recognitionRef.current?.abort?.();
       planActionKeysRef.current = new Map();
       setMessages([]);
       setInput('');
@@ -292,11 +297,15 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
 
     setVoiceSupported(true);
     const recognition = new SpeechRecognition();
+    const recognitionIdentity = requestIdentityRef.current;
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = getVoiceService()?.getLanguage() || 'it-IT';
     recognition.onresult = (event: any) => {
-      if (!ownerReadyRef.current) return;
+      if (
+        requestIdentityRef.current !== recognitionIdentity
+        || !ownerReadyRef.current
+      ) return;
       let transcript = '';
       for (let index = 0; index < event.results.length; index += 1) {
         transcript += event.results[index][0].transcript;
@@ -304,14 +313,23 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
       setInput(transcript);
       if (event.results[event.results.length - 1].isFinal) setIsListening(false);
     };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => {
+      if (requestIdentityRef.current === recognitionIdentity) setIsListening(false);
+    };
+    recognition.onend = () => {
+      if (requestIdentityRef.current === recognitionIdentity) setIsListening(false);
+    };
     recognitionRef.current = recognition;
 
     return () => {
       recognition.abort?.();
-      recognitionRef.current = null;
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
     };
+  }, [authStatus, authenticatedUid]);
+
+  useEffect(() => () => {
+    recognitionRef.current?.abort?.();
+    getVoiceService()?.stopSpeech();
   }, []);
 
   useEffect(() => {

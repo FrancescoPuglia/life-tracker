@@ -711,6 +711,99 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     expect((await firestore.collection('aiExecutions').where('uid', '==', uid).get()).size).toBe(1);
   }, 30_000);
 
+  it('serializes verifier marking before rollback and preserves final rolled-back receipts', async () => {
+    const uid = uniqueUid('verification-rollback-race');
+    await seedSchedule(firestore, uid);
+    let releaseVerifier: (() => void) | undefined;
+    let verifierReached: (() => void) | undefined;
+    const verifierBarrier = new Promise<void>((resolve) => {
+      verifierReached = resolve;
+    });
+    const verifierRelease = new Promise<void>((resolve) => {
+      releaseVerifier = resolve;
+    });
+    let paused = false;
+    const hooks: FirestoreRepositoryVerificationHooks = {
+      afterVerificationRead: async (status) => {
+        if (status !== 'applied' || paused) return;
+        paused = true;
+        verifierReached?.();
+        await verifierRelease;
+      },
+    };
+    const { service } = serviceFor(
+      firestore,
+      ['plan-verifier-race', 'execution-verifier-race', 'unused-replay-execution'],
+      hooks,
+    );
+    const preview = await previewTitle(service, uid, 'Verifier race update');
+    const applyInput = {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'verification-race-apply-key-001',
+    };
+
+    const laggingApply = service.applyPlan(context(uid, 'verification-race-apply'), applyInput);
+    await verifierBarrier;
+    const rollbackCapability = new CapabilityIssuer(TEST_CAPABILITY_SECRET).issue(
+      'rollback',
+      uid,
+      'execution-verifier-race',
+      preview.hash,
+    );
+    const rollbackPromise = service.rollbackExecution(context(uid, 'verification-race-rollback'), {
+      executionId: 'execution-verifier-race',
+      rollbackCapability,
+      idempotencyKey: 'verification-race-rollback-key-1',
+    });
+    try {
+      const observed = await Promise.race([
+        rollbackPromise.then(
+          () => 'settled' as const,
+          () => 'settled' as const,
+        ),
+        new Promise<'blocked'>((resolve) => {
+          setTimeout(() => resolve('blocked'), 1_000);
+        }),
+      ]);
+      expect(observed).toBe('blocked');
+    } finally {
+      releaseVerifier?.();
+    }
+
+    const [laggingResult, rollbackResult] = await Promise.all([laggingApply, rollbackPromise]);
+    expect(laggingResult).toMatchObject({
+      executionId: rollbackResult.executionId,
+      status: 'applied',
+      verified: true,
+    });
+    expect(rollbackResult).toMatchObject({ status: 'rolled_back', verified: true });
+    const applyReplay = await service.applyPlan(
+      context(uid, 'verification-race-final-replay'),
+      applyInput,
+    );
+    expect(applyReplay).toMatchObject({
+      executionId: rollbackResult.executionId,
+      status: 'rolled_back',
+      verified: true,
+      idempotentReplay: true,
+    });
+    expect(applyReplay.rollback).toBeUndefined();
+
+    const execution = await firestore.doc(`aiExecutions/${uid}_${rollbackResult.executionId}`).get();
+    expect(execution.data()).toMatchObject({
+      status: 'rolled_back',
+      verified: true,
+      result: { status: 'rolled_back', verified: true },
+    });
+    const receipts = await firestore.collection('aiIdempotency').where('uid', '==', uid).get();
+    expect(receipts.docs).toHaveLength(2);
+    expect(receipts.docs.every((receipt) => (
+      receipt.data().result?.status === 'rolled_back'
+      && receipt.data().result?.verified === true
+    ))).toBe(true);
+  }, 30_000);
+
   it('fails closed when a server-owned rollback snapshot value no longer matches its hash', async () => {
     const uid = uniqueUid('snapshot-integrity');
     await seedSchedule(firestore, uid);

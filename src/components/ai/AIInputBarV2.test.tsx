@@ -13,6 +13,12 @@ const mocks = vi.hoisted(() => ({
   applyAIPlan: vi.fn(),
   rollbackAIExecution: vi.fn(),
   createIdempotencyKey: vi.fn(),
+  voiceService: {
+    getLanguage: vi.fn(),
+    getSettings: vi.fn(),
+    speakAIResponse: vi.fn(),
+    stopSpeech: vi.fn(),
+  },
 }));
 
 vi.mock('@/providers/AuthProvider', () => ({
@@ -32,7 +38,7 @@ vi.mock('@/lib/ai/client', async (importOriginal) => {
 });
 
 vi.mock('@/lib/voice/voiceService', () => ({
-  getVoiceService: () => null,
+  getVoiceService: () => mocks.voiceService,
 }));
 
 describe('AIInputBarV2 secure client flow', () => {
@@ -46,6 +52,12 @@ describe('AIInputBarV2 secure client flow', () => {
     mocks.rollbackAIExecution.mockReset();
     mocks.createIdempotencyKey.mockReset();
     mocks.createIdempotencyKey.mockReturnValue('idem_1234567890123456');
+    mocks.voiceService.getLanguage.mockReset();
+    mocks.voiceService.getLanguage.mockReturnValue('it-IT');
+    mocks.voiceService.getSettings.mockReset();
+    mocks.voiceService.getSettings.mockReturnValue({ provider: 'browser' });
+    mocks.voiceService.speakAIResponse.mockReset();
+    mocks.voiceService.stopSpeech.mockReset();
   });
 
   it('fails closed until the hydrated assistant session matches the authenticated UID', () => {
@@ -452,6 +464,58 @@ describe('AIInputBarV2 secure client flow', () => {
       });
     });
     expect(await screen.findByText('Risposta per B')).toBeInTheDocument();
+  });
+
+  it('stops account-local speech and ignores a late recognition result after an account switch', async () => {
+    const recognitions: Array<{
+      abort: ReturnType<typeof vi.fn>;
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+      onresult?: (event: unknown) => void;
+    }> = [];
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      abort = vi.fn();
+      start = vi.fn();
+      stop = vi.fn();
+      onresult?: (event: unknown) => void;
+
+      constructor() {
+        recognitions.push(this);
+      }
+    }
+    (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition = FakeSpeechRecognition;
+    mocks.requestAIChat.mockResolvedValueOnce({ message: 'Risposta parlata privata di A' });
+    const view = render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Parla solo con A' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    expect(await screen.findByText('Risposta parlata privata di A')).toBeInTheDocument();
+    expect(mocks.voiceService.speakAIResponse).toHaveBeenCalledWith('Risposta parlata privata di A');
+    const accountARecognition = recognitions[0];
+    expect(accountARecognition).toBeDefined();
+    mocks.voiceService.stopSpeech.mockClear();
+
+    mocks.authState.user = { uid: 'second-user' };
+    view.rerender(<AIInputBarV2 />);
+    await waitFor(() => expect(mocks.voiceService.stopSpeech).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      accountARecognition?.onresult?.({
+        results: Object.assign([[{ transcript: 'Trascrizione privata tardiva di A' }]], {
+          length: 1,
+        }),
+      });
+    });
+    expect(screen.getByLabelText('Messaggio per l’assistente AI')).toHaveValue('');
+    expect(screen.queryByDisplayValue('Trascrizione privata tardiva di A')).not.toBeInTheDocument();
+
+    view.unmount();
+    expect(mocks.voiceService.stopSpeech).toHaveBeenCalledTimes(2);
+    delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
   });
 
   it('preserves an in-flight action for same-key recovery by its original owner only', async () => {
