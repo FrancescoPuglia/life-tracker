@@ -61,6 +61,34 @@ planned-vs-actual interpretation, hostile-Note behavior, proposal, Reject,
 Apply, replay, drift, audit receipt, and Undo remain **NOT RUN against the real
 Responses API**. Their local/emulator counterparts remain green.
 
+## Live evidence harness hardening
+
+The next funded run now fails closed unless it proves the deployed behavior,
+not merely a plausible response:
+
+- canonical shared-contract parsing plus one exact, conflict-free operation;
+- plan/hash/execution/affected-set binding for Apply, replay, and Undo;
+- full bounded-fixture hashes for Reject, exact Apply scope, and stale-preview
+  zero-partial-write checks;
+- one UI request per approval and a real concurrent same-key TimeBlock-create
+  race that must converge on one execution, one replay, and one entity;
+- definite cross-user and missing-entity proposal probes, payload `userId`
+  rejection, wrong-owner Apply/Rollback indistinguishability, and newer-human-
+  edit rollback refusal;
+- hostile-Note canary retrieval in planning mode while proposal tools are
+  available, with a full fixture no-mutation check;
+- fixed-message assertion failures that never serialize provider credentials,
+  approval capabilities, rollback capabilities, or Firebase tokens;
+- explicit overall `PASS`/`FAIL`, failure stage, completed/NOT-RUN matrix,
+  local source commit, and cleanup result in the evidence artifact;
+- teardown of every explicit synthetic user document followed by deletion of
+  both synthetic Auth accounts, including provider-failure paths. Durable
+  server audit records remain server-only; rollback snapshots use the deployed
+  TTL policy.
+
+Targeted evidence-helper tests: 3 files / 16 tests passed. Root TypeScript and
+the static security scan also passed after this hardening.
+
 ## Green independent regression at this checkpoint
 
 - Root unit tests: 44 files, 572 tests passed.
