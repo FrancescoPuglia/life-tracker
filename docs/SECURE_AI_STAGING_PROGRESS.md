@@ -292,6 +292,14 @@ Its focused adapter suite passed 17/17, the complete Functions unit suite
 157/157, Functions typecheck and build passed, and the generated backend source
 fingerprint is
 `sha256:dd9b08c86037d78a4bb7ec7dd3ece78e340d6886af877ae4f4ae253ec9c39d1c`.
+Final review identified the remaining SDK statuses `in_progress`, `cancelled`,
+and `queued`, plus absent status metadata. Commit
+`771e261c680f29c8b6aa1293675d0c75ef19b1ec` now requires explicit
+`status: completed`; every other or missing status is rejected before output or
+tool processing. The expanded focused suite passed 21/21, the complete
+Functions unit suite passed 161/161, Functions typecheck/build passed, and the
+generated backend source fingerprint is
+`sha256:6994a8f1bf82fdfddb023e1e5e050b27dbf3b5927062c471d85a852fdca57da1`.
 At exact source checkpoint `08f26fa94f070c1f9d0fb1f30f275fe6e6d5e1fb`,
 the fresh production static export and output-inclusive scan passed, static
 browser E2E passed 1/1, and the full isolated Auth + Firestore + Functions
