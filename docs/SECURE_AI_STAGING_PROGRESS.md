@@ -253,9 +253,14 @@ before creating any identity or data. A direct negative scan proved
 The same checkpoint distinguishes the configured model from the
 provider-returned model identity. A successful staging record must now report
 both the reviewed request model and the provider's exact safe model field.
-Missing or malformed provider model metadata fails closed. It also captures a
-single immutable source commit for the entire staging run and fails if the tree
-or HEAD changes before evidence finalization.
+Missing or malformed provider model metadata fails closed. Follow-up commit
+`0373bae874df7c4c2df0bb1b4808d56dd95db079` strengthens that boundary by
+requiring the exact configured model identity on **every** provider response,
+including intermediate tool-call turns, before usage, output, or tool execution
+is processed. Missing, malformed, and mismatched intermediate identities are
+covered by fail-closed tests that also prove no proposal or audit event is
+created. The staging harness captures a single immutable source commit for the
+entire run and fails if the tree or HEAD changes before evidence finalization.
 
 Full unit verification after this remediation passed 597/597 root tests and
 152/152 Functions unit tests; both typechecks and the focused positive/negative
@@ -272,6 +277,12 @@ approved localhost sandbox permission and passed. The first full emulator
 attempt selected system Node 18 because of an overly narrow temporary PATH and
 failed before emulator startup; restoring the repository Node 22 path made the
 unchanged gate pass. No test or security policy was weakened.
+
+The per-turn provider-identity checkpoint passed its focused adapter suite
+15/15, the complete Functions unit suite 155/155, Functions typecheck and
+build, `git diff --check`, and the canonical static security scan. Its locally
+generated backend source fingerprint is
+`sha256:d4046d28fdb96b6c3b2454b1bfad91dfa89980a03b0727e8984c644b68caba24`.
 
 The exact static export attested source
 `c1a837994680c808f23dea10e9d05fb1d3532ea3` and public AI backend state
