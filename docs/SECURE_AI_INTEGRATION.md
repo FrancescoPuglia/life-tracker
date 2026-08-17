@@ -131,8 +131,8 @@ through Secret Manager. Set them interactively only after selecting the intended
 staging project:
 
 ```bash
-firebase functions:secrets:set OPENAI_API_KEY
-firebase functions:secrets:set AI_CAPABILITY_SIGNING_SECRET
+firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
+firebase functions:secrets:set AI_CAPABILITY_SIGNING_SECRET --project life-tracker-staging
 ```
 
 No live OpenAI smoke test may use the historical exposed key. Human revocation
@@ -227,6 +227,15 @@ firebase functions:secrets:set OPENAI_API_KEY --project life-tracker-staging
    ```bash
    firebase deploy --project life-tracker-staging --only firestore:indexes
    ```
+
+   `aiAuditLogs` are the durable receipt trail. Ephemeral `aiChangePlans`,
+   `aiApprovals`, `aiExecutions`, and `aiIdempotency` records carry a
+   server-owned `purgeAt` timestamp and use a seven-day post-action retention
+   window; abandoned previews expire at preview expiry. `aiSnapshots` expire
+   at the rollback boundary, and `aiRateLimits.expiresAt` is TTL-managed.
+   Staging fixture teardown removes explicit user documents and Auth accounts
+   immediately; server-only ephemeral records are deleted asynchronously by
+   these deployed TTL policies.
 
 9. Set the GitHub Pages repository variable `NEXT_PUBLIC_AI_API_BASE_URL` to
    the verified Function URL, then use the existing reviewed Pages workflow.

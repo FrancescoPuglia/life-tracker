@@ -34,6 +34,10 @@ export interface ExpectedPlanChange {
   readonly title: string;
   readonly startTime: string;
   readonly endTime: string;
+  readonly changedFields: readonly string[];
+  readonly beforeFields?: Readonly<Record<string, unknown>>;
+  readonly afterFields: Readonly<Record<string, unknown>>;
+  readonly requiresWpiMarker?: boolean;
 }
 
 export interface ExpectedActionResult {
@@ -64,6 +68,13 @@ export function assertNoProviderCredentialMaterial(value: unknown): void {
 export function assertEvidenceSafe(value: unknown): void {
   assertNoProviderCredentialMaterial(value);
   visitEvidence(value, 0);
+}
+
+/** Never let a failed no-plan assertion serialize an approval capability. */
+export function assertNoPlan(value: unknown): void {
+  if (value !== undefined) {
+    fail('Staging analysis unexpectedly returned a mutation proposal.');
+  }
 }
 
 export function requireExactPlan(
@@ -109,12 +120,35 @@ export function requireExactPlan(
   if (expected.action === 'create' ? diff.before !== null : diff.before === null) {
     fail('Staging proposal before-state did not match the requested action.');
   }
+  const computedChangedFields = changedFields(diff.before, diff.after);
+  if (
+    !sameStrings(diff.changedFields, expected.changedFields)
+    || !sameStrings(computedChangedFields, expected.changedFields)
+  ) {
+    fail('Staging proposal changed fields outside the exact requested scope.');
+  }
   if (
     !diff.after
     || canonicalInstant(diff.after.startTime) !== canonicalInstant(expected.startTime)
     || canonicalInstant(diff.after.endTime) !== canonicalInstant(expected.endTime)
   ) {
     fail('Staging proposal after-state interval did not match the requested change.');
+  }
+  if (
+    (expected.beforeFields && !fieldsMatch(diff.before, expected.beforeFields))
+    || !fieldsMatch(diff.after, expected.afterFields)
+  ) {
+    fail('Staging proposal before/after values did not match the exact requested change.');
+  }
+  if (expected.requiresWpiMarker) {
+    const notes = diff.after.notes;
+    const escapedId = escapeRegExp(operation.entityId);
+    if (
+      typeof notes !== 'string'
+      || !new RegExp(`^WPI_KEY: wpi:ai_draft_[a-f0-9]{20}:${escapedId}$`).test(notes)
+    ) {
+      fail('Staging proposal did not contain exactly one server-generated WPI marker.');
+    }
   }
   return plan;
 }
@@ -168,6 +202,45 @@ function canonicalInstant(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
+}
+
+function fieldsMatch(
+  actual: Readonly<Record<string, unknown>> | null,
+  expected: Readonly<Record<string, unknown>>,
+): boolean {
+  if (!actual) return false;
+  return Object.entries(expected).every(([key, value]) =>
+    canonicalJson(actual[key]) === canonicalJson(value));
+}
+
+function changedFields(
+  before: Readonly<Record<string, unknown>> | null,
+  after: Readonly<Record<string, unknown>> | null,
+): readonly string[] {
+  const fields = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
+  return [...fields]
+    .filter((field) => canonicalJson(before?.[field]) !== canonicalJson(after?.[field]))
+    .filter((field) => !['id', 'createdAt', 'updatedAt'].includes(field))
+    .sort();
+}
+
+function sameStrings(actual: readonly string[], expected: readonly string[]): boolean {
+  const left = [...actual].sort();
+  const right = [...expected].sort();
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+    .join(',')}}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function visitEvidence(value: unknown, depth: number): void {

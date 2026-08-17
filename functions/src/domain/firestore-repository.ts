@@ -54,6 +54,7 @@ const MAX_SCAN_PER_PAGE = 500;
 const SCAN_BATCH_SIZE = 100;
 const MAX_AUDIT_RESULTS = 500;
 const EPOCH = new Date(0).toISOString();
+const SERVER_RECORD_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 const PRODUCT_DEFAULT_PREFERENCES: UserPlanningPreferences = Object.freeze({
   source: 'product_default',
@@ -334,12 +335,13 @@ export class FirestoreRepository implements AuditableRepository {
       if (existing.some((document) => document.exists)) {
         throw new DomainError('CONFLICT', 'Plan already exists.');
       }
-      transaction.create(planRef, encodeServer(stored));
+      const previewPurgeAt = Timestamp.fromDate(new Date(plan.expiresAt));
+      transaction.create(planRef, { ...encodeServer(stored), purgeAt: previewPurgeAt });
       transaction.create(snapshotRef, {
         ...encodeServer(snapshot),
         purgeAt: Timestamp.fromDate(new Date(plan.expiresAt)),
       });
-      transaction.create(approvalRef, encodeServer(approval));
+      transaction.create(approvalRef, { ...encodeServer(approval), purgeAt: previewPurgeAt });
       transaction.create(auditRef, encodeServer(audit));
     });
     return clone(stored);
@@ -550,19 +552,20 @@ export class FirestoreRepository implements AuditableRepository {
         request.idempotencyKeyHash,
       );
 
-      transaction.set(planRef, encodeServer(updatedPlan));
+      const retainedUntil = serverRecordPurgeAt(request.now);
+      transaction.set(planRef, { ...encodeServer(updatedPlan), purgeAt: retainedUntil });
       transaction.update(snapshotRef, {
         purgeAt: Timestamp.fromDate(new Date(request.rollbackExpiresAt)),
       });
-      transaction.set(approvalRef, encodeServer({
+      transaction.set(approvalRef, { ...encodeServer({
         ...approval,
         status: 'consumed',
         consumedAt: request.now,
         executionId: request.executionId,
-      } satisfies ApprovalRecord));
-      transaction.create(executionRef, encodeServer(execution));
+      } satisfies ApprovalRecord), purgeAt: retainedUntil });
+      transaction.create(executionRef, { ...encodeServer(execution), purgeAt: retainedUntil });
       transaction.create(auditRef, encodeServer(audit));
-      transaction.create(idempotencyRef, encodeServer({
+      transaction.create(idempotencyRef, { ...encodeServer({
         uid: request.uid,
         action: 'apply',
         resourceId: plan.id,
@@ -570,7 +573,7 @@ export class FirestoreRepository implements AuditableRepository {
         createdAt: request.now,
         capabilityHash: request.approvalCapabilityHash,
         result: withoutRollback(result),
-      }));
+      }), purgeAt: retainedUntil });
       return { result, replay: false };
     });
 
@@ -746,13 +749,14 @@ export class FirestoreRepository implements AuditableRepository {
         request.idempotencyKeyHash,
       );
 
-      transaction.set(planRef, encodeServer(updatedPlan));
+      const retainedUntil = serverRecordPurgeAt(request.now);
+      transaction.set(planRef, { ...encodeServer(updatedPlan), purgeAt: retainedUntil });
       transaction.update(snapshotRef, {
         purgeAt: Timestamp.fromDate(new Date(request.now)),
       });
-      transaction.set(executionRef, encodeServer(updatedExecution));
+      transaction.set(executionRef, { ...encodeServer(updatedExecution), purgeAt: retainedUntil });
       transaction.create(auditRef, encodeServer(audit));
-      transaction.create(idempotencyRef, encodeServer({
+      transaction.create(idempotencyRef, { ...encodeServer({
         uid: request.uid,
         action: 'rollback',
         resourceId: request.executionId,
@@ -760,9 +764,10 @@ export class FirestoreRepository implements AuditableRepository {
         createdAt: request.now,
         capabilityHash: request.rollbackCapabilityHash,
         result: withoutRollback(result),
-      }));
+      }), purgeAt: retainedUntil });
       transaction.update(applyIdempotencyRef, {
         result: encodeServer(withoutRollback(result)),
+        purgeAt: retainedUntil,
       });
       return { result, replay: false };
     });
@@ -1300,6 +1305,12 @@ function encodeEntityValue(value: unknown, key?: string): unknown {
 
 function encodeServer(value: unknown): DocumentData {
   return stripUndefined(clone(value)) as DocumentData;
+}
+
+function serverRecordPurgeAt(now: string): Timestamp {
+  const timestamp = Date.parse(now);
+  if (!Number.isFinite(timestamp)) throw new DomainError('INTERNAL', 'Server retention timestamp is invalid.');
+  return Timestamp.fromMillis(timestamp + SERVER_RECORD_RETENTION_MS);
 }
 
 function stripUndefined(value: unknown): unknown {

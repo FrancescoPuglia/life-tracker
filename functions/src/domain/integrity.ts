@@ -17,6 +17,7 @@ export function verifyStoredPlan(plan: StoredChangePlan): void {
   const {
     hash,
     status: _status,
+    purgeAt: _purgeAt,
     appliedAt: _appliedAt,
     rolledBackAt: _rolledBackAt,
     appliedVersions: _versions,

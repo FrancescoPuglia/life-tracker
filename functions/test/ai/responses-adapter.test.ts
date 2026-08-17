@@ -348,7 +348,10 @@ describe('bounded OpenAI Responses orchestration', () => {
       message: 'Read',
       mode: 'ask',
       authenticatedContext: CONTEXT,
-    })).rejects.toMatchObject({ code: 'INTERNAL', message: 'AI request timed out.' });
+    })).rejects.toMatchObject({
+      code: 'PROVIDER_UNAVAILABLE',
+      message: 'The AI provider request timed out safely.',
+    });
   });
 
   it('applies the same end-to-end deadline to domain tool execution', async () => {
@@ -439,6 +442,25 @@ describe('bounded OpenAI Responses orchestration', () => {
       providerStatus: 401,
     });
 
+    const genericSecretObserver = vi.fn();
+    const genericSecret = setup([{ id: 'unused', output: [] }], {
+      onProviderError: genericSecretObserver,
+    });
+    genericSecret.create.mockRejectedValueOnce({
+      status: 401,
+      code: ['sk', 'abcdefghijklmnopqrstuvwxyz123456'].join('-'),
+    });
+    await expect(genericSecret.adapter.run({
+      auth: AUTH,
+      message: 'Read',
+      mode: 'ask',
+      authenticatedContext: CONTEXT,
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    expect(genericSecretObserver).toHaveBeenCalledWith({
+      requestId: AUTH.requestId,
+      providerStatus: 401,
+    });
+
     const toolCall = {
       id: 'response-tool-error',
       output: [{
@@ -471,6 +493,20 @@ describe('bounded OpenAI Responses orchestration', () => {
       mode: 'ask',
       authenticatedContext: CONTEXT,
     })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+
+    const internalTool = setup([toolCall]);
+    vi.spyOn(internalTool.domain.executor, 'executeJson').mockRejectedValueOnce(
+      new TypeError('internal serialization detail'),
+    );
+    await expect(internalTool.adapter.run({
+      auth: AUTH,
+      message: 'Read',
+      mode: 'ask',
+      authenticatedContext: CONTEXT,
+    })).rejects.toMatchObject({
+      code: 'INTERNAL',
+      message: 'Domain tool execution failed safely.',
+    });
   });
 });
 

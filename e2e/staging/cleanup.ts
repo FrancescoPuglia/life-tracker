@@ -15,8 +15,8 @@ export interface CleanupReport {
   readonly deletedUserDocuments: number;
   readonly attemptedAuthAccounts: number;
   readonly deletedAuthAccounts: number;
-  readonly complete: boolean;
-  readonly serverArtifactPolicy: 'durable_audit_and_expiring_snapshot_records';
+  readonly userAndAuthCleanupComplete: boolean;
+  readonly serverArtifactPolicy: 'durable_audit_and_ttl_managed_ephemeral_records';
 }
 
 export interface CleanupConfiguration {
@@ -77,9 +77,9 @@ export async function cleanupStagingResources(
     deletedUserDocuments,
     attemptedAuthAccounts,
     deletedAuthAccounts,
-    complete: attemptedUserDocuments === deletedUserDocuments
+    userAndAuthCleanupComplete: attemptedUserDocuments === deletedUserDocuments
       && attemptedAuthAccounts === deletedAuthAccounts,
-    serverArtifactPolicy: 'durable_audit_and_expiring_snapshot_records',
+    serverArtifactPolicy: 'durable_audit_and_ttl_managed_ephemeral_records',
   };
 }
 

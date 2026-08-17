@@ -24,7 +24,8 @@ describe('live staging fixture cleanup', () => {
       deletedUserDocuments: 2,
       attemptedAuthAccounts: 1,
       deletedAuthAccounts: 1,
-      complete: true,
+      userAndAuthCleanupComplete: true,
+      serverArtifactPolicy: 'durable_audit_and_ttl_managed_ephemeral_records',
     });
     expect(calls).toHaveLength(3);
     expect(calls.at(-1)?.url).toContain('identitytoolkit.googleapis.com/v1/accounts:delete');
@@ -50,7 +51,7 @@ describe('live staging fixture cleanup', () => {
       deletedUserDocuments: 1,
       attemptedAuthAccounts: 1,
       deletedAuthAccounts: 0,
-      complete: false,
+      userAndAuthCleanupComplete: false,
     });
     expect(fetchSpy.mock.calls.some(([input]) => String(input).includes('accounts:delete'))).toBe(false);
   });

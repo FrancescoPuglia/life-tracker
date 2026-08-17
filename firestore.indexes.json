@@ -15,6 +15,36 @@
       "fieldPath": "purgeAt",
       "ttl": true,
       "indexes": []
+    },
+    {
+      "collectionGroup": "aiChangePlans",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "aiApprovals",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "aiExecutions",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "aiIdempotency",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "aiRateLimits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

@@ -99,20 +99,30 @@ not merely a plausible response:
   available, with a full fixture no-mutation check;
 - fixed-message assertion failures that never serialize provider credentials,
   approval capabilities, rollback capabilities, or Firebase tokens;
+- exact diff-value/changed-field checks for TimeBlock identity, interval,
+  status, type, hierarchy links, flexibility, and server WPI provenance;
+- fixture snapshots taken before Preview as well as after Preview/Reject, so a
+  proposal-time mutation cannot be mislabeled as a safe Reject;
+- pre-consumption wrong-capability and cross-plan-capability rejection checks;
+- the payload-UID negative case now uses a valid `ask` mode, and privileged
+  Rules probes address the real root `aiChangePlans/{uid}_{planId}` namespace;
 - explicit overall `PASS`/`FAIL`, failure stage, completed/NOT-RUN matrix,
   local source commit, and cleanup result in the evidence artifact;
 - teardown of every explicit synthetic user document followed by deletion of
   both synthetic Auth accounts, including provider-failure paths. Durable
-  server audit records remain server-only; rollback snapshots use the deployed
-  TTL policy.
+  server audit records remain server-only. Plans, approvals, executions, and
+  idempotency records now carry server-owned TTL timestamps; snapshots and
+  rate-limit records use their rollback/window TTL boundaries. Evidence calls
+  the immediate result `userAndAuthCleanupComplete` rather than claiming that
+  asynchronous server TTL deletion has already occurred.
 
-Targeted evidence-helper tests: 3 files / 16 tests passed. Root TypeScript and
+Targeted evidence-helper tests: 3 files / 18 tests passed. Root TypeScript and
 the static security scan also passed after this hardening.
 
 ## Green independent regression at this checkpoint
 
-- Root unit tests: 44 files, 572 tests passed.
-- Functions unit tests: 13 files / 141 tests passed; 27 emulator-only tests
+- Root unit tests: 46 files, 583 tests passed.
+- Functions unit tests: 13 files / 142 tests passed; 27 emulator-only tests
   skipped in the unit invocation.
 - Firestore Rules emulator: 47/47 passed.
 - Firebase Auth emulator: 2/2 passed.
@@ -125,6 +135,11 @@ the static security scan also passed after this hardening.
 - Production static export with OpenAI variables empty: passed.
 - Post-build static security scan: passed.
 - `git diff --check`: passed.
+
+The final transaction-emulator rerun also verifies that TTL metadata is stored
+as Firestore timestamps while remaining outside the immutable LifePlan hash.
+The first attempt failed closed on this boundary; after explicitly excluding
+`purgeAt` from changeset integrity, all 25/25 cases passed again.
 
 ## Exact external unblock
 

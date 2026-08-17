@@ -59,10 +59,20 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
 
     const executions = await firestore.collection('aiExecutions').where('uid', '==', uid).get();
     expect(executions.size).toBe(1);
+    expect(executions.docs[0]?.data().purgeAt).toBeInstanceOf(Timestamp);
+    const plan = await firestore.doc(`aiChangePlans/${uid}_${preview.id}`).get();
+    const snapshot = await firestore.doc(`aiSnapshots/${uid}_${preview.id}`).get();
+    expect(plan.data()?.purgeAt).toBeInstanceOf(Timestamp);
+    expect(snapshot.data()?.purgeAt).toBeInstanceOf(Timestamp);
     const approval = await firestore.doc(`aiApprovals/${uid}_${preview.id}`).get();
     expect(approval.data()?.status).toBe('consumed');
+    expect(approval.data()?.purgeAt).toBeInstanceOf(Timestamp);
     expect(JSON.stringify(approval.data())).not.toContain(preview.approval.capability);
+    const idempotency = await firestore.collection('aiIdempotency').where('uid', '==', uid).get();
+    expect(idempotency.size).toBe(1);
+    expect(idempotency.docs[0]?.data().purgeAt).toBeInstanceOf(Timestamp);
     const audit = await firestore.doc(`aiAuditLogs/${uid}_${first.executionId}`).get();
+    expect(audit.data()?.purgeAt).toBeUndefined();
     expect(audit.data()?.metadata).toMatchObject({
       changesetHash: preview.hash,
       baseStateHash: preview.baseStateHash,
@@ -1077,6 +1087,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     const rejected = attempts.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
     expect(rejected).toHaveLength(7);
     expect(rejected.every((result) => result.reason?.code === 'RATE_LIMITED')).toBe(true);
+    const rateLimitRecords = await firestore.collection('aiRateLimits').where('bucket', '==', 'chat').get();
+    expect(rateLimitRecords.empty).toBe(false);
+    expect(rateLimitRecords.docs.every((document) => document.data().expiresAt instanceof Timestamp)).toBe(true);
     await expect(limiter.consume({
       uid: uniqueUid('rate-limit-other'),
       bucket: 'chat',

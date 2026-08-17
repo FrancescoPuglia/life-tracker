@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertEvidenceSafe,
+  assertNoPlan,
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
@@ -28,8 +29,8 @@ function plan() {
       summary: 'Move block.',
       title: 'Block',
       changedFields: ['startTime', 'endTime'],
-      before: { id: 'block-1', title: 'Block', startTime: '2026-08-18T08:00:00.000Z', endTime: '2026-08-18T09:00:00.000Z' },
-      after: { id: 'block-1', title: 'Block', startTime: START, endTime: END },
+      before: { id: 'block-1', title: 'Block', projectId: 'project-1', startTime: '2026-08-18T08:00:00.000Z', endTime: '2026-08-18T09:00:00.000Z' },
+      after: { id: 'block-1', title: 'Block', projectId: 'project-1', startTime: START, endTime: END },
     }],
     reason: 'Controlled move.',
     warnings: [],
@@ -76,6 +77,9 @@ describe('secret-safe staging evidence assertions', () => {
       title: 'Block',
       startTime: START,
       endTime: END,
+      changedFields: ['startTime', 'endTime'],
+      beforeFields: { id: 'block-1', title: 'Block' },
+      afterFields: { id: 'block-1', title: 'Block', startTime: START, endTime: END },
     });
     expect(parsedPlan.id).toBe('plan-1');
 
@@ -102,6 +106,9 @@ describe('secret-safe staging evidence assertions', () => {
         title: 'Block',
         startTime: START,
         endTime: END,
+        changedFields: ['startTime', 'endTime'],
+        beforeFields: { id: 'block-1', title: 'Block' },
+        afterFields: { id: 'block-1', title: 'Block', startTime: START, endTime: END },
       });
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
@@ -127,5 +134,35 @@ describe('secret-safe staging evidence assertions', () => {
       expect(message).not.toContain(providerSentinel);
       expect(message).not.toContain(capabilitySentinel);
     }
+  });
+
+  it('rejects an unexpected plan without serializing its approval capability', () => {
+    const sentinel = `approval_${'do-not-print'.repeat(5)}`;
+    let message = '';
+    try {
+      assertNoPlan({ ...plan(), approval: { ...plan().approval, capability: sentinel } });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBe('Staging analysis unexpectedly returned a mutation proposal.');
+    expect(message).not.toContain(sentinel);
+  });
+
+  it('rejects an unapproved same-document side effect', () => {
+    const invalid = plan();
+    invalid.diff[0]!.after = { ...invalid.diff[0]!.after, projectId: 'other-project' };
+    invalid.diff[0]!.changedFields = ['startTime', 'endTime', 'projectId'];
+    expect(() => requireExactPlan(200, invalid, {
+      tool: 'preview_timeblock_change',
+      action: 'move',
+      entityType: 'timeBlocks',
+      entityId: 'block-1',
+      title: 'Block',
+      startTime: START,
+      endTime: END,
+      changedFields: ['startTime', 'endTime'],
+      beforeFields: { id: 'block-1', title: 'Block' },
+      afterFields: { id: 'block-1', title: 'Block', startTime: START, endTime: END },
+    })).toThrow('Staging proposal changed fields outside the exact requested scope.');
   });
 });

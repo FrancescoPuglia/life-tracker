@@ -221,6 +221,8 @@ export type PlanStatus = 'previewed' | 'applied' | 'rolled_back';
 
 export interface StoredChangePlan extends ImmutableChangePlan {
   readonly status: PlanStatus;
+  /** Firestore TTL metadata; never part of the immutable changeset hash. */
+  readonly purgeAt?: string;
   readonly appliedAt?: string;
   readonly rolledBackAt?: string;
   /** Version after apply; null means the entity was deleted. */
