@@ -431,7 +431,15 @@ export class ChangePlanService {
       ) {
         throw new DomainError('FORBIDDEN', 'Completed, in-progress, fixed, or locked time blocks cannot be changed by AI.');
       }
-      if (operation.op === 'delete' || operation.op === 'create') {
+      if (
+        operation.op === 'delete'
+        || operation.op === 'create'
+        // Sessions are authoritative execution evidence written by existing
+        // client flows. Bind their exact inbound-reference scope to every
+        // TimeBlock mutation so a Session created before apply or rollback
+        // causes STATE_CHANGED instead of moving history underneath it.
+        || operation.collection === 'timeBlocks'
+      ) {
         await this.assertNoInboundReferences(
           uid,
           operation.collection,
@@ -546,7 +554,7 @@ export class ChangePlanService {
         limit: 1,
       });
       if (page.items.length) {
-        throw new DomainError('CONFLICT', `Cannot delete referenced ${collection}/${id}.`);
+        throw new DomainError('CONFLICT', `Cannot change referenced ${collection}/${id}.`);
       }
       const scope: ValidationScopeExpectation = {
         collection: childCollection,

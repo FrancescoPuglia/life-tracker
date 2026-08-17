@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   requestAIChat: vi.fn(),
   applyAIPlan: vi.fn(),
   rollbackAIExecution: vi.fn(),
+  createIdempotencyKey: vi.fn(),
 }));
 
 vi.mock('@/providers/AuthProvider', () => ({
@@ -26,7 +27,7 @@ vi.mock('@/lib/ai/client', async (importOriginal) => {
     requestAIChat: mocks.requestAIChat,
     applyAIPlan: mocks.applyAIPlan,
     rollbackAIExecution: mocks.rollbackAIExecution,
-    createIdempotencyKey: () => 'idem_1234567890123456',
+    createIdempotencyKey: mocks.createIdempotencyKey,
   };
 });
 
@@ -43,6 +44,8 @@ describe('AIInputBarV2 secure client flow', () => {
     mocks.requestAIChat.mockReset();
     mocks.applyAIPlan.mockReset();
     mocks.rollbackAIExecution.mockReset();
+    mocks.createIdempotencyKey.mockReset();
+    mocks.createIdempotencyKey.mockReturnValue('idem_1234567890123456');
   });
 
   it('disables cloud AI clearly for signed-out users', () => {
@@ -375,10 +378,44 @@ describe('AIInputBarV2 secure client flow', () => {
     expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
   });
 
-  it('reconciles a malformed 2xx action response with the same idempotency key', async () => {
+  it('removes the previous user action session on account switch', async () => {
     mocks.requestAIChat.mockResolvedValueOnce({
       message: 'Anteprima pronta',
       plan: minimalPlan(),
+    });
+    mocks.applyAIPlan.mockRejectedValueOnce(new AIClientError('committed_unverified', 503));
+    const view = render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Pianifica per il primo account' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
+    expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
+    expect(window.sessionStorage.getItem('life-tracker:secure-ai-actions:firebase-user')).not.toBeNull();
+
+    mocks.authState.user = { uid: 'second-user' };
+    view.rerender(<AIInputBarV2 />);
+
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem('life-tracker:secure-ai-actions:firebase-user')).toBeNull();
+    });
+    expect(screen.queryByText('Sessione di modifica sicura ripristinata.')).not.toBeInTheDocument();
+  });
+
+  it('reconciles a malformed 2xx action response with the same idempotency key', async () => {
+    const expiresAt = new Date(Date.now() + 750).toISOString();
+    const originalKey = 'idem_original_1234567890123456';
+    mocks.createIdempotencyKey
+      .mockReturnValueOnce(originalKey)
+      .mockReturnValueOnce('idem_must_not_be_generated');
+    mocks.requestAIChat.mockResolvedValueOnce({
+      message: 'Anteprima pronta',
+      plan: {
+        ...minimalPlan(),
+        expiresAt,
+        approval: { ...minimalPlan().approval, expiresAt },
+      },
     });
     mocks.applyAIPlan.mockRejectedValueOnce(new AIClientError('invalid_response', 200));
     render(<AIInputBarV2 />);
@@ -390,6 +427,9 @@ describe('AIInputBarV2 secure client flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
 
     expect(await screen.findByRole('button', { name: 'Riconcilia applicazione' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rifiuta' })).not.toBeInTheDocument();
+    expect(await screen.findByText(/Anteprima scaduta/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Riconcilia applicazione' })).toBeEnabled();
     mocks.applyAIPlan.mockResolvedValueOnce(validActionResult());
     fireEvent.click(screen.getByRole('button', { name: 'Riconcilia applicazione' }));
 
@@ -397,11 +437,68 @@ describe('AIInputBarV2 secure client flow', () => {
       expect(mocks.applyAIPlan).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({ id: 'plan_123' }),
-        'idem_1234567890123456',
+        originalKey,
       );
     });
+    expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('Piano applicato')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Annulla modifiche' })).toBeInTheDocument();
+  });
+
+  it('keeps an uncertain rollback reconcilable after capability expiry', async () => {
+    const expiresAt = new Date(Date.now() + 750).toISOString();
+    const applyKey = 'idem_apply_1234567890123456';
+    const rollbackKey = 'idem_rollback_1234567890123456';
+    mocks.createIdempotencyKey
+      .mockReturnValueOnce(applyKey)
+      .mockReturnValueOnce(rollbackKey)
+      .mockReturnValueOnce('idem_must_not_be_generated');
+    mocks.requestAIChat.mockResolvedValueOnce({ message: 'Anteprima pronta', plan: minimalPlan() });
+    mocks.applyAIPlan.mockResolvedValueOnce({
+      ...validActionResult(),
+      receipt: { ...validActionResult().receipt, rollbackExpiresAt: expiresAt },
+      rollback: { ...validActionResult().rollback, expiresAt },
+    });
+    mocks.rollbackAIExecution.mockRejectedValueOnce(new AIClientError('invalid_response', 200));
+    render(<AIInputBarV2 />);
+
+    fireEvent.change(screen.getByLabelText('Messaggio per l’assistente AI'), {
+      target: { value: 'Applica e poi annulla' },
+    });
+    fireEvent.click(screen.getByLabelText('Invia messaggio AI'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Applica piano' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Annulla modifiche' }));
+    expect(await screen.findByRole('button', { name: 'Riconcilia rollback' })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(Date.now()).toBeGreaterThan(Date.parse(expiresAt));
+      expect(screen.getByRole('button', { name: 'Riconcilia rollback' })).toBeEnabled();
+    }, { timeout: 2_500 });
+    mocks.rollbackAIExecution.mockResolvedValueOnce({
+      ...validActionResult(),
+      message: 'Rollback completato',
+      status: 'rolled_back',
+      rollback: undefined,
+      receipt: {
+        ...validActionResult().receipt,
+        status: 'rolled_back',
+        rollbackAvailable: false,
+        rollbackExpiresAt: null,
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Riconcilia rollback' }));
+
+    await waitFor(() => {
+      expect(mocks.rollbackAIExecution).toHaveBeenNthCalledWith(
+        2,
+        'execution_123',
+        'r'.repeat(43),
+        rollbackKey,
+        { planId: 'plan_123', hash: 'b'.repeat(64) },
+      );
+    });
+    expect(mocks.createIdempotencyKey).toHaveBeenCalledTimes(2);
+    expect((await screen.findAllByText('Rollback completato')).length).toBeGreaterThan(0);
   });
 
   it('expires a rollback capability on the clock and clears protected session state', async () => {

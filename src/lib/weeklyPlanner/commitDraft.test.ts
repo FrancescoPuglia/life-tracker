@@ -354,6 +354,53 @@ describe('commitWeeklyPlanDraft', () => {
     ).toBe(true);
   });
 
+  it('commits the exact positive instants across the repeated fallback hour', async () => {
+    const block = manualBlock({
+      day: 6,
+      startTime: '02:50',
+      endTime: '02:10',
+      startInstant: '2026-10-25T00:50:00.000Z',
+      endInstant: '2026-10-25T01:10:00.000Z',
+      durationMinutes: 20,
+      mapping: {
+        intentId: 'i',
+        status: 'mapped',
+        taskId: 't_catalan',
+        projectId: 'p_openings',
+        goalId: 'g_chess',
+        confidence: 1,
+        reason: 'fixture',
+        matchedKeywords: [],
+      },
+    });
+    const draft: WeeklyPlanDraft = {
+      ...draftFor('Domenica Catalana.'),
+      weekStartISO: '2026-10-19',
+      blocks: [block],
+      conflicts: [],
+    };
+    const create = vi.fn(async (_input: CommitTimeBlockInput) => {});
+
+    const result = await commitWeeklyPlanDraft({
+      draft,
+      existingTimeBlocks: [],
+      createTimeBlock: create,
+    });
+
+    expect(result.status).toBe('success');
+    expect(create).toHaveBeenCalledTimes(1);
+    const payload = create.mock.calls[0]?.[0] as CommitTimeBlockInput;
+    expect(payload.startTime.toISOString()).toBe(block.startInstant);
+    expect(payload.endTime.toISOString()).toBe(block.endInstant);
+    expect(payload.endTime.getTime() - payload.startTime.getTime()).toBe(20 * 60_000);
+    expect(isDuplicateDraftBlock(block, [{
+      id: 'existing-fallback-block',
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      taskId: 't_catalan',
+    }], draft)).toBe(true);
+  });
+
   it('is idempotent: second commit detects WPI_KEY duplicates and creates nothing', async () => {
     const draft = draftFor('Lunedì Catalana 2 ore.');
     const created: CommitTimeBlockInput[] = [];

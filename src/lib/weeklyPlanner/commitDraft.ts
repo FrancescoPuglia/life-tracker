@@ -449,9 +449,7 @@ export function draftBlockToTimeBlockInput(
   block: DraftTimeBlock,
   draft: WeeklyPlanDraft,
 ): CommitTimeBlockInput {
-  const dateISO = getDateISOForWeekDay(draft.weekStartISO, block.day);
-  const startTime = combineDateAndTime(dateISO, block.startTime);
-  const endTime = combineDateAndTime(dateISO, block.endTime);
+  const { startTime, endTime } = resolveDraftBlockDates(block, draft);
 
   const m = block.mapping;
   const notes =
@@ -489,9 +487,9 @@ export function isDuplicateDraftBlock(
   }
 
   // Cheap path 2: structural — same entity link + same date + same start/end.
-  const dateISO = getDateISOForWeekDay(draft.weekStartISO, block.day);
-  const targetStartISO = combineDateAndTime(dateISO, block.startTime).toISOString();
-  const targetEndISO = combineDateAndTime(dateISO, block.endTime).toISOString();
+  const target = resolveDraftBlockDates(block, draft);
+  const targetStartISO = target.startTime.toISOString();
+  const targetEndISO = target.endTime.toISOString();
 
   const m = block.mapping;
   const targetTaskId = m?.taskId;
@@ -511,6 +509,29 @@ export function isDuplicateDraftBlock(
   }
 
   return false;
+}
+
+function resolveDraftBlockDates(
+  block: DraftTimeBlock,
+  draft: WeeklyPlanDraft,
+): Readonly<{ startTime: Date; endTime: Date }> {
+  const instantGeometry = instantIntervalIsPositive(block.startInstant, block.endInstant);
+  if (instantGeometry === false) {
+    throw new Error(`Invalid absolute interval for draft block "${block.id}".`);
+  }
+  if (instantGeometry === true) {
+    return {
+      startTime: new Date(block.startInstant!),
+      endTime: new Date(block.endInstant!),
+    };
+  }
+  const dateISO = getDateISOForWeekDay(draft.weekStartISO, block.day);
+  const startTime = combineDateAndTime(dateISO, block.startTime);
+  const endTime = combineDateAndTime(dateISO, block.endTime);
+  if (endTime.getTime() <= startTime.getTime()) {
+    throw new Error(`Invalid wall-clock interval for draft block "${block.id}".`);
+  }
+  return { startTime, endTime };
 }
 
 function containsCanonicalWpiKey(notes: string | undefined, key: string): boolean {

@@ -114,6 +114,43 @@ describe('Weekly Planning Intelligence backend adapter', () => {
     })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('protects TimeBlocks carrying authoritative actual execution timestamps', async () => {
+    const { repository, domain } = harness();
+    repository.seed(UID, 'timeBlocks', [{
+      id: 'actual-history',
+      title: 'Executed before status sync',
+      domainId: 'domain-1',
+      startTime: '2026-08-17T08:00:00.000Z',
+      endTime: '2026-08-17T09:00:00.000Z',
+      actualStartTime: '2026-08-17T08:05:00.000Z',
+      actualEndTime: '2026-08-17T08:55:00.000Z',
+      status: 'planned',
+      type: 'deep',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      goalId: 'goal-1',
+    }]);
+
+    const replacement = await domain.scheduling.replaceDaySchedule(context(UID, 'actual-replace'), {
+      date: '2026-08-17',
+      timezone: 'Europe/Rome',
+      blocks: [block({ id: 'later-actual-safe', start: '2026-08-17T10:00:00.000Z', end: '2026-08-17T11:00:00.000Z' })],
+      reason: 'Explicit actual execution evidence must survive replanning.',
+    });
+    expect(replacement.operations.some((operation) => operation.entityId === 'actual-history')).toBe(false);
+
+    await expect(domain.scheduling.previewTimeBlockChange(context(UID, 'actual-move'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: block({
+        id: 'actual-history',
+        start: '2026-08-17T09:00:00.000Z',
+        end: '2026-08-17T10:00:00.000Z',
+      }),
+      reason: 'Attempt to move trusted execution history.',
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('persists an approved fixed proposal as a protected commitment for later replanning', async () => {
     const { repository, domain } = harness(['plan-fixed-create', 'execution-fixed-create', 'plan-replan']);
     const first = await domain.scheduling.replaceDaySchedule(context(UID, 'fixed-create'), {

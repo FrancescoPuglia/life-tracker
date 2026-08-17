@@ -187,6 +187,7 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   const [actionKeysVersion, setActionKeysVersion] = useState(0);
   const [hydratedUid, setHydratedUid] = useState<string | null>(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
+  const sessionOwnerUidRef = useRef<string | null>(null);
 
   const status: AIStatus = authStatus === 'unknown'
     ? 'checking'
@@ -200,6 +201,11 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   useEffect(() => {
     if (authStatus === 'unknown') return;
     const uid = user?.uid ?? null;
+    const previousUid = sessionOwnerUidRef.current;
+    if (previousUid && previousUid !== uid && typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(actionStorageKey(previousUid));
+    }
+    sessionOwnerUidRef.current = uid;
     if (!uid) {
       planActionKeysRef.current.clear();
       setMessages([]);
@@ -436,7 +442,12 @@ export default function AIInputBarV2({ className = '' }: AIInputBarV2Props) {
   };
 
   const rejectPlan = (messageId: string) => {
-    const plan = messages.find((message) => message.id === messageId)?.plan;
+    const target = messages.find((message) => message.id === messageId);
+    // An uncertain request may already have committed. Its exact key must be
+    // retained until reconciliation; it is no longer safe to call this a
+    // rejection or claim that no data changed.
+    if (target?.actionStatus || target?.actionRecoveryPending) return;
+    const plan = target?.plan;
     if (plan) {
       planActionKeysRef.current.delete(`apply:${plan.id}`);
       setActionKeysVersion((version) => version + 1);
@@ -873,7 +884,7 @@ function PlanPreviewCard({
           <button
             type="button"
             onClick={() => onAction(messageId, plan, 'apply')}
-            disabled={busy || expired || hasConflicts || stale}
+            disabled={busy || (expired && !actionRecoveryPending) || hasConflicts || stale}
             className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-gray-700"
           >
             {actionStatus === 'applying'
@@ -882,7 +893,7 @@ function PlanPreviewCard({
             {actionRecoveryPending ? 'Riconcilia applicazione' : 'Applica piano'}
           </button>
         )}
-        {!applied && !rolledBack && !rejected && (
+        {!applied && !rolledBack && !rejected && !actionRecoveryPending && (
           <button
             type="button"
             onClick={() => onReject(messageId)}
@@ -892,7 +903,7 @@ function PlanPreviewCard({
             Rifiuta
           </button>
         )}
-        {rollbackUnexpired && (
+        {(rollbackUnexpired || (applied && actionRecoveryPending && Boolean(execution?.rollback))) && (
           <button
             type="button"
             onClick={() => onAction(messageId, plan, 'rollback', execution)}
@@ -905,7 +916,7 @@ function PlanPreviewCard({
             {actionRecoveryPending ? 'Riconcilia rollback' : 'Annulla modifiche'}
           </button>
         )}
-        {applied && !rollbackUnexpired && (
+        {applied && !rollbackUnexpired && !actionRecoveryPending && (
           <span className="text-gray-400">Rollback non disponibile</span>
         )}
         {rolledBack && (

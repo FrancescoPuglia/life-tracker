@@ -13,5 +13,14 @@ export function isProtectedTimeBlock(record: EntityRecord): boolean {
     || record.flexibility === 'fixed'
     || record.status === 'completed'
     || record.status === 'in_progress'
-    || record.status === 'overrun';
+    || record.status === 'overrun'
+    // Explicit actual timestamps are authoritative execution evidence even
+    // when an older client has not yet advanced the planned status. AI
+    // scheduling must never rewrite history underneath those measurements.
+    || hasTimestamp(record.actualStartTime)
+    || hasTimestamp(record.actualEndTime);
+}
+
+function hasTimestamp(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }

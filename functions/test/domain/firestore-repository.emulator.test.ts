@@ -418,6 +418,90 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   }, 30_000);
 
+  it('binds Session execution evidence across preview, apply, and rollback', async () => {
+    const uid = uniqueUid('session-evidence');
+    await seedHierarchy(firestore, uid);
+    const createdAt = Timestamp.fromDate(new Date('2026-08-17T09:00:00.000Z'));
+    const { domain } = domainFor(firestore, [
+      'plan-session-drift',
+      'plan-session-rollback',
+      'execution-session-rollback',
+    ]);
+
+    const stalePreview = await domain.scheduling.previewTimeBlockChange(context(uid, 'session-drift-preview'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: 'block-1',
+        title: 'Original block',
+        type: 'buffer',
+        taskId: null,
+        projectId: null,
+        goalId: null,
+        start: '2026-08-17T10:00:00.000Z',
+        end: '2026-08-17T11:00:00.000Z',
+      }),
+      reason: 'A Session created after preview must invalidate the move.',
+    });
+    const sessionRef = firestore.doc(`users/${uid}/sessions/session-after-preview`);
+    await sessionRef.set({
+      id: 'session-after-preview',
+      userId: uid,
+      timeBlockId: 'block-1',
+      status: 'completed',
+      startTime: createdAt,
+      endTime: Timestamp.fromDate(new Date('2026-08-17T09:30:00.000Z')),
+      createdAt,
+      updatedAt: createdAt,
+    });
+    await expect(domain.changePlans.applyPlan(context(uid, 'session-drift-apply'), {
+      planId: stalePreview.id,
+      approvalCapability: stalePreview.approval.capability,
+      idempotencyKey: 'session-drift-apply-key-0001',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?.startTime.toDate().toISOString())
+      .toBe('2026-08-17T09:00:00.000Z');
+    await sessionRef.delete();
+
+    const rollbackPreview = await domain.scheduling.previewTimeBlockChange(context(uid, 'session-rollback-preview'), {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: 'block-1',
+        title: 'Original block',
+        type: 'buffer',
+        taskId: null,
+        projectId: null,
+        goalId: null,
+        start: '2026-08-17T10:00:00.000Z',
+        end: '2026-08-17T11:00:00.000Z',
+      }),
+      reason: 'A Session created after apply must make rollback stale.',
+    });
+    const applied = await domain.changePlans.applyPlan(context(uid, 'session-rollback-apply'), {
+      planId: rollbackPreview.id,
+      approvalCapability: rollbackPreview.approval.capability,
+      idempotencyKey: 'session-rollback-apply-key-01',
+    });
+    await firestore.doc(`users/${uid}/sessions/session-after-apply`).set({
+      id: 'session-after-apply',
+      userId: uid,
+      timeBlockId: 'block-1',
+      status: 'completed',
+      startTime: Timestamp.fromDate(new Date('2026-08-17T10:05:00.000Z')),
+      endTime: Timestamp.fromDate(new Date('2026-08-17T10:45:00.000Z')),
+      createdAt,
+      updatedAt: createdAt,
+    });
+    await expect(domain.changePlans.rollbackExecution(context(uid, 'session-rollback-action'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'session-rollback-key-000001',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    expect((await firestore.doc(`users/${uid}/timeBlocks/block-1`).get()).data()?.startTime.toDate().toISOString())
+      .toBe('2026-08-17T10:00:00.000Z');
+  }, 30_000);
+
   it('binds a cross-day move to both calendar scopes and refuses unsafe rollback into a filled source slot', async () => {
     const uid = uniqueUid('cross-day-rollback');
     await seedHierarchy(firestore, uid);

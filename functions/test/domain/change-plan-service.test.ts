@@ -358,6 +358,22 @@ describe('ChangePlanService authorization and lifecycle', () => {
     })).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
+  it('rejects mutation of a TimeBlock that already has linked Session evidence', async () => {
+    const harness = createHarness();
+    harness.repository.seed(UID, 'sessions', [{
+      id: 'session-for-block',
+      timeBlockId: 'block-1',
+      status: 'completed',
+      startTime: '2026-08-17T09:05:00.000Z',
+      endTime: '2026-08-17T09:55:00.000Z',
+    }]);
+
+    await expect(updateTitlePreview(harness.service, UID, 'Rewrite executed block'))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await harness.repository.getEntity(UID, 'timeBlocks', 'block-1'))?.title)
+      .toBe('Original block');
+  });
+
   it('refuses a preview that cannot be returned within the bounded public contract', async () => {
     const harness = createHarness();
     const longBefore = 'a'.repeat(20_000);
