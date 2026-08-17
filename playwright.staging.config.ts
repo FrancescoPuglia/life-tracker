@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { readStagingEnvironment } from './e2e/staging/safety';
 
 const staging = readStagingEnvironment();
+const stagingSourceCommit = sourceCommit();
 
 export default defineConfig({
   testDir: './e2e',
@@ -36,6 +38,21 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: staging.firebaseMessagingSenderId,
       NEXT_PUBLIC_FIREBASE_APP_ID: staging.firebaseAppId,
       NEXT_PUBLIC_AI_API_BASE_URL: staging.aiApiBaseUrl,
+      NEXT_PUBLIC_BUILD_COMMIT: stagingSourceCommit,
     },
   },
 });
+
+function sourceCommit(): string {
+  try {
+    const value = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (/^[a-f0-9]{40}$/.test(value)) return value;
+  } catch {
+    // The fixed failure below deliberately excludes command output.
+  }
+  throw new Error('Staging frontend source commit is unavailable.');
+}

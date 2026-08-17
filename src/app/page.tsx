@@ -5,11 +5,7 @@ import { AuthProvider, useAuthContext } from '@/providers/AuthProvider';
 import { DataProvider, useDataContext } from '@/providers/DataProvider';
 import AuthModal from '@/components/AuthModal';
 import MainApp from '@/components/MainApp';
-
-// ============================================================================
-// BUILD INFO
-// ============================================================================
-const BUILD_ID = `2025-12-22-v3-${Date.now().toString(36)}`;
+import { BUILD_ID } from '@/lib/buildInfo';
 
 // ============================================================================
 // LOADING SCREENS - Pure UI, no logic

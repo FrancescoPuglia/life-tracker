@@ -33,7 +33,7 @@ body, query, tool, and model `userId` values are never authoritative.
 
 The single exported v2 Function is `lifeTrackerAiApi` in `europe-west1`:
 
-- `GET /v1/health`: non-secret readiness;
+- `GET /v1/health`: non-secret source and runtime-policy readiness;
 - `POST /v1/chat`: authenticated analysis or proposal orchestration;
 - `POST /v1/plans/{planId}/apply`: authenticated exact-capability apply;
 - `POST /v1/executions/{executionId}/rollback`: authenticated safe rollback.
@@ -43,6 +43,11 @@ Origin header is present, and `Authorization: Bearer <Firebase ID token>`.
 Errors expose stable classifications and request IDs, not provider/auth details.
 The Firestore rate limiter is per authenticated UID and shared across serverless
 instances. Fixed windows are deliberately simple and may allow boundary bursts.
+Health returns two independent attestations: a source/configuration fingerprint
+and a runtime-policy digest. The latter binds the configured model, reasoning
+effort, official provider URL, exact CORS allowlist, prompt/schema versions,
+timeouts, tool-loop limits, and output limit. Only its digest plus safe
+model/version labels are public; origins and provider URL are not echoed.
 
 ## Authorized state and tools
 
@@ -108,7 +113,7 @@ npm run test:rules
 npm run test:functions:emulator
 npm run test:auth:emulator
 npm run test:e2e:emulator
-GITHUB_PAGES=true NEXT_PUBLIC_AI_API_BASE_URL=https://europe-west1-PROJECT_ID.cloudfunctions.net/lifeTrackerAiApi npm run build
+npm run build:static
 npm run check:static-security -- --include-output
 npm run test:e2e:static
 ```
@@ -121,6 +126,12 @@ OpenAI-compatible Responses transport. It exercises desktop and mobile UI
 flows without a provider key or live model. Screenshots/traces are written to
 ignored `test-results/` evidence. Tests must never call a live model or
 production Firebase project.
+
+`build:static` always performs a fresh GitHub Pages export, clears OpenAI
+variables, embeds the current public Git commit, and never reuses an existing
+`out/` directory as evidence. Static and staging browser gates assert that
+commit marker; a stale reused frontend process fails before staging identities
+or fixture data are created.
 
 ## Secrets and configuration
 

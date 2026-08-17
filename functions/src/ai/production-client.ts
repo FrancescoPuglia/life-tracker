@@ -29,7 +29,7 @@ export function createProductionResponsesClient(
   };
 }
 
-function validateProviderBaseUrl(value: string, allowLoopback: boolean): string {
+export function validateProviderBaseUrl(value: string, allowLoopback: boolean): string {
   const url = new URL(value);
   const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
   const officialOpenAi = url.protocol === 'https:'

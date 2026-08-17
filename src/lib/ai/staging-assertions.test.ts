@@ -5,6 +5,7 @@ import {
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
+  requireFrontendBuildCommit,
   requireStagingHttpStatus,
   stagingHttpFailureEvidence,
 } from '../../../e2e/staging/assertions';
@@ -190,5 +191,13 @@ describe('secret-safe staging evidence assertions', () => {
       requestId: 'request-safe-1',
     });
     expect(JSON.stringify(evidence)).not.toContain(sentinel);
+  });
+
+  it('fails closed when a reused frontend does not match the clean source commit', () => {
+    const expected = 'a'.repeat(40);
+    expect(() => requireFrontendBuildCommit(expected, expected)).not.toThrow();
+    expect(() => requireFrontendBuildCommit('b'.repeat(40), expected))
+      .toThrow('Staging frontend source marker does not match the clean committed checkout.');
+    expect(() => requireFrontendBuildCommit(null, expected)).toThrow();
   });
 });

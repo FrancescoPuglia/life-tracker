@@ -9,6 +9,7 @@ import {
   assertNoProviderCredentialMaterial,
   requireExactActionResponse,
   requireExactPlan,
+  requireFrontendBuildCommit,
   requireStagingHttpStatus,
   stagingHttpFailureEvidence,
 } from './staging/assertions';
@@ -21,6 +22,8 @@ import { readStagingEnvironment } from './staging/safety';
 const staging = readStagingEnvironment();
 const EXPECTED_MODEL = 'gpt-5.6-sol';
 const EXPECTED_REASONING = 'medium';
+const EXPECTED_PROMPT_VERSION = 'life-tracker-secure-v1';
+const EXPECTED_SCHEMA_VERSION = 'life-plan-v1';
 const TIMEZONE = 'Europe/Rome';
 const EXPECTED_SMOKE_NAMES = [
   'staging_health_and_exact_cors',
@@ -127,7 +130,7 @@ test.describe.serial('real secure AI staging boundary', () => {
 
     try {
       assertCleanSource();
-      await verifyHealthAndCors(records);
+      await verifyHealthAndCors(page, records);
       failureStage = 'create_staging_identity_a';
       const activeA = accountA = await createStagingIdentity(`${runId}-a`);
       failureStage = 'create_staging_identity_b';
@@ -762,8 +765,14 @@ test.describe.serial('real secure AI staging boundary', () => {
   });
 });
 
-async function verifyHealthAndCors(records: SmokeRecord[]): Promise<void> {
+async function verifyHealthAndCors(page: Page, records: SmokeRecord[]): Promise<void> {
+  const sourceCommit = currentSourceCommit();
+  await page.goto(staging.appOrigin, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+  const frontendBuildCommit = await page.locator('body').getAttribute('data-life-tracker-build');
+  requireFrontendBuildCommit(frontendBuildCommit, sourceCommit);
+
   const expectedReleaseId = await expectedBackendReleaseId();
+  const expectedRuntimeConfigId = runtimeConfigId();
   const health = await fetch(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: staging.appOrigin },
     signal: AbortSignal.timeout(30_000),
@@ -774,6 +783,13 @@ async function verifyHealthAndCors(records: SmokeRecord[]): Promise<void> {
     status: 'ok',
     service: 'life-tracker-ai',
     releaseId: expectedReleaseId,
+    runtimeConfig: {
+      configId: expectedRuntimeConfigId,
+      model: EXPECTED_MODEL,
+      reasoningEffort: EXPECTED_REASONING,
+      promptVersion: EXPECTED_PROMPT_VERSION,
+      schemaVersion: EXPECTED_SCHEMA_VERSION,
+    },
   });
   const evil = await fetch(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: 'https://untrusted-origin.example' },
@@ -788,8 +804,27 @@ async function verifyHealthAndCors(records: SmokeRecord[]): Promise<void> {
       approvedOrigin: true,
       unapprovedOriginDenied: true,
       backendReleaseId: expectedReleaseId,
+      runtimeConfigId: expectedRuntimeConfigId,
+      frontendBuildCommit,
     },
   });
+}
+
+function runtimeConfigId(): string {
+  const manifest = {
+    version: 1,
+    model: EXPECTED_MODEL,
+    reasoningEffort: EXPECTED_REASONING,
+    providerBaseUrl: 'https://api.openai.com/v1',
+    allowedOrigins: [staging.appOrigin, 'https://life-tracker-staging.web.app'].sort(),
+    promptVersion: EXPECTED_PROMPT_VERSION,
+    schemaVersion: EXPECTED_SCHEMA_VERSION,
+    timeoutMs: 30_000,
+    maxTurns: 6,
+    maxToolCalls: 12,
+    maxOutputTokens: 1_500,
+  };
+  return `sha256:${createHash('sha256').update(JSON.stringify(manifest)).digest('hex')}`;
 }
 
 async function createStagingIdentity(label: string): Promise<StagingIdentity> {

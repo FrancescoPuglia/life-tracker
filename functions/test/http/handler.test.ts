@@ -67,6 +67,13 @@ describe('Life Tracker HTTP API boundary', () => {
       status: 'ok',
       service: 'life-tracker-ai',
       releaseId: 'sha256:test-release',
+      runtimeConfig: {
+        configId: 'sha256:test-runtime',
+        model: 'test-model',
+        reasoningEffort: 'low',
+        promptVersion: 'test-prompt',
+        schemaVersion: 'test-schema',
+      },
       requestId: 'request-test-1',
     });
     expect(tokenVerifier.verifyBearerToken).not.toHaveBeenCalled();
@@ -263,6 +270,13 @@ describe('Life Tracker HTTP API boundary', () => {
       rateLimiter,
       allowedOrigins: new Set([ALLOWED_ORIGIN, 'http://localhost:3000']),
       releaseId: 'sha256:test-release',
+      runtimeConfig: {
+        configId: 'sha256:test-runtime',
+        model: 'test-model',
+        reasoningEffort: 'low',
+        promptVersion: 'test-prompt',
+        schemaVersion: 'test-schema',
+      },
       clock: () => FIXED_NOW,
       requestId: () => 'request-test-1',
     });

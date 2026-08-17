@@ -5,7 +5,7 @@ import { defineSecret, defineString } from 'firebase-functions/params';
 import * as logger from 'firebase-functions/logger';
 import { onRequest } from 'firebase-functions/v2/https';
 import { LifeTrackerApiApplication } from './application';
-import { createProductionResponsesClient } from './ai/production-client';
+import { createProductionResponsesClient, validateProviderBaseUrl } from './ai/production-client';
 import { OpenAIResponsesAdapter } from './ai/responses-adapter';
 import { CapabilityIssuer } from './domain/capabilities';
 import { DomainError } from './domain/errors';
@@ -16,6 +16,11 @@ import { parseAllowedOrigins } from './http/cors';
 import { createApiHandler } from './http/handler';
 import { FirestoreRateLimiter } from './http/rate-limiter';
 import type { ApiApplication, HttpRequestLike, HttpResponseLike } from './http/types';
+import {
+  createRuntimeConfigMetadata,
+  type RuntimeConfigMetadata,
+  type RuntimeReasoningEffort,
+} from './runtime-config';
 import { BACKEND_SOURCE_FINGERPRINT } from '../.generated/release-id';
 
 const OPENAI_API_KEY = defineSecret('OPENAI_API_KEY', {
@@ -43,6 +48,10 @@ const AI_ALLOWED_ORIGINS = defineString('AI_ALLOWED_ORIGINS', {
 
 const PROMPT_VERSION = 'life-tracker-secure-v1';
 const SCHEMA_VERSION = 'life-plan-v1';
+const RESPONSES_TIMEOUT_MS = 30_000;
+const RESPONSES_MAX_TURNS = 6;
+const RESPONSES_MAX_TOOL_CALLS = 12;
+const RESPONSES_MAX_OUTPUT_TOKENS = 1_500;
 const SYSTEM_INSTRUCTIONS = [
   'You are the Life Tracker reasoning assistant.',
   'Firebase authentication and backend domain policy are authoritative; never infer or select a user identity.',
@@ -58,6 +67,7 @@ const tokenVerifier = new FirebaseTokenVerifier(getAuth(firebaseApp));
 const rateLimiter = new FirestoreRateLimiter(firestore);
 let cachedApplication: ApiApplication | undefined;
 let cachedResponses: OpenAIResponsesAdapter | undefined;
+let cachedRuntimeSettings: RuntimeSettings | undefined;
 
 export const lifeTrackerAiApi = onRequest({
   region: 'europe-west1',
@@ -69,12 +79,14 @@ export const lifeTrackerAiApi = onRequest({
   secrets: [OPENAI_API_KEY, CAPABILITY_SIGNING_SECRET],
 }, async (request, response) => {
   try {
+    const runtime = runtimeSettings();
     const handler = createApiHandler({
       application: lazyApplication(),
       tokenVerifier,
       rateLimiter,
-      allowedOrigins: parseAllowedOrigins(AI_ALLOWED_ORIGINS.value()),
+      allowedOrigins: runtime.allowedOrigins,
       releaseId: BACKEND_SOURCE_FINGERPRINT,
+      runtimeConfig: runtime.metadata,
     });
     await handler(
       request as unknown as HttpRequestLike,
@@ -110,23 +122,24 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
   if (cachedResponses) return cachedResponses;
   const apiKey = OPENAI_API_KEY.value();
   if (!apiKey) throw new DomainError('INTERNAL', 'OpenAI secret is unavailable.');
+  const runtime = runtimeSettings();
   cachedResponses = new OpenAIResponsesAdapter(
     createProductionResponsesClient(apiKey, {
-      baseURL: OPENAI_BASE_URL.value(),
-      allowLoopback: process.env.FUNCTIONS_EMULATOR === 'true',
+      baseURL: runtime.providerBaseUrl,
+      allowLoopback: runtime.allowLoopback,
     }),
     domain.registry,
     domain.executor,
     {
-      model: OPENAI_MODEL.value(),
+      model: runtime.model,
       instructions: SYSTEM_INSTRUCTIONS,
-      reasoningEffort: parseReasoningEffort(OPENAI_REASONING_EFFORT.value()),
+      reasoningEffort: runtime.reasoningEffort,
       promptVersion: PROMPT_VERSION,
       schemaVersion: SCHEMA_VERSION,
-      timeoutMs: 30_000,
-      maxTurns: 6,
-      maxToolCalls: 12,
-      maxOutputTokens: 1_500,
+      timeoutMs: RESPONSES_TIMEOUT_MS,
+      maxTurns: RESPONSES_MAX_TURNS,
+      maxToolCalls: RESPONSES_MAX_TOOL_CALLS,
+      maxOutputTokens: RESPONSES_MAX_OUTPUT_TOKENS,
       onProviderError: (metadata) => {
         logger.error('OpenAI Responses provider request failed safely.', metadata);
       },
@@ -135,9 +148,48 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
   return cachedResponses;
 }
 
+interface RuntimeSettings {
+  readonly model: string;
+  readonly reasoningEffort: RuntimeReasoningEffort;
+  readonly providerBaseUrl: string;
+  readonly allowLoopback: boolean;
+  readonly allowedOrigins: ReadonlySet<string>;
+  readonly metadata: RuntimeConfigMetadata;
+}
+
+function runtimeSettings(): RuntimeSettings {
+  if (cachedRuntimeSettings) return cachedRuntimeSettings;
+  const allowLoopback = process.env.FUNCTIONS_EMULATOR === 'true';
+  const model = OPENAI_MODEL.value();
+  const reasoningEffort = parseReasoningEffort(OPENAI_REASONING_EFFORT.value());
+  const providerBaseUrl = validateProviderBaseUrl(OPENAI_BASE_URL.value(), allowLoopback);
+  const allowedOrigins = parseAllowedOrigins(AI_ALLOWED_ORIGINS.value());
+  const metadata = createRuntimeConfigMetadata({
+    model,
+    reasoningEffort,
+    providerBaseUrl,
+    allowedOrigins,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    timeoutMs: RESPONSES_TIMEOUT_MS,
+    maxTurns: RESPONSES_MAX_TURNS,
+    maxToolCalls: RESPONSES_MAX_TOOL_CALLS,
+    maxOutputTokens: RESPONSES_MAX_OUTPUT_TOKENS,
+  });
+  cachedRuntimeSettings = Object.freeze({
+    model,
+    reasoningEffort,
+    providerBaseUrl,
+    allowLoopback,
+    allowedOrigins,
+    metadata,
+  });
+  return cachedRuntimeSettings;
+}
+
 function parseReasoningEffort(
   value: string,
-): 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' {
+): RuntimeReasoningEffort {
   if (value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max') {
     return value;
   }
@@ -166,3 +218,4 @@ export * from './domain/services/scheduling-service';
 export * from './domain/tool-definitions';
 export * from './domain/types';
 export * from './mcp/read-only-adapter';
+export * from './runtime-config';

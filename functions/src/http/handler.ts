@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DomainError, isDomainError, type DomainErrorCode } from '../domain/errors';
 import type { AuthContext } from '../domain/types';
+import type { RuntimeConfigMetadata } from '../runtime-config';
 import { parseBearerToken } from './auth';
 import { applyCors } from './cors';
 import { applyRequestSchema, chatRequestSchema, parsePathId, rollbackRequestSchema } from './schemas';
@@ -22,6 +23,7 @@ export interface ApiHandlerDependencies {
   readonly rateLimiter: RateLimiter;
   readonly allowedOrigins: ReadonlySet<string>;
   readonly releaseId: string;
+  readonly runtimeConfig: RuntimeConfigMetadata;
   readonly clock?: () => Date;
   readonly requestId?: () => string;
 }
@@ -49,6 +51,7 @@ export function createApiHandler(dependencies: ApiHandlerDependencies) {
           status: 'ok',
           service: 'life-tracker-ai',
           releaseId: dependencies.releaseId,
+          runtimeConfig: dependencies.runtimeConfig,
           requestId,
         });
         return;

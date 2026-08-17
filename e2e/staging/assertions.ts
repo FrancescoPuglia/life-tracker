@@ -84,6 +84,12 @@ export function stagingHttpFailureEvidence(error: unknown): SafeStagingHttpFailu
   return error instanceof StagingHttpFailure ? error.evidence : null;
 }
 
+export function requireFrontendBuildCommit(actual: string | null, expected: string): void {
+  if (!/^[a-f0-9]{40}$/.test(expected) || actual !== expected) {
+    throw new Error('Staging frontend source marker does not match the clean committed checkout.');
+  }
+}
+
 /**
  * Response checks deliberately throw fixed classifications. Never let an
  * assertion framework serialize a body that can contain an approval or
