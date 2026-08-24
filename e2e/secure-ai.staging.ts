@@ -120,7 +120,7 @@ test.describe.serial('real secure AI staging boundary', () => {
     page.on('pageerror', (error) => consoleFailures.push(`pageerror:${error.name}`));
     page.on('console', (message) => {
       if (message.type() !== 'error') return;
-      consoleFailures.push(message.text().includes('status of 409') ? 'console:http-409' : 'console:error');
+      consoleFailures.push(safeConsoleErrorCategory(message.text()));
     });
     page.on('request', (request) => {
       const url = new URL(request.url());
@@ -225,7 +225,11 @@ test.describe.serial('real secure AI staging boundary', () => {
         await selectPlanMode(page);
       }
 
-      if (EXECUTION_PROFILE !== 'create_onward' && EXECUTION_PROFILE !== 'stale_onward') {
+      if (
+        EXECUTION_PROFILE !== 'create_onward'
+        && EXECUTION_PROFILE !== 'stale_onward'
+        && EXECUTION_PROFILE !== 'boundary_only'
+      ) {
         failureStage = 'proposal_preview_then_reject';
         if (EXECUTION_PROFILE === 'full') await startNewChat(page);
       const beforeRejectProposal = await readFixtureState(activeA, fixtureDocumentsA);
@@ -410,7 +414,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         await page.screenshot({ path: `test-results/staging/${runId}-rolled-back.png`, fullPage: true });
       }
 
-      if (EXECUTION_PROFILE !== 'stale_onward') {
+      if (EXECUTION_PROFILE !== 'stale_onward' && EXECUTION_PROFILE !== 'boundary_only') {
         failureStage = 'concurrent_create_is_idempotent';
         const createTitle = `STAGING Concurrent create ${runId}`;
       const fixtureBeforeCreatePreview = await readFixtureState(activeA, fixtureDocumentsA);
@@ -529,7 +533,8 @@ test.describe.serial('real secure AI staging boundary', () => {
         });
       }
 
-      failureStage = 'stale_preview_rejected_without_partial_write';
+      if (EXECUTION_PROFILE !== 'boundary_only') {
+        failureStage = 'stale_preview_rejected_without_partial_write';
       if (EXECUTION_PROFILE !== 'create_onward' && EXECUTION_PROFILE !== 'stale_onward') {
         await startNewChat(page);
       }
@@ -709,12 +714,15 @@ test.describe.serial('real secure AI staging boundary', () => {
           staleRollbackMutationCount: 0,
         },
       });
+      }
 
       failureStage = 'browser_network_boundary';
       expect(directOpenAiRequests).toEqual([]);
       expect(legacyAiRequests).toEqual([]);
-      expect(backendRequests.length).toBeGreaterThan(0);
-      expect(backendRequests.every((entry) => entry.hasBearer && !entry.bodyHasUserId)).toBe(true);
+      if (EXECUTION_PROFILE !== 'boundary_only') {
+        expect(backendRequests.length).toBeGreaterThan(0);
+        expect(backendRequests.every((entry) => entry.hasBearer && !entry.bodyHasUserId)).toBe(true);
+      }
       const unexpectedConsoleFailures = consoleFailures.filter((entry) =>
         entry !== 'console:http-409');
       if (unexpectedConsoleFailures.length !== 0) {
@@ -798,6 +806,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         directOpenAiRequests: directOpenAiRequests.length,
         legacyAiRequests: legacyAiRequests.length,
         expectedStateChangedConsoleMessages: consoleFailures.filter((entry) => entry === 'console:http-409').length,
+        consoleErrorCategories: countStrings(consoleFailures),
       },
     });
     if (primaryFailure !== undefined) throw primaryFailure;
@@ -809,10 +818,31 @@ test.describe.serial('real secure AI staging boundary', () => {
 
 function stagingExecutionProfile(
   value: string | undefined,
-): 'full' | 'proposal_onward' | 'create_onward' | 'stale_onward' {
+): 'full' | 'proposal_onward' | 'create_onward' | 'stale_onward' | 'boundary_only' {
   if (value === undefined || value === '' || value === 'full') return 'full';
-  if (value === 'proposal_onward' || value === 'create_onward' || value === 'stale_onward') return value;
+  if (
+    value === 'proposal_onward'
+    || value === 'create_onward'
+    || value === 'stale_onward'
+    || value === 'boundary_only'
+  ) return value;
   throw new Error('Invalid live staging execution profile.');
+}
+
+function safeConsoleErrorCategory(message: string): string {
+  const status = /status of (\d{3})/.exec(message)?.[1];
+  if (status) return `console:http-${status}`;
+  if (message.includes('Missing or insufficient permissions')) return 'console:firestore-permission-denied';
+  if (message.includes('Firestore persistence error')) return 'console:firestore-persistence';
+  if (message.includes('Analytics loading failed')) return 'console:analytics-load';
+  if (message.includes('Failed to load resource')) return 'console:http-other';
+  return 'console:application-error';
+}
+
+function countStrings(values: readonly string[]): Readonly<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  return counts;
 }
 
 async function verifyHealthAndCors(
