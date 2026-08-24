@@ -143,6 +143,9 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
       onProviderError: (metadata) => {
         logger.error('OpenAI Responses provider request failed safely.', metadata);
       },
+      onOrchestrationError: (metadata) => {
+        logger.error('OpenAI Responses orchestration failed safely.', metadata);
+      },
     },
   );
   return cachedResponses;

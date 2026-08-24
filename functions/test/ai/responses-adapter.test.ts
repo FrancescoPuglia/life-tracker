@@ -109,6 +109,7 @@ describe('bounded OpenAI Responses orchestration', () => {
   ] as const)(
     'rejects a non-completed %s intermediate response before executing its tool call',
     async (label, status) => {
+      const onOrchestrationError = vi.fn();
       const { adapter, repository } = setup([{
         id: `unsafe-${label.replaceAll(' ', '-')}-tool-turn`,
         status,
@@ -126,7 +127,7 @@ describe('bounded OpenAI Responses orchestration', () => {
             reason: `The provider marked this response ${label}.`,
           }),
         }],
-      }]);
+      }], { onOrchestrationError });
       await expect(adapter.run({
         auth: AUTH,
         message: 'Plan my day',
@@ -138,6 +139,12 @@ describe('bounded OpenAI Responses orchestration', () => {
       });
       expect(await repository.getPlan(UID, 'plan-1')).toBeNull();
       expect(await repository.listAuditEventsForUser(UID)).toEqual([]);
+      expect(onOrchestrationError).toHaveBeenCalledWith({
+        requestId: AUTH.requestId,
+        stage: 'provider_response_status',
+        providerResponseId: `unsafe-${label.replaceAll(' ', '-')}-tool-turn`,
+        providerResponseStatus: status ?? 'missing',
+      });
     },
   );
 
@@ -591,7 +598,8 @@ describe('bounded OpenAI Responses orchestration', () => {
       authenticatedContext: CONTEXT,
     })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
 
-    const internalTool = setup([toolCall]);
+    const onOrchestrationError = vi.fn();
+    const internalTool = setup([toolCall], { onOrchestrationError });
     vi.spyOn(internalTool.domain.executor, 'executeJson').mockRejectedValueOnce(
       new TypeError('internal serialization detail'),
     );
@@ -603,6 +611,11 @@ describe('bounded OpenAI Responses orchestration', () => {
     })).rejects.toMatchObject({
       code: 'INTERNAL',
       message: 'Domain tool execution failed safely.',
+    });
+    expect(onOrchestrationError).toHaveBeenCalledWith({
+      requestId: AUTH.requestId,
+      stage: 'domain_tool_execution',
+      providerResponseId: 'response-tool-error',
     });
   });
 });

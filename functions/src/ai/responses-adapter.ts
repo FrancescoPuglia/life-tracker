@@ -89,6 +89,7 @@ export interface ResponsesAdapterOptions {
   readonly promptVersion: string;
   readonly schemaVersion: string;
   readonly onProviderError?: (metadata: SafeProviderErrorMetadata) => void;
+  readonly onOrchestrationError?: (metadata: SafeOrchestrationErrorMetadata) => void;
 }
 
 export interface SafeProviderErrorMetadata {
@@ -98,6 +99,17 @@ export interface SafeProviderErrorMetadata {
   readonly providerType?: string;
   readonly providerParam?: string;
   readonly providerRequestId?: string;
+}
+
+export interface SafeOrchestrationErrorMetadata {
+  readonly requestId: string;
+  readonly stage:
+    | 'provider_model_attestation'
+    | 'provider_response_status'
+    | 'domain_tool_execution'
+    | 'final_message';
+  readonly providerResponseId?: string;
+  readonly providerResponseStatus?: 'missing' | 'failed' | 'in_progress' | 'cancelled' | 'queued' | 'incomplete';
 }
 
 export class OpenAIResponsesAdapter {
@@ -198,11 +210,24 @@ export class OpenAIResponsesAdapter {
           controller,
           deadline,
         );
-        const providerModel = requireExpectedProviderModel(
-          response.model,
-          this.options.model,
-        );
+        let providerModel: string;
+        try {
+          providerModel = requireExpectedProviderModel(
+            response.model,
+            this.options.model,
+          );
+        } catch (error) {
+          reportOrchestrationError(
+            this.options.onOrchestrationError,
+            safeOrchestrationErrorMetadata(input.auth.requestId, 'provider_model_attestation', response),
+          );
+          throw error;
+        }
         if (response.status !== 'completed') {
+          reportOrchestrationError(
+            this.options.onOrchestrationError,
+            safeOrchestrationErrorMetadata(input.auth.requestId, 'provider_response_status', response),
+          );
           throw new DomainError('INTERNAL', 'The AI response did not complete safely.');
         }
         providerCalls += 1;
@@ -210,7 +235,16 @@ export class OpenAIResponsesAdapter {
         promptItems.push(...response.output);
         const calls = response.output.filter(isFunctionCall);
         if (!calls.length) {
-          const finalText = normalizeText(response);
+          let finalText: string;
+          try {
+            finalText = normalizeText(response);
+          } catch (error) {
+            reportOrchestrationError(
+              this.options.onOrchestrationError,
+              safeOrchestrationErrorMetadata(input.auth.requestId, 'final_message', response),
+            );
+            throw error;
+          }
           const metadata = {
             providerResponseId: response.id,
             providerModel,
@@ -251,7 +285,19 @@ export class OpenAIResponsesAdapter {
               controller,
             );
           } catch (error) {
-            if (isDomainError(error)) throw error;
+            if (isDomainError(error)) {
+              if (error.code === 'INTERNAL') {
+                reportOrchestrationError(
+                  this.options.onOrchestrationError,
+                  safeOrchestrationErrorMetadata(input.auth.requestId, 'domain_tool_execution', response),
+                );
+              }
+              throw error;
+            }
+            reportOrchestrationError(
+              this.options.onOrchestrationError,
+              safeOrchestrationErrorMetadata(input.auth.requestId, 'domain_tool_execution', response),
+            );
             throw new DomainError('INTERNAL', 'Domain tool execution failed safely.');
           }
           if (isPublicPlan(result)) lastPlan = result;
@@ -336,6 +382,34 @@ export function safeProviderErrorMetadata(
     ...(providerParam === undefined ? {} : { providerParam }),
     ...(providerRequestId === undefined ? {} : { providerRequestId }),
   };
+}
+
+function safeOrchestrationErrorMetadata(
+  requestId: string,
+  stage: SafeOrchestrationErrorMetadata['stage'],
+  response: ResponseLike,
+): SafeOrchestrationErrorMetadata {
+  const providerResponseId = safeProviderScalar(response.id, 200);
+  const providerResponseStatus = response.status === undefined ? 'missing' : response.status;
+  return {
+    requestId,
+    stage,
+    ...(providerResponseId === undefined ? {} : { providerResponseId }),
+    ...(stage === 'provider_response_status' && providerResponseStatus !== 'completed'
+      ? { providerResponseStatus }
+      : {}),
+  };
+}
+
+function reportOrchestrationError(
+  observer: ResponsesAdapterOptions['onOrchestrationError'],
+  metadata: SafeOrchestrationErrorMetadata,
+): void {
+  try {
+    observer?.(metadata);
+  } catch {
+    // Secret-safe observability must never change the normalized failure path.
+  }
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
