@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   assertReviewedProjectFields,
+  allowlistWindowsBuildEnvironment,
   createStagingBuildEnvironment,
   extractFirebaseWebManifest,
   resolveTauriBuildInvocation,
@@ -74,5 +75,20 @@ describe('staging Desktop Firebase resolver', () => {
       () => resolveTauriBuildInvocation('darwin', '/usr/bin/node'),
       /only with the Windows toolchain/,
     );
+  });
+
+  it('allowlists only the two public build variables across WSL interop', () => {
+    const environment = allowlistWindowsBuildEnvironment({
+      WSLENV: 'PATH/l:LIFE_TRACKER_DESKTOP_PROFILE',
+      OPENAI_API_KEY: 'non-secret-test-value',
+    });
+    const entries = environment.WSLENV.split(':');
+
+    assert.deepEqual(entries, [
+      'PATH/l',
+      'LIFE_TRACKER_DESKTOP_PROFILE',
+      'LIFE_TRACKER_DESKTOP_FIREBASE_API_KEY',
+    ]);
+    assert.equal(entries.includes('OPENAI_API_KEY'), false);
   });
 });

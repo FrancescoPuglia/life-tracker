@@ -105,6 +105,18 @@ export function resolveTauriBuildInvocation(platform, nodeExecutable) {
   throw new Error('The R1 installer can be built only with the Windows toolchain.');
 }
 
+export function allowlistWindowsBuildEnvironment(environment) {
+  const existing = (environment.WSLENV ?? '').split(':').filter(Boolean);
+  const existingNames = new Set(existing.map((entry) => entry.split('/')[0]));
+  for (const name of [
+    'LIFE_TRACKER_DESKTOP_PROFILE',
+    'LIFE_TRACKER_DESKTOP_FIREBASE_API_KEY',
+  ]) {
+    if (!existingNames.has(name)) existing.push(name);
+  }
+  return { ...environment, WSLENV: existing.join(':') };
+}
+
 function windowsBuildEnvironment(environment) {
   if (process.platform === 'win32') return environment;
   try {
@@ -112,7 +124,10 @@ function windowsBuildEnvironment(environment) {
   } catch {
     throw new Error('The root WSL Windows-interoperability socket is unavailable.');
   }
-  return { ...environment, WSL_INTEROP: ROOT_WSL_INTEROP_SOCKET };
+  return {
+    ...allowlistWindowsBuildEnvironment(environment),
+    WSL_INTEROP: ROOT_WSL_INTEROP_SOCKET,
+  };
 }
 
 function run(command, profile) {
