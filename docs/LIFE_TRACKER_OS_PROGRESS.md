@@ -7,7 +7,7 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `52ee54f03976de81fb4b8488b3e9ba599a91330e`
+- Current implementation checkpoint SHA: `3545280d3b7f16543db27963a90089ca9a8fea55`
 - Remote master branch: not created yet
 - Worktree at checkpoint start: clean
 
@@ -143,6 +143,33 @@ slice changes one of those trust boundaries.
   permission/toast interaction remain **NOT VERIFIED** pending the CORS deploy
   approval and direct installed-UI acceptance. R1 remains in progress.
 
+### Production read-only audit and timestamp compatibility
+
+- Green compatibility commit: `3545280d3b7f16543db27963a90089ca9a8fea55`.
+- Completed the explicit-target read-only audit of `life-tracker-12000`; no
+  production resource, data, API, billing, Rules, index, backup, Auth setting,
+  Hosting release, or GitHub setting changed.
+- Production has Native Firestore in `europe-southwest1`, broad owner-path Rules,
+  no composite index/TTL, no PITR/delete protection/backup, no production cloud
+  backend APIs, and no billing link. Backend promotion is an explicit human
+  cost/plan gate.
+- All audited embedded owners matched their owner-scoped paths. Production
+  TimeBlocks use legacy timestamp maps; the client sanitizer had been flattening
+  SDK timestamp/server-transform instances. The compatibility commit preserves
+  SDK atomic values and safely normalizes legacy maps during legitimate reads
+  and full user updates.
+- The official Rules emulator proves malformed legacy maps remain rejected and
+  a legitimate native-timestamp normalization update succeeds: 49/49 PASS.
+  Frontend regression is 53 files / 639 tests PASS; typecheck and static security
+  pass.
+- The installed `52ee54f` Beta remains valid evidence for packaging, launch,
+  tray, single-instance, and restart, but is superseded as a release candidate
+  by the client compatibility change. Rebuild/reinstall is required before R1
+  workflow acceptance.
+- Added `docs/PRODUCTION_READ_ONLY_AUDIT.md`. Exact personal collection counts
+  are intentionally not committed while GitHub is public; recapture them after
+  R7 for the private final receipt.
+
 ## Evidence
 
 | Check | Result |
@@ -183,11 +210,16 @@ slice changes one of those trust boundaries.
 | Installed launch/tray/single-instance/restart | PASS; visible staging title, hide-to-tray, same-PID focus, new-PID restart |
 | Staging Function Desktop-origin deploy | NOT RUN — exact human deployment approval required |
 | Installed auth/domain/AI/notification acceptance | NOT VERIFIED |
+| Production positive identity/read-only audit | PASS; explicit `life-tracker-12000`, zero mutations |
+| Production Rules/index/backup comparison | PASS; broad Rules, no index/TTL, no backup/PITR/delete protection |
+| Production backend/billing inventory | PASS; required backend APIs disabled, no billing link |
+| Production owner-marker compatibility | PASS; all projected embedded owners matched their owner paths |
+| Legacy TimeBlock timestamp remediation | PASS; unit behavior, 49/49 Rules emulator, 639 frontend regression |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
-- R2 Production Desktop: NOT STARTED
+- R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: NOT STARTED
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: NOT STARTED
@@ -204,11 +236,17 @@ changed. Installed UI authentication/notification acceptance will then require
 Francesco to interact with the visible Beta. No production resource, provider
 credential, billing setting, GitHub visibility, or public Pages state changed.
 
+Production promotion has a separate later cost gate: `life-tracker-12000` has
+no billing link and its required backend APIs are disabled. Do not enable
+billing, APIs, or paid services without explicit human approval. This does not
+block independent local/emulator implementation.
+
 ## Exact next step
 
 After exact human approval, deploy only `functions:lifeTrackerAiApi` to explicit
 project `life-tracker-staging`, verify health/runtime attestation and exact CORS
-allow/deny behavior, then complete installed authentication, core-domain, Ask
-AI Preview/Apply/Undo, notification, autostart, offline/backend-unavailable, and
-expired-auth acceptance. Then begin the required read-only production audit and
-recovery classification without making any production change.
+allow/deny behavior, rebuild/reinstall the staging Beta from the compatibility
+checkpoint, then complete installed authentication, core-domain, Ask AI
+Preview/Apply/Undo, notification, autostart, offline/backend-unavailable, and
+expired-auth acceptance. Continue independent production-ready implementation
+without enabling production billing or APIs.
