@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { resolveNpmCliInvocation } from './node-cli.mjs';
 
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
   cwd: process.cwd(),
@@ -17,7 +18,7 @@ if (status !== '') {
   throw new Error('Static export verification requires a clean committed source tree.');
 }
 
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmInvocation = resolveNpmCliInvocation(['run', 'build']);
 const buildEnvironment = {
   ...process.env,
   GITHUB_PAGES: 'true',
@@ -25,7 +26,7 @@ const buildEnvironment = {
   OPENAI_API_KEY: '',
   NEXT_PUBLIC_OPENAI_API_KEY: '',
 };
-const result = spawnSync(npmCommand, ['run', 'build'], {
+const result = spawnSync(npmInvocation.executable, npmInvocation.args, {
   cwd: process.cwd(),
   env: buildEnvironment,
   stdio: 'inherit',

@@ -6,6 +6,7 @@ import {
   DESKTOP_PROFILES,
   resolveDesktopBuildProfile,
 } from './desktop-build-profile.mjs';
+import { resolveNpmCliInvocation } from './node-cli.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const firebaseCli = resolve(root, 'node_modules/firebase-tools/lib/bin/firebase.js');
@@ -132,9 +133,9 @@ function windowsBuildEnvironment(environment) {
 
 function run(command, profile) {
   const environment = createStagingBuildEnvironment(process.env, profile.apiKey);
-  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const npmInvocation = resolveNpmCliInvocation(['run', 'build:desktop']);
   const invocation = command === 'export'
-    ? [npmCommand, ['run', 'build:desktop']]
+    ? [npmInvocation.executable, npmInvocation.args]
     : resolveTauriBuildInvocation(process.platform, process.execPath);
   const result = spawnSync(invocation[0], invocation[1], {
     cwd: root,
