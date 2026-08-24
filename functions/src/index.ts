@@ -223,6 +223,8 @@ export * from './domain/types';
 export * from './mcp/read-only-adapter';
 export * from './notifications/domain';
 export * from './notifications/cloud-tasks-queue';
+export * from './notifications/delivery';
+export * from './notifications/delivery-service';
 export * from './notifications/firestore-repository';
 export * from './notifications/in-memory-repository';
 export * from './notifications/reconciliation-service';
