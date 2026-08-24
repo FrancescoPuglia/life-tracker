@@ -57,6 +57,11 @@ const SERVER_ONLY_COLLECTIONS = [
   'aiAuditLogs',
   'aiIdempotency',
   'aiRateLimits',
+  'reminderJobs',
+  'reminderManifests',
+  'deliveryAttempts',
+  'deliveryReceipts',
+  'notificationIdempotency',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [
@@ -108,6 +113,29 @@ function entityForCollection(name: string, uid: string, id: string) {
   }
 
   return ownedEntity(uid, id);
+}
+
+function notificationPreferences(uid: string, extra: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 'notification-preferences-v1',
+    id: 'default',
+    userId: uid,
+    timezone: 'Europe/Rome',
+    locale: 'it-IT',
+    quietHours: { enabled: true, start: '22:30', end: '07:00' },
+    desktopEnabled: true,
+    whatsappEnabled: false,
+    emailEnabled: false,
+    reminderOffsetsMinutes: [15],
+    atStartEnabled: true,
+    missedStart: { enabled: false, afterMinutes: 10 },
+    maxRemindersPerBlock: 3,
+    dailyReport: { enabled: false, localTime: '22:30' },
+    weeklyReport: { enabled: false, isoWeekday: 7, localTime: '20:30' },
+    createdAt: new Date('2026-08-10T08:00:00.000Z'),
+    updatedAt: new Date('2026-08-10T08:00:00.000Z'),
+    ...extra,
+  };
 }
 
 describe('Firestore user isolation rules', () => {
@@ -413,6 +441,55 @@ describe('Firestore user isolation rules', () => {
     await assertFails(setDoc(
       doc(db, 'users/alice/login_streaks/extra-streak'),
       ownedEntity('alice', 'extra-streak'),
+    ));
+  });
+
+  it('allows exactly one owner-scoped validated notification preference document', async () => {
+    const db = testEnv.authenticatedContext('alice').firestore();
+    const preferences = doc(db, 'users/alice/notificationPreferences/default');
+
+    await assertSucceeds(setDoc(preferences, notificationPreferences('alice')));
+    await assertSucceeds(getDoc(preferences));
+    await assertSucceeds(getDocs(query(
+      collection(db, 'users/alice/notificationPreferences'),
+      where('userId', '==', 'alice'),
+    )));
+    await assertFails(getDocs(collection(db, 'users/alice/notificationPreferences')));
+    await assertSucceeds(updateDoc(preferences, {
+      desktopEnabled: false,
+      reminderOffsetsMinutes: [60, 15],
+      updatedAt: new Date('2026-08-10T09:00:00.000Z'),
+    }));
+    await assertSucceeds(deleteDoc(preferences));
+  });
+
+  it('rejects forged, extra, immutable, and malformed notification preferences', async () => {
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    const preferences = doc(aliceDb, 'users/alice/notificationPreferences/default');
+
+    await assertFails(setDoc(
+      doc(aliceDb, 'users/alice/notificationPreferences/extra'),
+      { ...notificationPreferences('alice'), id: 'extra' },
+    ));
+    await assertFails(setDoc(preferences, notificationPreferences('bob')));
+    await assertFails(setDoc(preferences, notificationPreferences('alice', {
+      providerSecret: 'client-controlled',
+    })));
+    await assertFails(setDoc(preferences, notificationPreferences('alice', {
+      reminderOffsetsMinutes: [0],
+    })));
+    await assertFails(setDoc(preferences, notificationPreferences('alice', {
+      quietHours: { enabled: true, start: '25:00', end: '07:00' },
+    })));
+
+    await assertSucceeds(setDoc(preferences, notificationPreferences('alice')));
+    await assertFails(updateDoc(preferences, { schemaVersion: 'forged-v2' }));
+    await assertFails(updateDoc(preferences, { userId: 'bob' }));
+    const bobDb = testEnv.authenticatedContext('bob').firestore();
+    await assertFails(getDoc(doc(bobDb, 'users/alice/notificationPreferences/default')));
+    await assertFails(updateDoc(
+      doc(bobDb, 'users/alice/notificationPreferences/default'),
+      { desktopEnabled: false },
     ));
   });
 

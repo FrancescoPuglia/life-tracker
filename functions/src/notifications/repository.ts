@@ -15,6 +15,13 @@ export type StoredReminderJobState =
   | 'uncertain'
   | 'suppressed';
 
+export const RECONCILIATION_ACTIVE_JOB_STATES: ReadonlySet<StoredReminderJobState> = new Set([
+  'client_pending',
+  'pending_enqueue',
+  'schedule_failed',
+  'scheduled',
+]);
+
 export type ReminderTaskCancellationState =
   | 'not_applicable'
   | 'pending'
@@ -88,4 +95,25 @@ export interface ReminderTaskQueue {
   ): Promise<void>;
 
   cancel(taskId: string): Promise<ReminderQueueCancellationOutcome>;
+}
+
+export function isReconciliationActiveJobState(state: StoredReminderJobState): boolean {
+  return RECONCILIATION_ACTIVE_JOB_STATES.has(state);
+}
+
+export function sameImmutableReminderJob(
+  stored: StoredReminderJob,
+  desired: ReminderJob,
+): boolean {
+  return stored.schemaVersion === desired.schemaVersion
+    && stored.id === desired.id
+    && stored.uid === desired.uid
+    && stored.timeBlockId === desired.timeBlockId
+    && stored.channel === desired.channel
+    && stored.kind === desired.kind
+    && stored.offsetMinutes === desired.offsetMinutes
+    && stored.scheduledFor === desired.scheduledFor
+    && stored.expectedTimeBlockVersion === desired.expectedTimeBlockVersion
+    && stored.expectedPolicyVersion === desired.expectedPolicyVersion
+    && stored.idempotencyKey === desired.idempotencyKey;
 }

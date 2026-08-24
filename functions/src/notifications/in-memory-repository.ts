@@ -1,6 +1,8 @@
 import type { ReminderJob } from './domain';
 import {
   REMINDER_STORAGE_SCHEMA_VERSION,
+  isReconciliationActiveJobState,
+  sameImmutableReminderJob,
   type ReminderReconciliationDelta,
   type ReminderReconciliationRepository,
   type ReminderTaskCancellation,
@@ -8,13 +10,6 @@ import {
   type StoredReminderJob,
   type StoredReminderJobState,
 } from './repository';
-
-const ACTIVE_JOB_STATES: ReadonlySet<StoredReminderJobState> = new Set([
-  'client_pending',
-  'pending_enqueue',
-  'schedule_failed',
-  'scheduled',
-]);
 
 /** Deterministic transactional adapter for unit tests; it never contacts Firebase. */
 export class InMemoryReminderRepository implements ReminderReconciliationRepository {
@@ -45,7 +40,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
           current.uid !== uid
           || current.timeBlockId !== timeBlockId
           || desired.has(current.id)
-          || !ACTIVE_JOB_STATES.has(current.state)
+          || !isReconciliationActiveJobState(current.state)
         ) {
           continue;
         }
@@ -69,7 +64,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
       for (const job of desired.values()) {
         const key = jobKey(uid, job.id);
         const current = this.jobs.get(key);
-        if (current && !sameImmutableJob(current, job)) {
+        if (current && !sameImmutableReminderJob(current, job)) {
           throw new Error('Stored reminder job does not match its deterministic identity.');
         }
         if (!current) {
@@ -214,20 +209,6 @@ function assertDesiredJob(uid: string, timeBlockId: string, job: ReminderJob): v
   }
   assertIdentity(job.id, 'Reminder job ID');
   validInstant(job.scheduledFor, 'Reminder scheduled time');
-}
-
-function sameImmutableJob(stored: StoredReminderJob, desired: ReminderJob): boolean {
-  return stored.schemaVersion === desired.schemaVersion
-    && stored.id === desired.id
-    && stored.uid === desired.uid
-    && stored.timeBlockId === desired.timeBlockId
-    && stored.channel === desired.channel
-    && stored.kind === desired.kind
-    && stored.offsetMinutes === desired.offsetMinutes
-    && stored.scheduledFor === desired.scheduledFor
-    && stored.expectedTimeBlockVersion === desired.expectedTimeBlockVersion
-    && stored.expectedPolicyVersion === desired.expectedPolicyVersion
-    && stored.idempotencyKey === desired.idempotencyKey;
 }
 
 function assertIdentity(value: string, label: string): void {

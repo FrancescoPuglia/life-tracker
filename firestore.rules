@@ -140,6 +140,93 @@ service cloud.firestore {
             && request.resource.data.totalLogins >= 0));
     }
 
+    function validClock(value) {
+      return value is string
+        && value.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+
+    function validReminderOffset(value) {
+      return value is int && value >= 1 && value <= 1440;
+    }
+
+    function validReminderOffsets(offsets) {
+      return offsets is list
+        && offsets.size() >= 1
+        && offsets.size() <= 8
+        && validReminderOffset(offsets[0])
+        && (offsets.size() < 2 || validReminderOffset(offsets[1]))
+        && (offsets.size() < 3 || validReminderOffset(offsets[2]))
+        && (offsets.size() < 4 || validReminderOffset(offsets[3]))
+        && (offsets.size() < 5 || validReminderOffset(offsets[4]))
+        && (offsets.size() < 6 || validReminderOffset(offsets[5]))
+        && (offsets.size() < 7 || validReminderOffset(offsets[6]))
+        && (offsets.size() < 8 || validReminderOffset(offsets[7]));
+    }
+
+    function hasValidNotificationPreferences(uid, documentId) {
+      let data = request.resource.data;
+      return documentId == 'default'
+        && data.keys().hasAll([
+          'schemaVersion', 'id', 'userId', 'timezone', 'locale', 'quietHours',
+          'desktopEnabled', 'whatsappEnabled', 'emailEnabled',
+          'reminderOffsetsMinutes', 'atStartEnabled', 'missedStart',
+          'maxRemindersPerBlock', 'dailyReport', 'weeklyReport',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'schemaVersion', 'id', 'userId', 'timezone', 'locale', 'quietHours',
+          'desktopEnabled', 'whatsappEnabled', 'emailEnabled',
+          'reminderOffsetsMinutes', 'atStartEnabled', 'missedStart',
+          'maxRemindersPerBlock', 'dailyReport', 'weeklyReport',
+          'createdAt', 'updatedAt'
+        ])
+        && data.schemaVersion == 'notification-preferences-v1'
+        && data.id == documentId
+        && data.userId == uid
+        && data.timezone is string
+        && data.timezone.size() >= 1
+        && data.timezone.size() <= 100
+        && data.locale is string
+        && data.locale.size() >= 2
+        && data.locale.size() <= 35
+        && data.quietHours is map
+        && data.quietHours.keys().hasAll(['enabled', 'start', 'end'])
+        && data.quietHours.keys().hasOnly(['enabled', 'start', 'end'])
+        && data.quietHours.enabled is bool
+        && validClock(data.quietHours.start)
+        && validClock(data.quietHours.end)
+        && data.desktopEnabled is bool
+        && data.whatsappEnabled is bool
+        && data.emailEnabled is bool
+        && validReminderOffsets(data.reminderOffsetsMinutes)
+        && data.atStartEnabled is bool
+        && data.missedStart is map
+        && data.missedStart.keys().hasAll(['enabled', 'afterMinutes'])
+        && data.missedStart.keys().hasOnly(['enabled', 'afterMinutes'])
+        && data.missedStart.enabled is bool
+        && data.missedStart.afterMinutes is int
+        && data.missedStart.afterMinutes >= 1
+        && data.missedStart.afterMinutes <= 240
+        && data.maxRemindersPerBlock is int
+        && data.maxRemindersPerBlock >= 1
+        && data.maxRemindersPerBlock <= 8
+        && data.dailyReport is map
+        && data.dailyReport.keys().hasAll(['enabled', 'localTime'])
+        && data.dailyReport.keys().hasOnly(['enabled', 'localTime'])
+        && data.dailyReport.enabled is bool
+        && validClock(data.dailyReport.localTime)
+        && data.weeklyReport is map
+        && data.weeklyReport.keys().hasAll(['enabled', 'isoWeekday', 'localTime'])
+        && data.weeklyReport.keys().hasOnly(['enabled', 'isoWeekday', 'localTime'])
+        && data.weeklyReport.enabled is bool
+        && data.weeklyReport.isoWeekday is int
+        && data.weeklyReport.isoWeekday >= 1
+        && data.weeklyReport.isoWeekday <= 7
+        && validClock(data.weeklyReport.localTime)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isClientCollection(collectionName) {
       return collectionName in [
         'domains',
@@ -226,6 +313,30 @@ service cloud.firestore {
           && existingOwnershipMatchesPath(uid);
       }
 
+      // Users control only validated channel and schedule preferences. Jobs,
+      // provider state, delivery receipts, and idempotency stay server-owned.
+      match /notificationPreferences/{documentId} {
+        allow get: if ownsPath(uid)
+          && documentId == 'default'
+          && resource.data.userId == uid;
+
+        allow list: if ownsPath(uid)
+          && resource.data.userId == uid;
+
+        allow create: if ownsPath(uid)
+          && hasValidNotificationPreferences(uid, documentId);
+
+        allow update: if ownsPath(uid)
+          && resource.data.userId == uid
+          && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['schemaVersion', 'id', 'userId', 'createdAt'])
+          && hasValidNotificationPreferences(uid, documentId);
+
+        allow delete: if ownsPath(uid)
+          && documentId == 'default'
+          && resource.data.userId == uid;
+      }
+
       // Defense in depth: these resources are written only by the backend via
       // the Admin SDK, which bypasses Firestore Security Rules.
       match /aiChangePlans/{document=**} {
@@ -247,6 +358,21 @@ service cloud.firestore {
         allow read, write: if false;
       }
       match /aiRateLimits/{document=**} {
+        allow read, write: if false;
+      }
+      match /reminderJobs/{document=**} {
+        allow read, write: if false;
+      }
+      match /reminderManifests/{document=**} {
+        allow read, write: if false;
+      }
+      match /deliveryAttempts/{document=**} {
+        allow read, write: if false;
+      }
+      match /deliveryReceipts/{document=**} {
+        allow read, write: if false;
+      }
+      match /notificationIdempotency/{document=**} {
         allow read, write: if false;
       }
     }
