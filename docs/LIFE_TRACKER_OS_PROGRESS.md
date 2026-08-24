@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `bc9d1a98dc5a8ef59f653cb78cb6076ec7ec9503`
+- Current implementation checkpoint SHA: `a8762376df685763aa8ce20ec8e734546ff31c60`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -426,6 +426,36 @@ slice changes one of those trust boundaries.
   deployed; no Twilio credential/account/sender/template was accessed, no
   message was sent, and no Firebase API, IAM, billing, queue, or index changed.
 
+### R3/R5 named notification runtime bindings
+
+- Green implementation commit: `a8762376df685763aa8ce20ec8e734546ff31c60`.
+- Exported the exact deployable notification surface from the Functions entry:
+  private/internal `deliverReminderTask`, three authoritative Firestore
+  reconciliation triggers, the six-hour deferred refill scheduler, and one
+  intentionally public `twilioWhatsAppStatusCallback` whose authority remains
+  the exact official Twilio signature. The Cloud Tasks target name and worker
+  export are identical.
+- Only the worker and callback bind `TWILIO_AUTH_TOKEN`; triggers/scheduler bind
+  no provider secret. Provider parameters and the SecretParam are resolved only
+  inside the first real worker/callback invocation. Module import, Firebase
+  deployment discovery, endpoint metadata, and disabled execution read no
+  provider credential.
+- Added an exact `REMINDER_WHATSAPP_ENABLED` kill switch defaulting to `false`
+  and safe non-secret sentinel defaults. This prevents unrelated targeted
+  Secure AI deployments from requiring Twilio configuration. Disabled or
+  malformed configuration fails before owner lookup, destination use,
+  Firestore claim, SDK creation, or provider call; enabling still requires the
+  fixed owner/account/sender/recipient/callback/content configuration and the
+  securely bound auth secret.
+- Reconciliation reuses one owner-validating Firestore repository and creates
+  its Cloud Tasks client lazily on the first actual reconciliation invocation,
+  not during export discovery. Worker retry/rate/concurrency and all trigger
+  batch/retry bounds remain unchanged.
+- Production bundle inspection found all seven expected endpoints with exact
+  region, trigger type, ingress, timeout, and secret metadata. Nothing was
+  deployed and no runtime parameter, Secret Manager value, API, IAM binding,
+  billing state, queue, scheduler, trigger, provider, or message changed.
+
 ## Evidence
 
 | Check | Result |
@@ -508,14 +538,18 @@ slice changes one of those trust boundaries.
 | Functions regression after Twilio boundary | PASS; 24 files / 289 tests, with 57 emulator-only tests correctly skipped outside their explicit gates |
 | Twilio dependency audit | PASS; pinned `twilio@6.1.0`, `npm audit --omit=dev --audit-level=high` found 0 vulnerabilities |
 | Twilio boundary build/security/hygiene | PASS; Functions typecheck/bundle, valid index JSON, static security, 13-file changed/staged credential scans, `git diff --check`, and staged diff check |
+| Named notification binding focused tests | PASS; 47/47 lazy secret/parameter, kill-switch, fixed destination, endpoint metadata, task-worker, callback, and trigger tests |
+| Functions regression after named bindings | PASS; 25 files / 296 tests, with 57 emulator-only tests correctly skipped outside their explicit gates |
+| Compiled notification endpoint manifest | PASS; 7/7 named endpoints, exact trigger kinds/region/ingress/timeouts, and `TWILIO_AUTH_TOKEN` bound only to worker/callback |
+| Named binding build/security/hygiene | PASS; Functions typecheck/bundle, static security, six-file changed/staged credential scans, generated-bundle credential scan, `git diff --check`, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, private worker, authoritative trigger/refill, and Twilio adapter/callback factories green; secret/parameter binding, named exports, deployment, and installed delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, and Twilio adapter/signed callback bindings green; native reminder coordinator, cloud deployment, and installed/live delivery pending
 - R4 Daily and weekly reports: NOT STARTED
-- R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider and signed delivery-status path green locally/emulator; named binding, Sandbox join/configuration, cloud deployment, and real delivery pending
+- R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
 
@@ -536,11 +570,12 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with lazy, fail-closed runtime parameter/SecretParam binding and
-named private worker, reconciliation-trigger, refill-scheduler, and signed
-Twilio callback exports. Prove module loading never reads a secret at import
-time and malformed/missing non-secret configuration prevents provider calls.
-Do not read secret values, enable Cloud Tasks, billing, APIs, create provider
+Continue R3 with the native Desktop reminder coordinator over the existing
+server-owned `client_pending` jobs and least-privilege Tauri notification/focus
+bridge. It must reread current owner/TimeBlock/policy state before delivery,
+persist local duplicate protection, handle restart/offline/denied permission,
+and never mark execution complete. Keep cloud/provider configuration disabled;
+do not read secret values, enable Cloud Tasks, billing, APIs, create provider
 secrets, send messages, or deploy any resource. After exact human approval,
 separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
