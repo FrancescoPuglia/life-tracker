@@ -4,6 +4,7 @@ import {
   desiredReminderStorageState,
   isReconciliationActiveJobState,
   sameImmutableReminderJob,
+  type ReminderAuthorityExpectation,
   type ReminderReconciliationDelta,
   type ReminderReconciliationRepository,
   type ReminderTaskCancellation,
@@ -22,6 +23,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
     desiredJobs: readonly ReminderJob[],
     now: string,
     enqueueThrough: string,
+    authority: ReminderAuthorityExpectation,
   ): Promise<ReminderReconciliationDelta> {
     return this.withTransaction(() => {
       assertIdentity(uid, 'UID');
@@ -31,9 +33,16 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
       if (Date.parse(enqueueBoundary) < Date.parse(timestamp)) {
         throw new Error('Task enqueue horizon cannot be before reconciliation time.');
       }
+      assertAuthorityExpectation(authority);
       const desired = new Map<string, ReminderJob>();
       for (const job of desiredJobs) {
         assertDesiredJob(uid, timeBlockId, job);
+        if (
+          job.expectedTimeBlockVersion !== authority.expectedTimeBlockVersion
+          || job.expectedPolicyVersion !== authority.expectedPolicyVersion
+        ) {
+          throw new Error('Desired reminder job does not match the observed authority.');
+        }
         if (desired.has(job.id)) throw new Error('Desired reminder jobs contain a duplicate ID.');
         desired.set(job.id, clone(job));
       }
@@ -231,6 +240,18 @@ function assertDesiredJob(uid: string, timeBlockId: string, job: ReminderJob): v
   }
   assertIdentity(job.id, 'Reminder job ID');
   validInstant(job.scheduledFor, 'Reminder scheduled time');
+}
+
+function assertAuthorityExpectation(authority: ReminderAuthorityExpectation): void {
+  if (
+    authority.expectedTimeBlockVersion !== null
+    && !/^[a-f0-9]{64}$/.test(authority.expectedTimeBlockVersion)
+  ) {
+    throw new Error('Expected TimeBlock version is invalid.');
+  }
+  if (!/^[a-f0-9]{64}$/.test(authority.expectedPolicyVersion)) {
+    throw new Error('Expected reminder policy version is invalid.');
+  }
 }
 
 function assertIdentity(value: string, label: string): void {

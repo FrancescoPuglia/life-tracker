@@ -66,12 +66,11 @@ export class ReminderReconciliationService {
       input.persistedTimezone,
     );
     const policy = deriveReminderPolicy(preferences);
-    const desiredJobs = input.timeBlockValue
-      ? planReminderJobs(
-        createReminderTimeBlock(input.uid, input.timeBlockId, input.timeBlockValue),
-        policy,
-        now,
-      )
+    const timeBlock = input.timeBlockValue
+      ? createReminderTimeBlock(input.uid, input.timeBlockId, input.timeBlockValue)
+      : null;
+    const desiredJobs = timeBlock
+      ? planReminderJobs(timeBlock, policy, now)
       : Object.freeze([]) as readonly ReminderJob[];
     const delta = await this.repository.reconcileTimeBlock(
       input.uid,
@@ -79,6 +78,10 @@ export class ReminderReconciliationService {
       desiredJobs,
       now,
       enqueueThrough,
+      Object.freeze({
+        expectedTimeBlockVersion: timeBlock?.scheduleVersion ?? null,
+        expectedPolicyVersion: policy.version,
+      }),
     );
 
     let cancellationResolvedCount = 0;

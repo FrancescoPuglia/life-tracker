@@ -116,6 +116,31 @@ describe('ReminderReconciliationService', () => {
       });
   });
 
+  it('supersedes queued WhatsApp work when current preferences disable the channel', async () => {
+    const repository = new InMemoryReminderRepository();
+    const queue = new FakeReminderQueue();
+    const service = new ReminderReconciliationService(repository, queue);
+    await service.reconcile(input());
+    const originalTaskId = [...queue.tasks.keys()][0] as string;
+
+    const result = await service.reconcile(input({
+      notificationPreferencesValue: preferencesValue({ whatsappEnabled: false }),
+    }));
+
+    expect(result).toMatchObject({
+      desiredJobCount: 1,
+      clientPendingCount: 1,
+      enqueuedCount: 0,
+      supersededCount: 2,
+      cancellationResolvedCount: 1,
+    });
+    expect(queue.cancelCalls).toEqual([originalTaskId]);
+    expect(queue.tasks.size).toBe(0);
+    expect(repository.listJobsForTest(UID).filter((job) => (
+      job.channel === 'whatsapp' && job.state !== 'superseded'
+    ))).toEqual([]);
+  });
+
   it('defers work beyond the safe task horizon and schedules it on a later refill', async () => {
     const repository = new InMemoryReminderRepository();
     const queue = new FakeReminderQueue();
@@ -174,6 +199,7 @@ describe('ReminderReconciliationService', () => {
         movedJobs,
         NOW,
         enqueueThrough(NOW),
+        authorityForJobs(movedJobs),
       );
     };
 
@@ -275,7 +301,7 @@ function input(overrides: Partial<ReconcileReminderInput> = {}): ReconcileRemind
   };
 }
 
-function preferencesValue(): Record<string, unknown> {
+function preferencesValue(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     userId: UID,
     desktopEnabled: true,
@@ -284,6 +310,7 @@ function preferencesValue(): Record<string, unknown> {
     atStartEnabled: false,
     missedStart: { enabled: false, afterMinutes: 10 },
     maxRemindersPerBlock: 3,
+    ...overrides,
   };
 }
 
@@ -311,4 +338,13 @@ function desiredJobs(value: Record<string, unknown>) {
     deriveReminderPolicy(preferences),
     NOW,
   );
+}
+
+function authorityForJobs(jobs: ReturnType<typeof desiredJobs>) {
+  const job = jobs[0];
+  if (!job) throw new Error('Expected at least one reminder job.');
+  return {
+    expectedTimeBlockVersion: job.expectedTimeBlockVersion,
+    expectedPolicyVersion: job.expectedPolicyVersion,
+  };
 }

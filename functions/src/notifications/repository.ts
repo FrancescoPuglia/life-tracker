@@ -60,6 +60,71 @@ export interface ReminderReconciliationDelta {
   readonly deferredCount: number;
 }
 
+/**
+ * Exact authority observed while deriving a desired reminder set. The durable
+ * repository must compare it to the TimeBlock and policy inside the same
+ * transaction that changes jobs, otherwise an older trigger can overwrite a
+ * newer reconciliation after a move, delete, or preference change.
+ */
+export interface ReminderAuthorityExpectation {
+  readonly expectedTimeBlockVersion: string | null;
+  readonly expectedPolicyVersion: string;
+}
+
+export interface ReminderReconciliationContext {
+  readonly timeBlockValue: Readonly<Record<string, unknown>> | null;
+  readonly notificationPreferencesValue: unknown;
+  readonly persistedTimezone: unknown;
+}
+
+export interface ReminderReconciliationTarget {
+  readonly uid: string;
+  readonly timeBlockId: string;
+}
+
+export interface BoundedTimeBlockBatch {
+  readonly timeBlockIds: readonly string[];
+  readonly overflow: boolean;
+}
+
+export interface BoundedReminderTargetBatch {
+  readonly targets: readonly ReminderReconciliationTarget[];
+  readonly overflow: boolean;
+}
+
+/** Server-owned, owner-scoped reads used only by reconciliation workers. */
+export interface ReminderReconciliationSource {
+  loadReconciliationContext(
+    uid: string,
+    timeBlockId: string,
+  ): Promise<ReminderReconciliationContext>;
+
+  listFutureActiveTimeBlockIds(
+    uid: string,
+    now: string,
+    maximum: number,
+  ): Promise<BoundedTimeBlockBatch>;
+
+  /**
+   * Indexed bounded refill input. It includes horizon-deferred work and the
+   * recoverable pending/failed enqueue states left by a crash or queue outage.
+   */
+  listDueDeferredTargets(
+    now: string,
+    enqueueThrough: string,
+    maximum: number,
+  ): Promise<BoundedReminderTargetBatch>;
+}
+
+export class ReminderAuthorityChangedError extends Error {
+  readonly code = 'REMINDER_AUTHORITY_CHANGED';
+
+  constructor() {
+    super('Reminder authority changed during reconciliation.');
+    this.name = 'ReminderAuthorityChangedError';
+  }
+}
+
 export interface ReminderReconciliationRepository {
   /**
    * Atomically persists the exact desired set for one owner-scoped TimeBlock,
@@ -71,6 +136,7 @@ export interface ReminderReconciliationRepository {
     desiredJobs: readonly ReminderJob[],
     now: string,
     enqueueThrough: string,
+    authority: ReminderAuthorityExpectation,
   ): Promise<ReminderReconciliationDelta>;
 
   /**

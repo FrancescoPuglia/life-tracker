@@ -228,6 +228,7 @@ export * from './notifications/delivery-service';
 export * from './notifications/firestore-repository';
 export * from './notifications/in-memory-repository';
 export * from './notifications/reconciliation-service';
+export * from './notifications/reconciliation-trigger';
 export * from './notifications/repository';
 export * from './notifications/task-worker';
 export * from './runtime-config';

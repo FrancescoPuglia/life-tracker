@@ -239,7 +239,14 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       const { repository, jobs } = await setupReminderJobs(firestore, uid, preferences);
       const job = jobs.find((item) => item.kind === 'missed_start');
       if (!job) throw new Error('Expected a missed-start job.');
-      await repository.reconcileTimeBlock(uid, 'block-1', [job], RECONCILE_NOW, ENQUEUE_THROUGH);
+      await repository.reconcileTimeBlock(
+        uid,
+        'block-1',
+        [job],
+        RECONCILE_NOW,
+        ENQUEUE_THROUGH,
+        authorityForJobs([job]),
+      );
       await repository.markTaskScheduled(uid, job.id, job.id, RECONCILE_NOW);
       await firestore.doc(`users/${uid}/sessions/session-1`).set({
         id: 'session-1',
@@ -330,6 +337,7 @@ async function setupScheduledJob(firestore: Firestore, uid: string) {
     [job],
     RECONCILE_NOW,
     ENQUEUE_THROUGH,
+    authorityForJobs([job]),
   );
   await prepared.repository.markTaskScheduled(uid, job.id, job.id, RECONCILE_NOW);
   return { ...prepared, job };
@@ -391,6 +399,15 @@ function preferenceValue(uid: string, overrides: Record<string, unknown> = {}) {
 
 function deliveryInput(uid: string, job: ReminderJob, now = DELIVERY_NOW) {
   return { uid, jobId: job.id, taskId: job.id, now };
+}
+
+function authorityForJobs(jobs: readonly ReminderJob[]) {
+  const job = jobs[0];
+  if (!job) throw new Error('Expected at least one reminder job.');
+  return {
+    expectedTimeBlockVersion: job.expectedTimeBlockVersion,
+    expectedPolicyVersion: job.expectedPolicyVersion,
+  };
 }
 
 class StaticMessagingProvider implements MessagingProvider {

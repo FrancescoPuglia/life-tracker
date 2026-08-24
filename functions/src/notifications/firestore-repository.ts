@@ -36,11 +36,17 @@ import {
 } from './delivery';
 import {
   REMINDER_STORAGE_SCHEMA_VERSION,
+  ReminderAuthorityChangedError,
   desiredReminderStorageState,
   isReconciliationActiveJobState,
   sameImmutableReminderJob,
+  type BoundedReminderTargetBatch,
+  type BoundedTimeBlockBatch,
+  type ReminderAuthorityExpectation,
   type ReminderReconciliationDelta,
   type ReminderReconciliationRepository,
+  type ReminderReconciliationContext,
+  type ReminderReconciliationSource,
   type ReminderTaskCancellation,
   type ReminderTaskCancellationState,
   type StoredReminderJob,
@@ -65,8 +71,119 @@ interface ReminderManifest {
  */
 export class FirestoreReminderRepository implements
   ReminderReconciliationRepository,
-  ReminderDeliveryRepository {
+  ReminderDeliveryRepository,
+  ReminderReconciliationSource {
   constructor(private readonly firestore: Firestore) {}
+
+  async loadReconciliationContext(
+    uid: string,
+    timeBlockId: string,
+  ): Promise<ReminderReconciliationContext> {
+    assertIdentity(uid, 'UID');
+    assertIdentity(timeBlockId, 'TimeBlock ID');
+    const snapshots = await this.firestore.getAll(
+      this.firestore.doc(`users/${uid}/timeBlocks/${timeBlockId}`),
+      this.firestore.doc(`users/${uid}`),
+      this.firestore.doc(`users/${uid}/notificationPreferences/default`),
+    );
+    const [timeBlockSnapshot, userSnapshot, preferenceSnapshot] = snapshots;
+    if (!timeBlockSnapshot || !userSnapshot || !preferenceSnapshot) {
+      throw new Error('Reminder reconciliation source read is incomplete.');
+    }
+    const timeBlockValue = timeBlockSnapshot.exists
+      ? timeBlockSnapshot.data() ?? {}
+      : null;
+    if (timeBlockValue) {
+      assertScopedDocumentOwner(uid, timeBlockValue, 'TimeBlock');
+    }
+    const notificationPreferencesValue = preferenceSnapshot.exists
+      ? preferenceSnapshot.data() ?? {}
+      : {};
+    if (preferenceSnapshot.exists) {
+      assertScopedDocumentOwner(uid, notificationPreferencesValue, 'Notification preferences');
+    }
+    return Object.freeze({
+      timeBlockValue,
+      notificationPreferencesValue,
+      persistedTimezone: persistedUserTimezone(
+        uid,
+        userSnapshot.exists ? userSnapshot.data() ?? {} : null,
+      ),
+    });
+  }
+
+  async listFutureActiveTimeBlockIds(
+    uid: string,
+    now: string,
+    maximum: number,
+  ): Promise<BoundedTimeBlockBatch> {
+    assertIdentity(uid, 'UID');
+    const timestamp = normalizeInstant(now, 'Future TimeBlock query time');
+    assertBatchMaximum(maximum);
+    const snapshot = await this.firestore.collection(`users/${uid}/timeBlocks`)
+      .where('status', 'in', ['planned', 'in_progress'])
+      .where('endTime', '>', Timestamp.fromDate(new Date(timestamp)))
+      .orderBy('endTime', 'asc')
+      .limit(maximum + 1)
+      .get();
+    for (const document of snapshot.docs) {
+      assertIdentity(document.id, 'TimeBlock ID');
+      assertScopedDocumentOwner(uid, document.data(), 'TimeBlock');
+    }
+    return Object.freeze({
+      timeBlockIds: Object.freeze(snapshot.docs.slice(0, maximum).map((document) => document.id)),
+      overflow: snapshot.size > maximum,
+    });
+  }
+
+  async listDueDeferredTargets(
+    now: string,
+    enqueueThrough: string,
+    maximum: number,
+  ): Promise<BoundedReminderTargetBatch> {
+    const timestamp = normalizeInstant(now, 'Deferred reminder query time');
+    const enqueueBoundary = normalizeInstant(enqueueThrough, 'Deferred reminder enqueue horizon');
+    if (Date.parse(enqueueBoundary) < Date.parse(timestamp)) {
+      throw new Error('Deferred reminder enqueue horizon cannot be before query time.');
+    }
+    assertBatchMaximum(maximum);
+    const snapshot = await this.firestore.collectionGroup('reminderJobs')
+      .where('state', 'in', ['deferred_enqueue', 'pending_enqueue', 'schedule_failed'])
+      .where('scheduledFor', '<=', Timestamp.fromDate(new Date(enqueueBoundary)))
+      .orderBy('scheduledFor', 'asc')
+      .limit(maximum + 1)
+      .get();
+    const targets = new Map<string, Readonly<{ uid: string; timeBlockId: string }>>();
+    for (const document of snapshot.docs.slice(0, maximum)) {
+      const path = document.ref.path.split('/');
+      if (
+        path.length !== 4
+        || path[0] !== 'users'
+        || path[2] !== 'reminderJobs'
+        || path[3] !== document.id
+      ) {
+        throw new Error('Deferred reminder path is invalid.');
+      }
+      const uid = path[1];
+      if (!uid) throw new Error('Deferred reminder owner path is invalid.');
+      assertIdentity(uid, 'UID');
+      const job = decodeStoredJob(uid, document);
+      if (
+        !['deferred_enqueue', 'pending_enqueue', 'schedule_failed'].includes(job.state)
+        || job.channel !== 'whatsapp'
+      ) {
+        throw new Error('Deferred reminder state or channel is invalid.');
+      }
+      targets.set(`${uid}\u0000${job.timeBlockId}`, Object.freeze({
+        uid,
+        timeBlockId: job.timeBlockId,
+      }));
+    }
+    return Object.freeze({
+      targets: Object.freeze([...targets.values()]),
+      overflow: snapshot.size > maximum,
+    });
+  }
 
   async reconcileTimeBlock(
     uid: string,
@@ -74,6 +191,7 @@ export class FirestoreReminderRepository implements
     desiredJobs: readonly ReminderJob[],
     now: string,
     enqueueThrough: string,
+    authority: ReminderAuthorityExpectation,
   ): Promise<ReminderReconciliationDelta> {
     assertIdentity(uid, 'UID');
     assertIdentity(timeBlockId, 'TimeBlock ID');
@@ -85,16 +203,41 @@ export class FirestoreReminderRepository implements
     if (desiredJobs.length > MAX_ACTIVE_REMINDER_JOBS_PER_BLOCK) {
       throw new Error('Reminder reconciliation exceeds the per-block job limit.');
     }
+    assertAuthorityExpectation(authority);
     const desired = new Map<string, ReminderJob>();
     for (const job of desiredJobs) {
       assertDesiredJob(uid, timeBlockId, job);
+      if (
+        job.expectedTimeBlockVersion !== authority.expectedTimeBlockVersion
+        || job.expectedPolicyVersion !== authority.expectedPolicyVersion
+      ) {
+        throw new Error('Desired reminder job does not match the observed authority.');
+      }
       if (desired.has(job.id)) throw new Error('Desired reminder jobs contain a duplicate ID.');
       desired.set(job.id, clone(job));
     }
 
     return this.firestore.runTransaction(async (transaction) => {
       const manifestRef = this.manifestRef(uid, timeBlockId);
-      const manifestSnapshot = await transaction.get(manifestRef);
+      const authoritySnapshots = await transaction.getAll(
+        manifestRef,
+        this.firestore.doc(`users/${uid}/timeBlocks/${timeBlockId}`),
+        this.firestore.doc(`users/${uid}`),
+        this.firestore.doc(`users/${uid}/notificationPreferences/default`),
+      );
+      const [manifestSnapshot, timeBlockSnapshot, userSnapshot, preferenceSnapshot]
+        = authoritySnapshots;
+      if (!manifestSnapshot || !timeBlockSnapshot || !userSnapshot || !preferenceSnapshot) {
+        throw new Error('Reminder reconciliation authority read is incomplete.');
+      }
+      assertCurrentReconciliationAuthority(
+        uid,
+        timeBlockId,
+        timeBlockSnapshot,
+        userSnapshot,
+        preferenceSnapshot,
+        authority,
+      );
       const previousIds = manifestSnapshot.exists
         ? decodeManifest(uid, timeBlockId, manifestSnapshot.data() ?? {}).activeJobIds
         : [];
@@ -1164,6 +1307,54 @@ function assertDesiredJob(uid: string, timeBlockId: string, job: ReminderJob): v
   assertHash(job.expectedPolicyVersion, 'Reminder policy version');
   assertHash(job.idempotencyKey, 'Reminder idempotency key');
   normalizeInstant(job.scheduledFor, 'Reminder scheduled time');
+}
+
+function assertCurrentReconciliationAuthority(
+  uid: string,
+  timeBlockId: string,
+  timeBlockSnapshot: DocumentSnapshot,
+  userSnapshot: DocumentSnapshot,
+  preferenceSnapshot: DocumentSnapshot,
+  expected: ReminderAuthorityExpectation,
+): void {
+  const rawTimeBlock = timeBlockSnapshot.exists ? timeBlockSnapshot.data() ?? {} : null;
+  const currentTimeBlockVersion = rawTimeBlock
+    ? createReminderTimeBlock(uid, timeBlockId, rawTimeBlock).scheduleVersion
+    : null;
+  const rawPreferences = preferenceSnapshot.exists
+    ? preferenceSnapshot.data() ?? {}
+    : {};
+  if (preferenceSnapshot.exists) {
+    assertScopedDocumentOwner(uid, rawPreferences, 'Notification preferences');
+  }
+  const preferences = normalizeNotificationPreferences(
+    uid,
+    rawPreferences,
+    persistedUserTimezone(uid, userSnapshot.exists ? userSnapshot.data() ?? {} : null),
+  );
+  const currentPolicyVersion = deriveReminderPolicy(preferences).version;
+  if (
+    currentTimeBlockVersion !== expected.expectedTimeBlockVersion
+    || currentPolicyVersion !== expected.expectedPolicyVersion
+  ) {
+    throw new ReminderAuthorityChangedError();
+  }
+}
+
+function assertAuthorityExpectation(authority: ReminderAuthorityExpectation): void {
+  if (
+    authority.expectedTimeBlockVersion !== null
+    && !/^[a-f0-9]{64}$/.test(authority.expectedTimeBlockVersion)
+  ) {
+    throw new Error('Expected TimeBlock version is invalid.');
+  }
+  assertHash(authority.expectedPolicyVersion, 'Expected reminder policy version');
+}
+
+function assertBatchMaximum(value: number): void {
+  if (!Number.isInteger(value) || value < 1 || value > 500) {
+    throw new Error('Reminder reconciliation batch limit is invalid.');
+  }
 }
 
 function assertJobIdentity(uid: string, jobId: string, taskId: string): void {
