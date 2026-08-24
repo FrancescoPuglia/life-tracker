@@ -46,6 +46,7 @@ const WeeklyExecution = lazy(() => import('@/components/WeeklyExecution'));
 const VoiceSettings = lazy(() => import('@/components/VoiceSettings'));
 const WeeklyPlanningTab = lazy(() => import('@/components/WeeklyPlanning/WeeklyPlanningTab'));
 const GoalArchitectTab = lazy(() => import('@/components/GoalArchitect/GoalArchitectTab'));
+const DesktopSettings = lazy(() => import('@/components/settings/DesktopSettings'));
 
 // Shell components (UX overhaul)
 import SidebarNavigation, { type SidebarNavId } from '@/components/shell/SidebarNavigation';
@@ -56,7 +57,7 @@ import TodayCommandCenter from '@/components/shell/TodayCommandCenter';
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'performance' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice';
+type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'performance' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice' | 'settings';
 
 interface MainAppProps {
   buildId: string;
@@ -463,6 +464,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'events' && '📆 Calendario Strategico'}
                   {activeTab === 'badges' && '🏆 Achievements'}
                   {activeTab === 'voice' && '🎙️ Voice System'}
+                  {activeTab === 'settings' && '⚙️ Settings'}
                   <div className="achievement-badge ml-auto">ACTIVE</div>
                 </h2>
               </div>
@@ -670,6 +672,12 @@ export default function MainApp({ buildId }: MainAppProps) {
 
                 {activeTab === 'voice' && (
                   <VoiceSettings />
+                )}
+
+                {activeTab === 'settings' && (
+                  <Suspense fallback={null}>
+                    <DesktopSettings />
+                  </Suspense>
                 )}
               </div>
             </div>

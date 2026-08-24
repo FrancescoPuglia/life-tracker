@@ -32,7 +32,8 @@ export type SidebarNavId =
   | 'badges'
   | 'voice'
   | 'smart_scheduler'
-  | 'adaptation';
+  | 'adaptation'
+  | 'settings';
 
 interface NavItem {
   id: SidebarNavId;
@@ -86,6 +87,7 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
       { id: 'vision-board', label: 'Vision Board', icon: '✧', subtitle: 'Long-term vision' },
       { id: 'badges', label: 'Achievements', icon: '🏆', subtitle: 'Earned milestones' },
       { id: 'voice', label: 'Voice System', icon: '🎙️', subtitle: 'Language & voice' },
+      { id: 'settings', label: 'Settings', icon: '⚙️', subtitle: 'Desktop and providers' },
     ],
   },
 ];

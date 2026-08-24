@@ -12,7 +12,7 @@ import { DomainError } from './domain/errors';
 import { createLifeTrackerDomain } from './domain/factory';
 import { FirestoreRepository } from './domain/firestore-repository';
 import { FirebaseTokenVerifier } from './http/auth';
-import { parseAllowedOrigins } from './http/cors';
+import { LIFE_TRACKER_DESKTOP_ORIGIN, parseAllowedOrigins } from './http/cors';
 import { createApiHandler } from './http/handler';
 import { FirestoreRateLimiter } from './http/rate-limiter';
 import type { ApiApplication, HttpRequestLike, HttpResponseLike } from './http/types';
@@ -42,7 +42,7 @@ const OPENAI_BASE_URL = defineString('OPENAI_BASE_URL', {
   description: 'Backend-only official OpenAI base URL. Loopback is accepted only by the Functions emulator.',
 });
 const AI_ALLOWED_ORIGINS = defineString('AI_ALLOWED_ORIGINS', {
-  default: 'https://francescopuglia.github.io,http://localhost:3000,http://127.0.0.1:3000',
+  default: `https://francescopuglia.github.io,${LIFE_TRACKER_DESKTOP_ORIGIN},http://localhost:3000,http://127.0.0.1:3000`,
   description: 'Comma-separated exact browser origins allowed to call the authenticated API.',
 });
 

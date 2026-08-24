@@ -19,6 +19,7 @@ const allowedPermissions = new Set([
   'notification:allow-is-permission-granted',
   'notification:allow-notify',
   'notification:allow-request-permission',
+  'notification:allow-register-listener',
   'autostart:allow-disable',
   'autostart:allow-enable',
   'autostart:allow-is-enabled',

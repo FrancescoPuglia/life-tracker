@@ -5,7 +5,11 @@ const BASE: RuntimeConfigInput = {
   model: 'gpt-5.6-sol',
   reasoningEffort: 'medium',
   providerBaseUrl: 'https://api.openai.com/v1',
-  allowedOrigins: new Set(['https://life-tracker-staging.web.app', 'http://127.0.0.1:3300']),
+  allowedOrigins: new Set([
+    'https://life-tracker-staging.web.app',
+    'https://tauri.localhost',
+    'http://127.0.0.1:3300',
+  ]),
   promptVersion: 'life-tracker-secure-v1',
   schemaVersion: 'life-plan-v1',
   timeoutMs: 30_000,
@@ -24,7 +28,7 @@ describe('runtime configuration attestation', () => {
 
     expect(first).toEqual(second);
     expect(first).toMatchObject({
-      configId: 'sha256:16636fe0025aa4db11ce7d875dfc341e3fc2d69f817945321c7812aff82393a9',
+      configId: 'sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f',
       model: 'gpt-5.6-sol',
       reasoningEffort: 'medium',
       promptVersion: 'life-tracker-secure-v1',

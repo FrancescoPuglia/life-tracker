@@ -11,6 +11,7 @@ import type {
 
 const VALID_TOKEN = 'opaque-test-token-segment-safe-length';
 const ALLOWED_ORIGIN = 'https://francescopuglia.github.io';
+const DESKTOP_ORIGIN = 'https://tauri.localhost';
 const FIXED_NOW = new Date('2026-08-16T12:00:00.000Z');
 
 class ResponseRecorder implements HttpResponseLike {
@@ -88,6 +89,30 @@ describe('Life Tracker HTTP API boundary', () => {
     expect(response.statusCode).toBe(204);
     expect(response.headers.get('access-control-allow-origin')).toBe(ALLOWED_ORIGIN);
     expect(tokenVerifier.verifyBearerToken).not.toHaveBeenCalled();
+  });
+
+  it('allows only the exact installed Desktop webview origin', async () => {
+    const allowed = await execute({
+      method: 'OPTIONS',
+      path: '/v1/chat',
+      headers: { origin: DESKTOP_ORIGIN },
+    });
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers.get('access-control-allow-origin')).toBe(DESKTOP_ORIGIN);
+
+    for (const origin of [
+      'http://tauri.localhost',
+      'https://evil.tauri.localhost',
+      'https://tauri.localhost:443',
+    ]) {
+      const denied = await execute({
+        method: 'OPTIONS',
+        path: '/v1/chat',
+        headers: { origin },
+      });
+      expect(denied.statusCode).toBe(403);
+      expect(denied.headers.get('access-control-allow-origin')).toBeUndefined();
+    }
   });
 
   it('rejects an untrusted browser origin before authentication', async () => {
@@ -268,7 +293,7 @@ describe('Life Tracker HTTP API boundary', () => {
       application,
       tokenVerifier,
       rateLimiter,
-      allowedOrigins: new Set([ALLOWED_ORIGIN, 'http://localhost:3000']),
+      allowedOrigins: new Set([ALLOWED_ORIGIN, DESKTOP_ORIGIN, 'http://localhost:3000']),
       releaseId: 'sha256:test-release',
       runtimeConfig: {
         configId: 'sha256:test-runtime',

@@ -2,6 +2,7 @@ import { DomainError } from '../domain/errors';
 import type { HeaderValue, HttpResponseLike } from './types';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+export const LIFE_TRACKER_DESKTOP_ORIGIN = 'https://tauri.localhost';
 
 export function parseAllowedOrigins(configured: string): ReadonlySet<string> {
   const origins = new Set<string>();
