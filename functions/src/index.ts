@@ -231,4 +231,6 @@ export * from './notifications/reconciliation-service';
 export * from './notifications/reconciliation-trigger';
 export * from './notifications/repository';
 export * from './notifications/task-worker';
+export * from './notifications/twilio-provider';
+export * from './notifications/twilio-status-callback';
 export * from './runtime-config';

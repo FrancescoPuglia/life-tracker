@@ -155,6 +155,157 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       });
     }, 30_000);
 
+    it('persists an opaque callback route before send and closes the fast-callback race', async () => {
+      const uid = uniqueUid('fast-callback');
+      const { job, repository } = await setupScheduledJob(firestore, uid);
+      const prepared = await repository.prepareDelivery(deliveryInput(uid, job));
+      if (prepared.action !== 'send') throw new Error('Expected a claimed reminder delivery.');
+      const attemptId = prepared.claim.attemptId;
+      const providerMessageId = `SM${'1'.repeat(32)}`;
+      const route = await firestore.doc(
+        `reminderProviderCallbackRoutes/${attemptId}`,
+      ).get();
+
+      expect(route.data()).toMatchObject({
+        schemaVersion: 'reminder-provider-callback-route-v1',
+        id: attemptId,
+        uid,
+        jobId: job.id,
+        channel: 'whatsapp',
+        createdAt: expect.any(Timestamp),
+        purgeAt: expect.any(Timestamp),
+      });
+      expect(JSON.stringify(route.data())).not.toContain('Deep work');
+      expect(JSON.stringify(route.data())).not.toContain('hostile note');
+
+      const callback = {
+        attemptId,
+        jobId: job.id,
+        provider: 'twilio_whatsapp' as const,
+        providerMessageId,
+        status: 'delivered' as const,
+        providerFailureCode: null,
+        observedAt: '2026-08-24T09:45:00.500Z',
+      };
+      await expect(repository.recordProviderDeliveryStatus(callback)).resolves.toBe('recorded');
+      await expect(repository.recordProviderDeliveryStatus(callback)).resolves.toBe('duplicate');
+      await repository.finalizeDelivery({
+        uid,
+        jobId: job.id,
+        attemptId,
+        now: '2026-08-24T09:45:01.000Z',
+        result: { outcome: 'accepted', providerMessageId },
+      });
+
+      const [storedJob, status] = await Promise.all([
+        firestore.doc(`users/${uid}/reminderJobs/${job.id}`).get(),
+        firestore.doc(`users/${uid}/providerDeliveryStatuses/${attemptId}`).get(),
+      ]);
+      expect(storedJob.data()).toMatchObject({
+        state: 'delivered',
+        deliveryOutcome: 'accepted',
+      });
+      expect(status.data()).toMatchObject({
+        schemaVersion: 'provider-delivery-status-v1',
+        id: attemptId,
+        uid,
+        jobId: job.id,
+        attemptId,
+        channel: 'whatsapp',
+        provider: 'twilio_whatsapp',
+        providerMessageId,
+        status: 'delivered',
+        providerFailureCode: null,
+        firstObservedAt: expect.any(Timestamp),
+        latestObservedAt: expect.any(Timestamp),
+        purgeAt: expect.any(Timestamp),
+      });
+    }, 30_000);
+
+    it('records only monotonic provider status and never regresses a delivered job', async () => {
+      const uid = uniqueUid('callback-order');
+      const { job, repository } = await setupScheduledJob(firestore, uid);
+      const prepared = await repository.prepareDelivery(deliveryInput(uid, job));
+      if (prepared.action !== 'send') throw new Error('Expected a claimed reminder delivery.');
+      const providerMessageId = `SM${'2'.repeat(32)}`;
+      await repository.finalizeDelivery({
+        uid,
+        jobId: job.id,
+        attemptId: prepared.claim.attemptId,
+        now: '2026-08-24T09:45:01.000Z',
+        result: { outcome: 'accepted', providerMessageId },
+      });
+      const callback = (status: 'queued' | 'sent' | 'delivered' | 'read' | 'failed', second: number) => ({
+        attemptId: prepared.claim.attemptId,
+        jobId: job.id,
+        provider: 'twilio_whatsapp' as const,
+        providerMessageId,
+        status,
+        providerFailureCode: status === 'failed' ? '63016' : null,
+        observedAt: `2026-08-24T09:45:0${second}.000Z`,
+      });
+
+      await expect(repository.recordProviderDeliveryStatus(callback('sent', 2)))
+        .resolves.toBe('recorded');
+      await expect(repository.recordProviderDeliveryStatus(callback('queued', 3)))
+        .resolves.toBe('out_of_order');
+      await expect(repository.recordProviderDeliveryStatus(callback('delivered', 4)))
+        .resolves.toBe('recorded');
+      await expect(repository.recordProviderDeliveryStatus(callback('read', 5)))
+        .resolves.toBe('recorded');
+      await expect(repository.recordProviderDeliveryStatus(callback('failed', 6)))
+        .resolves.toBe('out_of_order');
+
+      expect((await firestore.doc(
+        `users/${uid}/providerDeliveryStatuses/${prepared.claim.attemptId}`,
+      ).get()).data()).toMatchObject({ status: 'read', providerFailureCode: null });
+      expect((await repository.getStoredJob(uid, job.id))).toMatchObject({
+        state: 'delivered',
+        deliveryOutcome: 'accepted',
+      });
+    }, 30_000);
+
+    it('binds callback identity to the claimed job and exact provider message', async () => {
+      const uid = uniqueUid('callback-identity');
+      const { job, repository } = await setupScheduledJob(firestore, uid);
+      const prepared = await repository.prepareDelivery(deliveryInput(uid, job));
+      if (prepared.action !== 'send') throw new Error('Expected a claimed reminder delivery.');
+      const providerMessageId = `SM${'3'.repeat(32)}`;
+      const callback = {
+        attemptId: prepared.claim.attemptId,
+        jobId: job.id,
+        provider: 'twilio_whatsapp' as const,
+        providerMessageId,
+        status: 'queued' as const,
+        providerFailureCode: null,
+        observedAt: '2026-08-24T09:45:00.500Z',
+      };
+
+      await expect(repository.recordProviderDeliveryStatus({
+        ...callback,
+        attemptId: 'f'.repeat(64),
+      })).resolves.toBe('unknown');
+      await expect(repository.recordProviderDeliveryStatus({
+        ...callback,
+        jobId: 'e'.repeat(64),
+      })).rejects.toThrow('route identity');
+      await expect(repository.recordProviderDeliveryStatus(callback)).resolves.toBe('recorded');
+      await expect(repository.finalizeDelivery({
+        uid,
+        jobId: job.id,
+        attemptId: prepared.claim.attemptId,
+        now: '2026-08-24T09:45:01.000Z',
+        result: { outcome: 'accepted', providerMessageId: `SM${'4'.repeat(32)}` },
+      })).rejects.toThrow('does not match');
+      await expect(repository.finalizeDelivery({
+        uid,
+        jobId: job.id,
+        attemptId: prepared.claim.attemptId,
+        now: '2026-08-24T09:45:01.000Z',
+        result: { outcome: 'accepted', providerMessageId },
+      })).resolves.toBeUndefined();
+    }, 30_000);
+
     it('serializes duplicate workers so only one provider call can occur', async () => {
       const uid = uniqueUid('concurrent');
       const { job, repository } = await setupScheduledJob(firestore, uid);

@@ -23,9 +23,14 @@ import {
   REMINDER_DELIVERY_COUNTER_SCHEMA_VERSION,
   type FinalizeReminderDeliveryInput,
   type MessagingRejectionReason,
+  type MessagingProviderId,
   type MessagingUncertaintyReason,
   type NotificationIdempotencyRecord,
   type PrepareReminderDeliveryInput,
+  type ProviderDeliveryStatus,
+  type ProviderDeliveryStatusRecordInput,
+  type ProviderDeliveryStatusRecordResult,
+  type ProviderDeliveryStatusRepository,
   type ReminderDeliveryAttemptRecord,
   type ReminderDeliveryCounter,
   type ReminderDeliveryFinalization,
@@ -52,8 +57,11 @@ import {
   type StoredReminderJob,
   type StoredReminderJobState,
 } from './repository';
-
 export const REMINDER_MANIFEST_SCHEMA_VERSION = 'reminder-manifest-v1' as const;
+export const REMINDER_PROVIDER_CALLBACK_ROUTE_SCHEMA_VERSION =
+  'reminder-provider-callback-route-v1' as const;
+export const PROVIDER_DELIVERY_STATUS_SCHEMA_VERSION =
+  'provider-delivery-status-v1' as const;
 export const MAX_ACTIVE_REMINDER_JOBS_PER_BLOCK = 16;
 const REMINDER_RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 export const DELIVERY_CLAIM_RECOVERY_DELAY_MS = 5 * 60 * 1_000;
@@ -65,6 +73,30 @@ interface ReminderManifest {
   readonly activeJobIds: readonly string[];
 }
 
+interface ReminderProviderCallbackRoute {
+  readonly schemaVersion: typeof REMINDER_PROVIDER_CALLBACK_ROUTE_SCHEMA_VERSION;
+  readonly id: string;
+  readonly uid: string;
+  readonly jobId: string;
+  readonly channel: 'whatsapp';
+  readonly createdAt: string;
+}
+
+interface ProviderDeliveryStatusRecord {
+  readonly schemaVersion: typeof PROVIDER_DELIVERY_STATUS_SCHEMA_VERSION;
+  readonly id: string;
+  readonly uid: string;
+  readonly jobId: string;
+  readonly attemptId: string;
+  readonly channel: 'whatsapp';
+  readonly provider: MessagingProviderId;
+  readonly providerMessageId: string;
+  readonly status: ProviderDeliveryStatus;
+  readonly providerFailureCode: string | null;
+  readonly firstObservedAt: string;
+  readonly latestObservedAt: string;
+}
+
 /**
  * Owner-scoped Firestore implementation. One bounded manifest per TimeBlock
  * avoids querying or polling historical jobs during reconciliation.
@@ -72,7 +104,8 @@ interface ReminderManifest {
 export class FirestoreReminderRepository implements
   ReminderReconciliationRepository,
   ReminderDeliveryRepository,
-  ReminderReconciliationSource {
+  ReminderReconciliationSource,
+  ProviderDeliveryStatusRepository {
   constructor(private readonly firestore: Firestore) {}
 
   async loadReconciliationContext(
@@ -454,9 +487,10 @@ export class FirestoreReminderRepository implements
         const claimSnapshots = await transaction.getAll(
           this.deliveryAttemptRef(input.uid, attemptId),
           this.notificationIdempotencyRef(input.uid, current.idempotencyKey),
+          this.providerCallbackRouteRef(attemptId),
         );
-        const [attemptSnapshot, idempotencySnapshot] = claimSnapshots;
-        if (!attemptSnapshot || !idempotencySnapshot) {
+        const [attemptSnapshot, idempotencySnapshot, callbackRouteSnapshot] = claimSnapshots;
+        if (!attemptSnapshot || !idempotencySnapshot || !callbackRouteSnapshot) {
           throw new Error('Reminder delivery claim read is incomplete.');
         }
         const attempt = decodeRequiredDeliveryAttempt(
@@ -470,6 +504,12 @@ export class FirestoreReminderRepository implements
           current,
           attemptId,
           idempotencySnapshot,
+        );
+        decodeRequiredProviderCallbackRoute(
+          input.uid,
+          current,
+          attemptId,
+          callbackRouteSnapshot,
         );
         assertActiveClaimCoherence(current, attempt, idempotency);
         const recoverAt = new Date(
@@ -500,6 +540,7 @@ export class FirestoreReminderRepository implements
         this.notificationIdempotencyRef(input.uid, current.idempotencyKey),
         this.deliveryAttemptRef(input.uid, attemptId),
         this.deliveryCounterRef(input.uid, counterId),
+        this.providerCallbackRouteRef(attemptId),
       );
       const sessionDocuments = current.kind === 'missed_start'
         ? (await transaction.get(
@@ -509,12 +550,14 @@ export class FirestoreReminderRepository implements
         )).docs
         : [];
       const [timeBlockSnapshot, userSnapshot, preferenceSnapshot,
-        idempotencySnapshot, attemptSnapshot, counterSnapshot] = authoritySnapshots;
+        idempotencySnapshot, attemptSnapshot, counterSnapshot,
+        callbackRouteSnapshot] = authoritySnapshots;
       if (!timeBlockSnapshot || !userSnapshot || !preferenceSnapshot
-        || !idempotencySnapshot || !attemptSnapshot || !counterSnapshot) {
+        || !idempotencySnapshot || !attemptSnapshot || !counterSnapshot
+        || !callbackRouteSnapshot) {
         throw new Error('Reminder delivery authority read is incomplete.');
       }
-      if (idempotencySnapshot.exists || attemptSnapshot.exists) {
+      if (idempotencySnapshot.exists || attemptSnapshot.exists || callbackRouteSnapshot.exists) {
         throw new Error('Reminder delivery claim state is inconsistent.');
       }
 
@@ -620,6 +663,10 @@ export class FirestoreReminderRepository implements
         this.deliveryCounterRef(input.uid, counterId),
         encodeDeliveryCounter(nextCounter, current.scheduledFor, timestamp),
       );
+      transaction.set(
+        this.providerCallbackRouteRef(attemptId),
+        encodeProviderCallbackRoute(input.uid, current, attemptId, timestamp),
+      );
       return Object.freeze({
         action: 'send',
         claim: Object.freeze({
@@ -654,16 +701,26 @@ export class FirestoreReminderRepository implements
         throw new Error('Reminder delivery attempt does not match the claimed job.');
       }
       const counterId = deliveryCounterId(current);
-      const [attemptSnapshot, idempotencySnapshot, receiptSnapshot, counterSnapshot]
+      const [attemptSnapshot, idempotencySnapshot, receiptSnapshot, counterSnapshot,
+        callbackRouteSnapshot, providerStatusSnapshot]
         = await transaction.getAll(
           this.deliveryAttemptRef(input.uid, input.attemptId),
           this.notificationIdempotencyRef(input.uid, current.idempotencyKey),
           this.deliveryReceiptRef(input.uid, input.attemptId),
           this.deliveryCounterRef(input.uid, counterId),
+          this.providerCallbackRouteRef(input.attemptId),
+          this.providerDeliveryStatusRef(input.uid, input.attemptId),
         );
-      if (!attemptSnapshot || !idempotencySnapshot || !receiptSnapshot || !counterSnapshot) {
+      if (!attemptSnapshot || !idempotencySnapshot || !receiptSnapshot || !counterSnapshot
+        || !callbackRouteSnapshot || !providerStatusSnapshot) {
         throw new Error('Reminder delivery finalization read is incomplete.');
       }
+      decodeRequiredProviderCallbackRoute(
+        input.uid,
+        current,
+        input.attemptId,
+        callbackRouteSnapshot,
+      );
       const attempt = decodeRequiredDeliveryAttempt(
         input.uid,
         current,
@@ -682,6 +739,15 @@ export class FirestoreReminderRepository implements
         counterId,
         counterSnapshot,
       );
+      const providerStatus = providerStatusSnapshot.exists
+        ? decodeProviderDeliveryStatus(
+          input.uid,
+          current,
+          input.attemptId,
+          providerStatusSnapshot,
+        )
+        : null;
+      assertProviderStatusMatchesFinalization(providerStatus, result);
 
       if (receiptSnapshot.exists) {
         const receipt = decodeDeliveryReceipt(
@@ -737,7 +803,7 @@ export class FirestoreReminderRepository implements
       });
       writeJob(transaction, jobRef, Object.freeze({
         ...current,
-        state: deliveryJobState(result),
+        state: deliveryJobState(result, providerStatus),
         updatedAt: timestamp,
         deliveryOutcome: result.outcome,
         deliverySuppressionReason: null,
@@ -768,6 +834,104 @@ export class FirestoreReminderRepository implements
     });
   }
 
+  async recordProviderDeliveryStatus(
+    input: ProviderDeliveryStatusRecordInput,
+  ): Promise<ProviderDeliveryStatusRecordResult> {
+    assertHash(input.attemptId, 'Provider callback attempt ID');
+    assertHash(input.jobId, 'Provider callback job ID');
+    const provider = messagingProviderIdValue(input.provider);
+    const providerMessageId = providerMessageIdValue(input.providerMessageId);
+    const status = providerDeliveryStatusValue(input.status);
+    const providerFailureCode = providerFailureCodeValue(input.providerFailureCode);
+    const observedAt = normalizeInstant(input.observedAt, 'Provider callback observation time');
+
+    return this.firestore.runTransaction(async (transaction) => {
+      const callbackRouteRef = this.providerCallbackRouteRef(input.attemptId);
+      const callbackRouteSnapshot = await transaction.get(callbackRouteRef);
+      if (!callbackRouteSnapshot.exists) return 'unknown';
+      const callbackRoute = decodeProviderCallbackRoute(
+        input.attemptId,
+        input.jobId,
+        callbackRouteSnapshot,
+      );
+      const jobRef = this.jobRef(callbackRoute.uid, input.jobId);
+      const providerStatusRef = this.providerDeliveryStatusRef(
+        callbackRoute.uid,
+        input.attemptId,
+      );
+      const [jobSnapshot, attemptSnapshot, providerStatusSnapshot]
+        = await transaction.getAll(
+          jobRef,
+          this.deliveryAttemptRef(callbackRoute.uid, input.attemptId),
+          providerStatusRef,
+        );
+      if (!jobSnapshot || !attemptSnapshot || !providerStatusSnapshot) {
+        throw new Error('Provider callback authority read is incomplete.');
+      }
+      const current = decodeRequiredStoredJob(callbackRoute.uid, jobSnapshot);
+      decodeRequiredProviderCallbackRoute(
+        callbackRoute.uid,
+        current,
+        input.attemptId,
+        callbackRouteSnapshot,
+      );
+      const attempt = decodeRequiredDeliveryAttempt(
+        callbackRoute.uid,
+        current,
+        input.attemptId,
+        attemptSnapshot,
+      );
+      assertProviderCallbackAttemptCoherence(current, attempt, providerMessageId);
+      const existing = providerStatusSnapshot.exists
+        ? decodeProviderDeliveryStatus(
+          callbackRoute.uid,
+          current,
+          input.attemptId,
+          providerStatusSnapshot,
+        )
+        : null;
+      const transition = providerStatusTransition(existing, {
+        provider,
+        providerMessageId,
+        status,
+        providerFailureCode,
+      });
+      if (transition === 'duplicate' || transition === 'out_of_order') {
+        return transition;
+      }
+      const next: ProviderDeliveryStatusRecord = Object.freeze({
+        schemaVersion: PROVIDER_DELIVERY_STATUS_SCHEMA_VERSION,
+        id: input.attemptId,
+        uid: callbackRoute.uid,
+        jobId: current.id,
+        attemptId: input.attemptId,
+        channel: 'whatsapp',
+        provider,
+        providerMessageId,
+        status,
+        providerFailureCode: transition.providerFailureCode,
+        firstObservedAt: existing?.firstObservedAt ?? observedAt,
+        latestObservedAt: latestInstant(existing?.latestObservedAt ?? observedAt, observedAt),
+      });
+      transaction.set(
+        providerStatusRef,
+        encodeProviderDeliveryStatus(next, current.scheduledFor, observedAt),
+      );
+      if (
+        isSuccessfulProviderDeliveryStatus(next.status)
+        && attempt.state === 'accepted'
+        && (current.state === 'accepted' || current.state === 'delivered')
+      ) {
+        writeJob(transaction, jobRef, Object.freeze({
+          ...current,
+          state: 'delivered',
+          updatedAt: latestInstant(current.updatedAt, observedAt),
+        }));
+      }
+      return 'recorded';
+    });
+  }
+
   async getStoredJob(uid: string, jobId: string): Promise<StoredReminderJob | null> {
     assertJobIdentity(uid, jobId, jobId);
     const snapshot = await this.jobRef(uid, jobId).get();
@@ -788,6 +952,14 @@ export class FirestoreReminderRepository implements
 
   private deliveryReceiptRef(uid: string, attemptId: string) {
     return this.firestore.doc(`users/${uid}/deliveryReceipts/${attemptId}`);
+  }
+
+  private providerDeliveryStatusRef(uid: string, attemptId: string) {
+    return this.firestore.doc(`users/${uid}/providerDeliveryStatuses/${attemptId}`);
+  }
+
+  private providerCallbackRouteRef(attemptId: string) {
+    return this.firestore.doc(`reminderProviderCallbackRoutes/${attemptId}`);
   }
 
   private notificationIdempotencyRef(uid: string, idempotencyKey: string) {
@@ -979,6 +1151,45 @@ function encodeDeliveryReceipt(
   };
 }
 
+function encodeProviderCallbackRoute(
+  uid: string,
+  job: StoredReminderJob,
+  attemptId: string,
+  createdAt: string,
+): DocumentData {
+  return {
+    schemaVersion: REMINDER_PROVIDER_CALLBACK_ROUTE_SCHEMA_VERSION,
+    id: attemptId,
+    uid,
+    jobId: job.id,
+    channel: 'whatsapp',
+    createdAt: Timestamp.fromDate(new Date(createdAt)),
+    purgeAt: deliveryPurgeAt(job.scheduledFor, createdAt),
+  };
+}
+
+function encodeProviderDeliveryStatus(
+  record: ProviderDeliveryStatusRecord,
+  scheduledFor: string,
+  now: string,
+): DocumentData {
+  return {
+    schemaVersion: record.schemaVersion,
+    id: record.id,
+    uid: record.uid,
+    jobId: record.jobId,
+    attemptId: record.attemptId,
+    channel: record.channel,
+    provider: record.provider,
+    providerMessageId: record.providerMessageId,
+    status: record.status,
+    providerFailureCode: record.providerFailureCode,
+    firstObservedAt: Timestamp.fromDate(new Date(record.firstObservedAt)),
+    latestObservedAt: Timestamp.fromDate(new Date(record.latestObservedAt)),
+    purgeAt: deliveryPurgeAt(scheduledFor, now),
+  };
+}
+
 function encodeNotificationIdempotency(
   record: NotificationIdempotencyRecord,
   scheduledFor: string,
@@ -1159,6 +1370,102 @@ function decodeDeliveryReceipt(
     providerMessageId,
     failureReason,
     createdAt,
+  });
+}
+
+function decodeProviderCallbackRoute(
+  attemptId: string,
+  jobId: string,
+  snapshot: DocumentSnapshot,
+): ReminderProviderCallbackRoute {
+  if (!snapshot.exists) throw new Error('Reminder provider callback route is missing.');
+  const value = snapshot.data() ?? {};
+  if (
+    value.schemaVersion !== REMINDER_PROVIDER_CALLBACK_ROUTE_SCHEMA_VERSION
+    || value.id !== snapshot.id
+    || snapshot.id !== attemptId
+    || value.jobId !== jobId
+    || value.channel !== 'whatsapp'
+  ) {
+    throw new Error('Reminder provider callback route identity or schema is invalid.');
+  }
+  assertIdentity(value.uid, 'Reminder provider callback route owner');
+  assertHash(value.jobId, 'Reminder provider callback route job ID');
+  const createdAt = timestampValue(
+    value.createdAt,
+    'Reminder provider callback route creation time',
+  );
+  assertPurgeAt(value.purgeAt, 'Reminder provider callback route retention');
+  return Object.freeze({
+    schemaVersion: REMINDER_PROVIDER_CALLBACK_ROUTE_SCHEMA_VERSION,
+    id: attemptId,
+    uid: value.uid,
+    jobId,
+    channel: 'whatsapp',
+    createdAt,
+  });
+}
+
+function decodeRequiredProviderCallbackRoute(
+  uid: string,
+  job: StoredReminderJob,
+  attemptId: string,
+  snapshot: DocumentSnapshot,
+): ReminderProviderCallbackRoute {
+  const route = decodeProviderCallbackRoute(attemptId, job.id, snapshot);
+  if (route.uid !== uid || job.uid !== uid || job.channel !== 'whatsapp') {
+    throw new Error('Reminder provider callback route owner or channel is invalid.');
+  }
+  return route;
+}
+
+function decodeProviderDeliveryStatus(
+  uid: string,
+  job: StoredReminderJob,
+  attemptId: string,
+  snapshot: DocumentSnapshot,
+): ProviderDeliveryStatusRecord {
+  const value = snapshot.data() ?? {};
+  if (
+    value.schemaVersion !== PROVIDER_DELIVERY_STATUS_SCHEMA_VERSION
+    || value.id !== snapshot.id
+    || snapshot.id !== attemptId
+    || value.uid !== uid
+    || value.jobId !== job.id
+    || value.attemptId !== attemptId
+    || value.channel !== 'whatsapp'
+  ) {
+    throw new Error('Provider delivery status identity or schema is invalid.');
+  }
+  const providerMessageId = providerMessageIdValue(value.providerMessageId);
+  const provider = messagingProviderIdValue(value.provider);
+  const status = providerDeliveryStatusValue(value.status);
+  const providerFailureCode = providerFailureCodeValue(value.providerFailureCode);
+  const firstObservedAt = timestampValue(
+    value.firstObservedAt,
+    'Provider delivery first observation time',
+  );
+  const latestObservedAt = timestampValue(
+    value.latestObservedAt,
+    'Provider delivery latest observation time',
+  );
+  if (Date.parse(latestObservedAt) < Date.parse(firstObservedAt)) {
+    throw new Error('Provider delivery observation order is invalid.');
+  }
+  assertPurgeAt(value.purgeAt, 'Provider delivery status retention');
+  return Object.freeze({
+    schemaVersion: PROVIDER_DELIVERY_STATUS_SCHEMA_VERSION,
+    id: attemptId,
+    uid,
+    jobId: job.id,
+    attemptId,
+    channel: 'whatsapp',
+    provider,
+    providerMessageId,
+    status,
+    providerFailureCode,
+    firstObservedAt,
+    latestObservedAt,
   });
 }
 
@@ -1522,7 +1829,15 @@ function normalizeDeliveryFinalization(
 
 function deliveryJobState(
   result: ReminderDeliveryFinalization,
-): Extract<StoredReminderJobState, 'accepted' | 'failed' | 'uncertain'> {
+  providerStatus: ProviderDeliveryStatusRecord | null = null,
+): Extract<StoredReminderJobState, 'accepted' | 'delivered' | 'failed' | 'uncertain'> {
+  if (
+    result.outcome === 'accepted'
+    && providerStatus
+    && isSuccessfulProviderDeliveryStatus(providerStatus.status)
+  ) {
+    return 'delivered';
+  }
   if (result.outcome === 'accepted') return 'accepted';
   return result.outcome === 'rejected' ? 'failed' : 'uncertain';
 }
@@ -1571,10 +1886,175 @@ function assertFinalizedDeliveryCoherence(
     || idempotency.finalizedAt !== receipt.createdAt
     || job.deliveryOutcome !== receipt.outcome
     || job.deliveryFinalizedAt !== receipt.createdAt
-    || job.state !== deliveryJobStateFromOutcome(receipt.outcome)
+    || (
+      job.state !== deliveryJobStateFromOutcome(receipt.outcome)
+      && !(receipt.outcome === 'accepted' && job.state === 'delivered')
+    )
   ) {
     throw new Error('Finalized reminder delivery records are inconsistent.');
   }
+}
+
+function assertProviderStatusMatchesFinalization(
+  providerStatus: ProviderDeliveryStatusRecord | null,
+  result: ReminderDeliveryFinalization,
+): void {
+  if (!providerStatus) return;
+  if (result.outcome === 'accepted') {
+    if (providerStatus.providerMessageId !== result.providerMessageId) {
+      throw new Error('Provider callback message does not match delivery finalization.');
+    }
+    return;
+  }
+  if (result.outcome === 'rejected') {
+    throw new Error('Provider callback conflicts with rejected delivery finalization.');
+  }
+}
+
+function assertProviderCallbackAttemptCoherence(
+  job: StoredReminderJob,
+  attempt: ReminderDeliveryAttemptRecord,
+  providerMessageId: string,
+): void {
+  if (
+    job.channel !== 'whatsapp'
+    || job.deliveryAttemptId !== attempt.id
+    || attempt.channel !== 'whatsapp'
+  ) {
+    throw new Error('Provider callback delivery attempt identity is invalid.');
+  }
+  if (attempt.state === 'claimed') {
+    if (job.state !== 'claimed') {
+      throw new Error('Provider callback delivery claim is inconsistent.');
+    }
+    return;
+  }
+  if (attempt.state === 'accepted') {
+    if (
+      (job.state !== 'accepted' && job.state !== 'delivered')
+      || attempt.providerMessageId !== providerMessageId
+    ) {
+      throw new Error('Provider callback accepted delivery is inconsistent.');
+    }
+    return;
+  }
+  if (attempt.state === 'uncertain') {
+    if (job.state !== 'uncertain') {
+      throw new Error('Provider callback uncertain delivery is inconsistent.');
+    }
+    return;
+  }
+  throw new Error('Provider callback cannot attach to a rejected delivery.');
+}
+
+type ProviderStatusTransitionDecision =
+  | 'duplicate'
+  | 'out_of_order'
+  | Readonly<{ providerFailureCode: string | null }>;
+
+function providerStatusTransition(
+  existing: ProviderDeliveryStatusRecord | null,
+  incoming: Readonly<{
+    provider: MessagingProviderId;
+    providerMessageId: string;
+    status: ProviderDeliveryStatus;
+    providerFailureCode: string | null;
+  }>,
+): ProviderStatusTransitionDecision {
+  if (!existing) {
+    return Object.freeze({ providerFailureCode: incoming.providerFailureCode });
+  }
+  if (
+    existing.provider !== incoming.provider
+    || existing.providerMessageId !== incoming.providerMessageId
+  ) {
+    throw new Error('Provider callback message identity changed.');
+  }
+  if (existing.status === incoming.status) {
+    if (
+      existing.providerFailureCode === incoming.providerFailureCode
+      || incoming.providerFailureCode === null
+    ) {
+      return 'duplicate';
+    }
+    if (existing.providerFailureCode !== null) {
+      throw new Error('Provider callback error code changed for the same status.');
+    }
+    return Object.freeze({ providerFailureCode: incoming.providerFailureCode });
+  }
+  if (!isAllowedProviderStatusTransition(existing.status, incoming.status)) {
+    return 'out_of_order';
+  }
+  return Object.freeze({ providerFailureCode: incoming.providerFailureCode });
+}
+
+function isAllowedProviderStatusTransition(
+  from: ProviderDeliveryStatus,
+  to: ProviderDeliveryStatus,
+): boolean {
+  if (isFailedProviderDeliveryStatus(from)) return false;
+  if (isFailedProviderDeliveryStatus(to)) {
+    return from !== 'delivered' && from !== 'read';
+  }
+  const progress: Readonly<Record<ProviderDeliveryStatus, number>> = {
+    accepted: 0,
+    queued: 1,
+    sending: 2,
+    sent: 3,
+    delivered: 4,
+    read: 5,
+    undelivered: -1,
+    failed: -1,
+    canceled: -1,
+  };
+  return progress[to] > progress[from];
+}
+
+function isFailedProviderDeliveryStatus(status: ProviderDeliveryStatus): boolean {
+  return status === 'undelivered' || status === 'failed' || status === 'canceled';
+}
+
+function isSuccessfulProviderDeliveryStatus(status: ProviderDeliveryStatus): boolean {
+  return status === 'delivered' || status === 'read';
+}
+
+function providerDeliveryStatusValue(value: unknown): ProviderDeliveryStatus {
+  if (
+    value === 'accepted'
+    || value === 'queued'
+    || value === 'sending'
+    || value === 'sent'
+    || value === 'delivered'
+    || value === 'read'
+    || value === 'undelivered'
+    || value === 'failed'
+    || value === 'canceled'
+  ) {
+    return value;
+  }
+  throw new Error('Provider delivery status is invalid.');
+}
+
+function messagingProviderIdValue(value: unknown): MessagingProviderId {
+  if (value === 'twilio_whatsapp') return value;
+  throw new Error('Messaging provider identity is invalid.');
+}
+
+function providerFailureCodeValue(value: unknown): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== 'string'
+    || value.length < 1
+    || value.length > 64
+    || !/^[A-Za-z0-9._:-]+$/.test(value)
+  ) {
+    throw new Error('Provider delivery error code is invalid.');
+  }
+  return value;
+}
+
+function latestInstant(first: string, second: string): string {
+  return Date.parse(first) >= Date.parse(second) ? first : second;
 }
 
 function deliveryJobStateFromOutcome(

@@ -5,6 +5,44 @@ export const DELIVERY_RECEIPT_SCHEMA_VERSION = 'delivery-receipt-v1' as const;
 export const NOTIFICATION_IDEMPOTENCY_SCHEMA_VERSION = 'notification-idempotency-v1' as const;
 export const REMINDER_DELIVERY_COUNTER_SCHEMA_VERSION = 'reminder-delivery-counter-v1' as const;
 
+export const MESSAGING_PROVIDER_IDS = ['twilio_whatsapp'] as const;
+export type MessagingProviderId = (typeof MESSAGING_PROVIDER_IDS)[number];
+
+export const PROVIDER_DELIVERY_STATUSES = [
+  'accepted',
+  'queued',
+  'sending',
+  'sent',
+  'delivered',
+  'read',
+  'undelivered',
+  'failed',
+  'canceled',
+] as const;
+export type ProviderDeliveryStatus = (typeof PROVIDER_DELIVERY_STATUSES)[number];
+
+export interface ProviderDeliveryStatusRecordInput {
+  readonly attemptId: string;
+  readonly jobId: string;
+  readonly provider: MessagingProviderId;
+  readonly providerMessageId: string;
+  readonly status: ProviderDeliveryStatus;
+  readonly providerFailureCode: string | null;
+  readonly observedAt: string;
+}
+
+export type ProviderDeliveryStatusRecordResult =
+  | 'recorded'
+  | 'duplicate'
+  | 'out_of_order'
+  | 'unknown';
+
+export interface ProviderDeliveryStatusRepository {
+  recordProviderDeliveryStatus(
+    input: ProviderDeliveryStatusRecordInput,
+  ): Promise<ProviderDeliveryStatusRecordResult>;
+}
+
 export interface ReminderDeliveryMessageData {
   /** Untrusted display data only; never authorization or provider instructions. */
   readonly title: string;

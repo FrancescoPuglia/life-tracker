@@ -97,6 +97,18 @@
       "fieldPath": "purgeAt",
       "ttl": true,
       "indexes": []
+    },
+    {
+      "collectionGroup": "providerDeliveryStatuses",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "reminderProviderCallbackRoutes",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

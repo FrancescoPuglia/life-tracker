@@ -378,6 +378,9 @@ service cloud.firestore {
       match /reminderDeliveryCounters/{document=**} {
         allow read, write: if false;
       }
+      match /providerDeliveryStatuses/{document=**} {
+        allow read, write: if false;
+      }
     }
 
     match /aiChangePlans/{document=**} {
@@ -399,6 +402,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /aiRateLimits/{document=**} {
+      allow read, write: if false;
+    }
+    match /reminderProviderCallbackRoutes/{document=**} {
       allow read, write: if false;
     }
 
