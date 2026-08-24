@@ -1,5 +1,5 @@
 import { Session, TimeBlock } from '@/types';
-import { db } from '@/lib/database';
+import { db, hasSessionTag } from '@/lib/database';
 
 export class SessionManager {
   private static instance: SessionManager;
@@ -348,7 +348,7 @@ export class SessionManager {
       total + (session.duration || 0), 0) / 60;
     
     const focusMinutes = todaySessions
-      .filter(session => session.tags.includes('focus'))
+      .filter(session => hasSessionTag(session, 'focus'))
       .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
     const averageSessionLength = todaySessions.length > 0 ? 

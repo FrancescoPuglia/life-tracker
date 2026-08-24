@@ -31,6 +31,11 @@ export function sanitizeForStorage<T>(data: T): T {
   return sanitizeDeep(data);
 }
 
+export function hasSessionTag(session: { readonly tags?: unknown }, tag: string): boolean {
+  return Array.isArray(session.tags)
+    && session.tags.some((value) => typeof value === 'string' && value === tag);
+}
+
 // Helper: Build normalized habit log payload (NEVER include undefined)
 export function buildHabitLogPayload(params: {
   id?: string;
@@ -448,7 +453,7 @@ class IndexedDBAdapter implements DatabaseAdapter {
     
     // Calculate focus minutes (session.duration is in seconds, convert to minutes)
     const focusMinutes = todaySessions
-      .filter(session => session.tags.includes('focus'))
+      .filter(session => hasSessionTag(session, 'focus'))
       .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
     // Calculate plan vs actual
@@ -713,7 +718,7 @@ class IndexedDBAdapter implements DatabaseAdapter {
 
       // Calculate focus minutes
       const focusMinutes = daySessions
-        .filter(session => session.tags.includes('focus'))
+        .filter(session => hasSessionTag(session, 'focus'))
         .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
       // Calculate average mood and energy
@@ -920,14 +925,14 @@ class IndexedDBAdapter implements DatabaseAdapter {
       
       // Calculate focus time
       const totalFocusMinutes = userSessions
-        .filter(s => s.status === 'completed' && s.tags.includes('focus'))
+        .filter(s => s.status === 'completed' && hasSessionTag(s, 'focus'))
         .reduce((total, s) => total + (s.duration || 0), 0) / 60;
       
       // Calculate weekly focus (last 7 days)
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const weeklyFocusMinutes = userSessions
-        .filter(s => s.status === 'completed' && 
-                     s.tags.includes('focus') && 
+        .filter(s => s.status === 'completed' &&
+                     hasSessionTag(s, 'focus') &&
                      new Date(s.startTime) >= weekAgo)
         .reduce((total, s) => total + (s.duration || 0), 0) / 60;
       
@@ -1657,7 +1662,7 @@ class LifeTrackerDB {
     );
     
     const focusMinutes = todaySessions
-      .filter(session => session.tags.includes('focus'))
+      .filter(session => hasSessionTag(session, 'focus'))
       .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
     const plannedMinutes = timeBlocks.reduce((total, block) => 
@@ -1845,7 +1850,7 @@ class LifeTrackerDB {
       );
 
       const focusMinutes = daySessions
-        .filter(session => session.tags.includes('focus'))
+        .filter(session => hasSessionTag(session, 'focus'))
         .reduce((total, session) => total + (session.duration || 0), 0) / 60;
 
       const moodSessions = daySessions.filter(s => s.mood !== undefined);
