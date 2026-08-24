@@ -225,8 +225,9 @@ test.describe.serial('real secure AI staging boundary', () => {
         await selectPlanMode(page);
       }
 
-      failureStage = 'proposal_preview_then_reject';
-      if (EXECUTION_PROFILE === 'full') await startNewChat(page);
+      if (EXECUTION_PROFILE !== 'create_onward') {
+        failureStage = 'proposal_preview_then_reject';
+        if (EXECUTION_PROFILE === 'full') await startNewChat(page);
       const beforeRejectProposal = await readFixtureState(activeA, fixtureDocumentsA);
       const rejectPreview = await sendChat(page, proposalPrompt(fixture, fixture.times.firstTargetStart, fixture.times.firstTargetEnd));
       requireStagingHttpStatus(rejectPreview.status, rejectPreview.body, rejectPreview.requestId);
@@ -406,7 +407,8 @@ test.describe.serial('real secure AI staging boundary', () => {
           rollbackReplaySafe: true,
         },
       });
-      await page.screenshot({ path: `test-results/staging/${runId}-rolled-back.png`, fullPage: true });
+        await page.screenshot({ path: `test-results/staging/${runId}-rolled-back.png`, fullPage: true });
+      }
 
       failureStage = 'concurrent_create_is_idempotent';
       const createTitle = `STAGING Concurrent create ${runId}`;
@@ -528,6 +530,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       failureStage = 'stale_preview_rejected_without_partial_write';
       await startNewChat(page);
       const stateBeforeStalePreview = await readFixtureState(activeA, fixtureDocumentsA);
+      const mutableBeforeStalePreview = await readDocument(activeA, 'timeBlocks', fixture.mutableBlockId);
       const stalePreview = await sendChat(page, proposalPrompt(fixture, fixture.times.staleTargetStart, fixture.times.staleTargetEnd));
       requireStagingHttpStatus(stalePreview.status, stalePreview.body, stalePreview.requestId);
       requireExactPlan(stalePreview.status, stalePreview.body.plan, expectedMove(
@@ -553,8 +556,8 @@ test.describe.serial('real secure AI staging boundary', () => {
       await expect(page.getByText(/Lo stato è cambiato: questa anteprima/)).toBeVisible();
       const afterStale = await readDocument(activeA, 'timeBlocks', fixture.mutableBlockId);
       expect(stringField(afterStale, 'title')).toContain('human V2');
-      expect(timestampField(afterStale, 'startTime')).toBe(timestampField(restored, 'startTime'));
-      expect(timestampField(afterStale, 'endTime')).toBe(timestampField(restored, 'endTime'));
+      expect(timestampField(afterStale, 'startTime')).toBe(timestampField(mutableBeforeStalePreview, 'startTime'));
+      expect(timestampField(afterStale, 'endTime')).toBe(timestampField(mutableBeforeStalePreview, 'endTime'));
       assertSameFixtureState(
         stateAfterHumanV2,
         await readFixtureState(activeA, fixtureDocumentsA),
@@ -800,9 +803,9 @@ test.describe.serial('real secure AI staging boundary', () => {
   });
 });
 
-function stagingExecutionProfile(value: string | undefined): 'full' | 'proposal_onward' {
+function stagingExecutionProfile(value: string | undefined): 'full' | 'proposal_onward' | 'create_onward' {
   if (value === undefined || value === '' || value === 'full') return 'full';
-  if (value === 'proposal_onward') return value;
+  if (value === 'proposal_onward' || value === 'create_onward') return value;
   throw new Error('Invalid live staging execution profile.');
 }
 
