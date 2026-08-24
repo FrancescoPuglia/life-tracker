@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `c4daf4311a73990357870e14819564ba6a0bf005`
+- Current implementation checkpoint SHA: `24d006500fe25c2afbf97588ad784fc36e04b68b`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -353,6 +353,44 @@ slice changes one of those trust boundaries.
   complete before the named worker can be exported. No function, queue, API,
   IAM binding, provider, secret, billing state, or external message changed.
 
+### R3 authoritative reconciliation triggers and bounded refill
+
+- Green implementation commit: `24d006500fe25c2afbf97588ad784fc36e04b68b`.
+- Added dependency-injected factories for TimeBlock, notification-preference,
+  and persisted-user-timezone Firestore write events. They ignore event
+  snapshots and reread the current owner-scoped TimeBlock, notification
+  preferences, and profile timezone. Malformed platform paths acknowledge with
+  zero work; operational failures throw only a sanitized retry signal.
+- Closed the out-of-order event race at the durable boundary: every
+  reconciliation carries the exact observed TimeBlock schedule version and
+  reminder-policy version, and the Firestore transaction recomputes both from
+  current authority before changing any job or manifest. An older handler can
+  no longer restore obsolete jobs after a newer move, delete, completion, or
+  preference change.
+- Event factories are private/internal, zero-warm-instance, region-fixed, and
+  idempotent with `retry: true`. Current Eventarc documentation defines
+  at-least-once retry with a default 24-hour retention window; see
+  [Eventarc retries](https://docs.cloud.google.com/eventarc/docs/retry-events).
+  Same-project Eventarc and Cloud Scheduler are explicitly accepted sources for
+  internal Cloud Run ingress; see
+  [Cloud Run ingress](https://docs.cloud.google.com/run/docs/securing/ingress).
+- Preference/timezone fan-out uses an indexed owner-subcollection query for
+  only future `planned`/`in_progress` TimeBlocks. It is capped at 100 and aborts
+  before reminder writes if the cap is exceeded, so partial preference changes
+  are never silently reported as complete. Current delivery authority still
+  suppresses any stale disabled-policy job independently.
+- Added a six-hour, indexed, 100-row horizon refill instead of a minute-wide
+  Firestore poll. It selects only WhatsApp jobs due inside the safe 29-day
+  Cloud Tasks horizon and also recovers `pending_enqueue`/`schedule_failed`
+  work left by a crash or queue outage. It reconciles at most four TimeBlocks
+  concurrently and requests one of three bounded scheduler retries when more
+  eligible work remains.
+- Added the exact additive composite indexes for future active TimeBlocks and
+  due unscheduled reminder jobs. This checkpoint exports factories only, not
+  named deployed trigger instances; no Function, scheduler, Eventarc trigger,
+  index, queue, API, IAM binding, billing state, secret, provider, or message
+  changed.
+
 ## Evidence
 
 | Check | Result |
@@ -424,12 +462,17 @@ slice changes one of those trust boundaries.
 | Task payload/worker focused tests | PASS; 45/45 parser, enqueue, deployment metadata, identity, malformed input, terminal outcome, retry, clock, and log-privacy cases |
 | Functions regression after worker boundary | PASS; 21 files / 237 tests, with 51 emulator-only tests correctly skipped in the non-emulator gate |
 | Worker build/security/hygiene | PASS; Functions bundle/typecheck, static security, six-file high-confidence credential scan, and staged diff check |
+| Reconciliation trigger/refill focused tests | PASS; 34/34 across authoritative handlers, preference disable/cap, bounded refill, queue adapter, and private worker metadata |
+| Reconciliation authority/source emulator | PASS; 10/10 final run, including stale transaction rejection, owner-scoped source reads, future-query cap, deferred promotion, and pending/failed enqueue recovery |
+| Combined reminder transaction check before final recovery assertion | PASS; 20/20 reconciliation plus delivery emulator tests; the expected local metadata lookup warning did not affect results |
+| Functions regression after trigger/refill | PASS; 22 files / 248 tests, with 54 emulator-only tests correctly skipped outside the emulator gate |
+| Trigger/refill build/security/hygiene | PASS; Functions typecheck/bundle, index JSON parse, static security, high-confidence changed/staged credential scan, `git diff --check`, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts, and private worker factory green; triggers, provider binding/export, and installed delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts, private worker, authoritative trigger, and bounded refill factories green; provider binding/named exports and installed delivery pending
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: NOT STARTED
 - R6 ChatGPT read integration: NOT STARTED
@@ -452,13 +495,12 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with dependency-injected TimeBlock and notification-preference
-reconciliation trigger handlers plus a bounded deferred-horizon refill. Prove
-create/move/delete/preference-disable races and no unbounded global polling
-locally before exporting any trigger. Then implement the server-owned provider
-binding/Twilio adapter and instantiate the named private worker. Do not enable
-Cloud Tasks, billing, APIs, provider secrets, or deploy any resource. After
-exact human approval, separately deploy only
+Continue R3 with the server-owned Twilio `MessagingProvider` adapter and secret
+binding, real provider-neutral message construction, signature-checked status
+callback boundary, and named private worker/trigger instances. Keep provider
+configuration fail-closed and locally testable; do not read secret values,
+enable Cloud Tasks, billing, APIs, create provider secrets, send messages, or
+deploy any resource. After exact human approval, separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
