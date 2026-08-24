@@ -19,7 +19,12 @@ import {
   cleanupStagingResources,
   type CleanupDocumentReference as DocumentReference,
 } from './staging/cleanup';
-import { fetchReadOnlyWithRetry } from './staging/read-only-transport';
+import {
+  discardResponseBody,
+  fetchDeterministicFixtureWithRetry,
+  fetchReadOnlyWithRetry,
+  stagingTransportFailureEvidence,
+} from './staging/read-only-transport';
 import { readStagingEnvironment } from './staging/safety';
 
 const staging = readStagingEnvironment();
@@ -103,6 +108,8 @@ test.describe.serial('real secure AI staging boundary', () => {
     let accountB: StagingIdentity | undefined;
     let fixtureDocumentsA: readonly SeedDocument[] = [];
     let fixtureDocumentsB: readonly SeedDocument[] = [];
+    const attemptedFixtureDocumentsA: DocumentReference[] = [];
+    const attemptedFixtureDocumentsB: DocumentReference[] = [];
     const dynamicDocumentsA: DocumentReference[] = [];
     const dynamicDocumentsB: DocumentReference[] = [];
     let failureStage = 'health_and_cors';
@@ -145,9 +152,9 @@ test.describe.serial('real secure AI staging boundary', () => {
       fixtureDocumentsA = fixture.documents;
       fixtureDocumentsB = fixtureB.documents;
       failureStage = 'seed_staging_fixture_a';
-      await seedFixture(activeA, fixtureDocumentsA);
+      await seedFixture(activeA, fixtureDocumentsA, attemptedFixtureDocumentsA);
       failureStage = 'seed_staging_fixture_b';
-      await seedFixture(activeB, fixtureDocumentsB);
+      await seedFixture(activeB, fixtureDocumentsB, attemptedFixtureDocumentsB);
 
       failureStage = 'authenticated_payload_uid_rejected';
       const spoofedUid = await backendJson(activeA, '/v1/chat', {
@@ -436,7 +443,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       );
       const createEntityId = createPlan.operations[0]!.entityId;
       dynamicDocumentsA.push(['timeBlocks', createEntityId]);
-      expect((await rawFirestoreGet(activeA, activeA.uid, 'timeBlocks', createEntityId)).status).toBe(404);
+      expect(await rawFirestoreStatus(activeA, activeA.uid, 'timeBlocks', createEntityId)).toBe(404);
       const createCapability = createPlan.approval.capability;
       assertCapabilityShape(createCapability);
       const createIdempotencyKey = newIdempotencyKey();
@@ -494,7 +501,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         idempotentReplay: false,
         affected: [{ collection: 'timeBlocks', id: createEntityId }],
       });
-      expect((await rawFirestoreGet(activeA, activeA.uid, 'timeBlocks', createEntityId)).status).toBe(404);
+      expect(await rawFirestoreStatus(activeA, activeA.uid, 'timeBlocks', createEntityId)).toBe(404);
       expect(await countDocumentsWithTitle(activeA, 'timeBlocks', createTitle)).toBe(0);
       records.push({
         name: 'concurrent_create_is_idempotent',
@@ -556,8 +563,8 @@ test.describe.serial('real secure AI staging boundary', () => {
 
       failureStage = 'cross_user_repository_and_rollback_denial';
       const bStateBeforeCrossUser = await readFixtureState(activeB, fixtureDocumentsB);
-      const directCrossUserRead = await rawFirestoreGet(activeA, activeB.uid, 'timeBlocks', fixtureB.blockId);
-      expect(directCrossUserRead.status).toBe(403);
+      const directCrossUserReadStatus = await rawFirestoreStatus(activeA, activeB.uid, 'timeBlocks', fixtureB.blockId);
+      expect(directCrossUserReadStatus).toBe(403);
       const crossUserProposal = await backendJson(activeA, '/v1/chat', {
         message: proposalPromptForBlock(fixtureB.block, fixtureB.targetStart, fixtureB.targetEnd),
         mode: 'plan',
@@ -619,12 +626,12 @@ test.describe.serial('real secure AI staging boundary', () => {
         idempotencyKey: newIdempotencyKey(),
       });
       assertIndistinguishableNotFound(crossApply, nonexistentApply, 'apply plan probe');
-      const crossServerOnlyRead = await rawRootFirestoreGet(
+      const crossServerOnlyReadStatus = await rawRootFirestoreStatus(
         activeA,
         'aiChangePlans',
         `${activeB.uid}_${bPlan.id}`,
       );
-      expect(crossServerOnlyRead.status).toBe(403);
+      expect(crossServerOnlyReadStatus).toBe(403);
       records.push({
         name: 'cross_user_rules_repository_and_error_indistinguishability',
         status: 'PASS',
@@ -723,14 +730,14 @@ test.describe.serial('real secure AI staging boundary', () => {
       {
         identity: accountA,
         documents: [
-          ...fixtureDocumentsA.map(([collection, id]) => [collection, id] as const),
+          ...attemptedFixtureDocumentsA,
           ...dynamicDocumentsA,
         ],
       },
       {
         identity: accountB,
         documents: [
-          ...fixtureDocumentsB.map(([collection, id]) => [collection, id] as const),
+          ...attemptedFixtureDocumentsB,
           ...dynamicDocumentsB,
         ],
       },
@@ -756,7 +763,8 @@ test.describe.serial('real secure AI staging boundary', () => {
           ? 'cleanup'
           : failureStage,
       failureClassification: primaryFailure instanceof Error ? primaryFailure.name : primaryFailure === undefined ? null : 'unknown',
-      failure: stagingHttpFailureEvidence(primaryFailure),
+      failure: stagingHttpFailureEvidence(primaryFailure)
+        ?? stagingTransportFailureEvidence(primaryFailure),
       runId,
       generatedAt: new Date().toISOString(),
       sourceCommit,
@@ -818,7 +826,9 @@ async function verifyHealthAndCors(
   const evil = await fetchReadOnlyWithRetry(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: 'https://untrusted-origin.example' },
   });
-  expect(evil.status).toBe(403);
+  const evilStatus = evil.status;
+  await discardResponseBody(evil);
+  expect(evilStatus).toBe(403);
   records.push({
     name: 'staging_health_and_exact_cors',
     status: 'PASS',
@@ -1231,15 +1241,25 @@ function timestamp(value: string): Readonly<{ __timestamp: string }> {
   return { __timestamp: value };
 }
 
-async function seedFixture(identity: StagingIdentity, documents: readonly SeedDocument[]): Promise<void> {
+async function seedFixture(
+  identity: StagingIdentity,
+  documents: readonly SeedDocument[],
+  attemptedDocuments: DocumentReference[],
+): Promise<void> {
   for (const [collection, id, values] of documents) {
-    const response = await fetch(firestoreUrl(identity.uid, collection, id), {
+    attemptedDocuments.push([collection, id]);
+    const response = await fetchDeterministicFixtureWithRetry(firestoreUrl(identity.uid, collection, id), {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${identity.idToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(firestoreDocument(values)),
-      signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) throw new Error(`Staging Firestore fixture write failed safely (${response.status}).`);
+    const status = response.status;
+    await discardResponseBody(response);
+    if (!response.ok) throw new Error(`Staging Firestore fixture write failed safely (${status}).`);
+    const persisted = await readDocument(identity, collection, id);
+    if (documentFieldsHash(persisted) !== documentFieldsHash(firestoreDocument(values))) {
+      throw new Error('Staging Firestore fixture post-read did not match the deterministic write.');
+    }
   }
 }
 
@@ -1257,7 +1277,9 @@ async function patchDocument(
     body: JSON.stringify(firestoreDocument(values)),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`Staging Firestore fixture update failed safely (${response.status}).`);
+  const status = response.status;
+  await discardResponseBody(response);
+  if (!response.ok) throw new Error(`Staging Firestore fixture update failed safely (${status}).`);
 }
 
 async function readDocument(
@@ -1326,27 +1348,33 @@ async function countDocumentsWithTitle(
   }).length;
 }
 
-async function rawFirestoreGet(
+async function rawFirestoreStatus(
   identity: StagingIdentity,
   pathUid: string,
   collection: string,
   id: string,
-): Promise<Response> {
-  return fetchReadOnlyWithRetry(firestoreUrl(pathUid, collection, id), {
+): Promise<number> {
+  const response = await fetchReadOnlyWithRetry(firestoreUrl(pathUid, collection, id), {
     headers: { Authorization: `Bearer ${identity.idToken}` },
   });
+  const status = response.status;
+  await discardResponseBody(response);
+  return status;
 }
 
-async function rawRootFirestoreGet(
+async function rawRootFirestoreStatus(
   identity: StagingIdentity,
   collection: string,
   id: string,
-): Promise<Response> {
+): Promise<number> {
   const root = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(staging.projectId)}`
     + '/databases/(default)/documents';
-  return fetchReadOnlyWithRetry(`${root}/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`, {
+  const response = await fetchReadOnlyWithRetry(`${root}/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${identity.idToken}` },
   });
+  const status = response.status;
+  await discardResponseBody(response);
+  return status;
 }
 
 function firestoreUrl(uid: string, collection: string, id: string): string {

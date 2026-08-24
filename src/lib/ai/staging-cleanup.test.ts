@@ -49,10 +49,59 @@ describe('live staging fixture cleanup', () => {
     expect(report).toMatchObject({
       attemptedUserDocuments: 2,
       deletedUserDocuments: 1,
-      attemptedAuthAccounts: 1,
+      attemptedAuthAccounts: 0,
       deletedAuthAccounts: 0,
       userAndAuthCleanupComplete: false,
     });
     expect(fetchSpy.mock.calls.some(([input]) => String(input).includes('accounts:delete'))).toBe(false);
+  });
+
+  it('retries only a cleanup DELETE transport exception and releases every response body', async () => {
+    const responses: Response[] = [];
+    const fetchSpy = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes('/tasks/task-1') && fetchSpy.mock.calls.length === 1) {
+        throw new TypeError('transient cleanup transport failure');
+      }
+      const response = new Response('{}', {
+        status: String(input).includes('/tasks/task-1') ? 404 : 200,
+      });
+      responses.push(response);
+      return response;
+    });
+
+    const report = await cleanupStagingResources(configuration, [{
+      identity: { uid: 'user-a', idToken: 'private-id-token' },
+      documents: [['tasks', 'task-1']],
+    }], fetchSpy as unknown as typeof fetch);
+
+    expect(report).toMatchObject({
+      attemptedUserDocuments: 1,
+      deletedUserDocuments: 1,
+      attemptedAuthAccounts: 1,
+      deletedAuthAccounts: 1,
+      userAndAuthCleanupComplete: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(responses.every((response) => response.bodyUsed)).toBe(true);
+  });
+
+  it('deletes Auth when no fixture document write was attempted', async () => {
+    const fetchSpy = vi.fn(async (_input: string | URL | Request) =>
+      new Response('{}', { status: 200 }));
+
+    const report = await cleanupStagingResources(configuration, [{
+      identity: { uid: 'user-a', idToken: 'private-id-token' },
+      documents: [],
+    }], fetchSpy as unknown as typeof fetch);
+
+    expect(report).toMatchObject({
+      attemptedUserDocuments: 0,
+      deletedUserDocuments: 0,
+      attemptedAuthAccounts: 1,
+      deletedAuthAccounts: 1,
+      userAndAuthCleanupComplete: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain('accounts:delete');
   });
 });

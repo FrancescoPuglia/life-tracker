@@ -1,3 +1,8 @@
+import {
+  discardResponseBody,
+  retryableStagingTransportKind,
+} from './read-only-transport';
+
 export interface CleanupIdentity {
   readonly uid: string;
   readonly idToken: string;
@@ -43,23 +48,20 @@ export async function cleanupStagingResources(
     let identityDocumentsComplete = true;
     for (const [collection, id] of uniqueDocuments) {
       attemptedUserDocuments += 1;
-      const response = await fetchImplementation(
+      const removed = await deleteDocumentWithBoundedTransportRetry(
         firestoreDocumentUrl(configuration.projectId, resource.identity.uid, collection, id),
-        {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${resource.identity.idToken}` },
-          signal: AbortSignal.timeout(30_000),
-        },
-      ).catch(() => null);
-      if (response && (response.ok || response.status === 404)) {
+        resource.identity.idToken,
+        fetchImplementation,
+      );
+      if (removed) {
         deletedUserDocuments += 1;
       } else {
         identityDocumentsComplete = false;
       }
     }
 
-    attemptedAuthAccounts += 1;
     if (!identityDocumentsComplete) continue;
+    attemptedAuthAccounts += 1;
     const authResponse = await fetchImplementation(
       `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${encodeURIComponent(configuration.firebaseApiKey)}`,
       {
@@ -69,7 +71,11 @@ export async function cleanupStagingResources(
         signal: AbortSignal.timeout(30_000),
       },
     ).catch(() => null);
-    if (authResponse?.ok) deletedAuthAccounts += 1;
+    if (authResponse) {
+      const deleted = authResponse.ok;
+      await discardResponseBody(authResponse);
+      if (deleted) deletedAuthAccounts += 1;
+    }
   }
 
   return {
@@ -81,6 +87,29 @@ export async function cleanupStagingResources(
       && attemptedAuthAccounts === deletedAuthAccounts,
     serverArtifactPolicy: 'durable_audit_and_ttl_managed_ephemeral_records',
   };
+}
+
+async function deleteDocumentWithBoundedTransportRetry(
+  url: string,
+  idToken: string,
+  fetchImplementation: typeof fetch,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetchImplementation(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const removed = response.ok || response.status === 404;
+      await discardResponseBody(response);
+      return removed;
+    } catch (error) {
+      if (retryableStagingTransportKind(error) !== null && attempt < 2) continue;
+      return false;
+    }
+  }
+  return false;
 }
 
 function firestoreDocumentUrl(

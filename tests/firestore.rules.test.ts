@@ -169,6 +169,12 @@ describe('Firestore user isolation rules', () => {
     await assertSucceeds(deleteDoc(goal));
   });
 
+  it('fails closed when asked to delete an owned-path document that does not exist', async () => {
+    const db = testEnv.authenticatedContext('alice').firestore();
+
+    await assertFails(deleteDoc(doc(db, 'users/alice/tasks/missing-task')));
+  });
+
   it.each(CLIENT_COLLECTIONS)('allows owned documents in the %s allowlist', async (name) => {
     const db = testEnv.authenticatedContext('alice').firestore();
     const id = `${name}-1`;
