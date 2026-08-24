@@ -449,7 +449,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       );
       const createEntityId = createPlan.operations[0]!.entityId;
       dynamicDocumentsA.push(['timeBlocks', createEntityId]);
-      expect(await rawFirestoreStatus(activeA, activeA.uid, 'timeBlocks', createEntityId)).toBe(404);
+      expect(await countDocumentsWithId(activeA, 'timeBlocks', createEntityId)).toBe(0);
       const createCapability = createPlan.approval.capability;
       assertCapabilityShape(createCapability);
       const createIdempotencyKey = newIdempotencyKey();
@@ -507,7 +507,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         idempotentReplay: false,
         affected: [{ collection: 'timeBlocks', id: createEntityId }],
       });
-      expect(await rawFirestoreStatus(activeA, activeA.uid, 'timeBlocks', createEntityId)).toBe(404);
+      expect(await countDocumentsWithId(activeA, 'timeBlocks', createEntityId)).toBe(0);
       expect(await countDocumentsWithTitle(activeA, 'timeBlocks', createTitle)).toBe(0);
       records.push({
         name: 'concurrent_create_is_idempotent',
@@ -1326,6 +1326,29 @@ async function countDocumentsWithTitle(
   collection: string,
   title: string,
 ): Promise<number> {
+  const documents = await readOwnedCollectionDocuments(identity, collection);
+  return documents.filter((document) => {
+    const fields = record(document.fields, 'collection document fields');
+    const candidate = record(fields.title, 'collection document title').stringValue;
+    return candidate === title;
+  }).length;
+}
+
+async function countDocumentsWithId(
+  identity: StagingIdentity,
+  collection: string,
+  id: string,
+): Promise<number> {
+  const expectedName = `projects/${staging.projectId}/databases/(default)/documents/users/`
+    + `${identity.uid}/${collection}/${id}`;
+  const documents = await readOwnedCollectionDocuments(identity, collection);
+  return documents.filter((document) => document.name === expectedName).length;
+}
+
+async function readOwnedCollectionDocuments(
+  identity: StagingIdentity,
+  collection: string,
+): Promise<readonly Record<string, unknown>[]> {
   const response = await fetchReadOnlyWithRetry(`${firestoreUserUrl(identity.uid)}:runQuery`, {
     method: 'POST',
     headers: {
@@ -1351,14 +1374,12 @@ async function countDocumentsWithTitle(
   if (!Array.isArray(results) || results.length > 100) {
     throw new Error('Staging Firestore collection response exceeded its bounded result shape.');
   }
-  return results.filter((entry) => {
+  return results.flatMap((entry) => {
     const result = record(entry, 'query result');
-    if (result.document === undefined) return false;
-    const document = record(result.document, 'query result document');
-    const fields = record(document.fields, 'collection document fields');
-    const candidate = record(fields.title, 'collection document title').stringValue;
-    return candidate === title;
-  }).length;
+    return result.document === undefined
+      ? []
+      : [record(result.document, 'query result document')];
+  });
 }
 
 async function rawFirestoreStatus(

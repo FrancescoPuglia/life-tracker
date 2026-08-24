@@ -56,6 +56,57 @@ describe('live staging fixture cleanup', () => {
     expect(fetchSpy.mock.calls.some(([input]) => String(input).includes('accounts:delete'))).toBe(false);
   });
 
+  it('proves a Rules-denied missing document absent before deleting Auth', async () => {
+    const fetchSpy = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/proposed-only')) return new Response('{}', { status: 403 });
+      if (url.endsWith(':runQuery')) return new Response('[{"readTime":"2026-08-24T00:00:00Z"}]', { status: 200 });
+      return new Response('{}', { status: 200 });
+    });
+
+    const report = await cleanupStagingResources(configuration, [{
+      identity: { uid: 'user-a', idToken: 'private-id-token' },
+      documents: [['tasks', 'proposed-only']],
+    }], fetchSpy as unknown as typeof fetch);
+
+    expect(report).toMatchObject({
+      attemptedUserDocuments: 1,
+      deletedUserDocuments: 1,
+      attemptedAuthAccounts: 1,
+      deletedAuthAccounts: 1,
+      userAndAuthCleanupComplete: true,
+    });
+    const queryCall = fetchSpy.mock.calls.find(([input]) => String(input).endsWith(':runQuery'));
+    expect(queryCall?.[1]?.method).toBe('POST');
+    expect(String(queryCall?.[1]?.body)).toContain('"fieldPath":"userId"');
+    expect(String(queryCall?.[1]?.body)).toContain('"stringValue":"user-a"');
+    expect(String(queryCall?.[1]?.body)).toContain('"limit":101');
+  });
+
+  it('retains Auth when the exact owner query does not prove absence', async () => {
+    const exactName = 'projects/life-tracker-staging/databases/(default)/documents/users/user-a/tasks/still-present';
+    const fetchSpy = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/still-present')) return new Response('{}', { status: 403 });
+      if (url.endsWith(':runQuery')) {
+        return new Response(JSON.stringify([{ document: { name: exactName } }]), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    const report = await cleanupStagingResources(configuration, [{
+      identity: { uid: 'user-a', idToken: 'private-id-token' },
+      documents: [['tasks', 'still-present']],
+    }], fetchSpy as unknown as typeof fetch);
+
+    expect(report).toMatchObject({
+      deletedUserDocuments: 0,
+      attemptedAuthAccounts: 0,
+      userAndAuthCleanupComplete: false,
+    });
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes('accounts:delete'))).toBe(false);
+  });
+
   it('retries only a cleanup DELETE transport exception and releases every response body', async () => {
     const responses: Response[] = [];
     const fetchSpy = vi.fn(async (input: string | URL | Request) => {

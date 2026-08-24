@@ -175,6 +175,16 @@ describe('Firestore user isolation rules', () => {
     await assertFails(deleteDoc(doc(db, 'users/alice/tasks/missing-task')));
   });
 
+  it('allows a bounded owner-constrained query to prove a document is absent', async () => {
+    const db = testEnv.authenticatedContext('alice').firestore();
+    const result = await assertSucceeds(getDocs(query(
+      collection(db, 'users/alice/tasks'),
+      where('userId', '==', 'alice'),
+    )));
+
+    expect(result.empty).toBe(true);
+  });
+
   it.each(CLIENT_COLLECTIONS)('allows owned documents in the %s allowlist', async (name) => {
     const db = testEnv.authenticatedContext('alice').firestore();
     const id = `${name}-1`;
