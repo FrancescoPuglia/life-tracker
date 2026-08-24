@@ -221,4 +221,5 @@ export * from './domain/services/scheduling-service';
 export * from './domain/tool-definitions';
 export * from './domain/types';
 export * from './mcp/read-only-adapter';
+export * from './notifications/domain';
 export * from './runtime-config';
