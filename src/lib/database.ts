@@ -8,13 +8,21 @@ import { Page } from '@/types/blocks';
 import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
 
-// Utility: Recursively remove undefined fields from objects/arrays, preserve Date
+function isPlainRecord(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+// Utility: Recursively remove undefined fields from plain objects/arrays while
+// preserving Date and SDK-owned atomic values such as Firestore Timestamp and
+// FieldValue instances. Flattening those instances changes their wire type.
 export function sanitizeDeep<T>(value: T): T {
   if (value instanceof Date) return value;
   if (Array.isArray(value)) {
     return value.map(sanitizeDeep) as any;
   }
   if (value && typeof value === 'object') {
+    if (!isPlainRecord(value)) return value;
     const result: any = {};
     Object.entries(value).forEach(([key, val]) => {
       if (val !== undefined) {

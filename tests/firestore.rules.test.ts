@@ -338,6 +338,26 @@ describe('Firestore user isolation rules', () => {
       status: 'in_progress',
       type: 'focus',
     }));
+
+    const legacyTimeBlockPath = 'users/alice/timeBlocks/legacy-time-block';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), legacyTimeBlockPath),
+        ownedEntity('alice', 'legacy-time-block', {
+          startTime: { seconds: 1_786_435_200, nanoseconds: 0 },
+          endTime: { seconds: 1_786_438_800, nanoseconds: 0 },
+          status: 'planned',
+          type: 'work',
+        }),
+      );
+    });
+    const legacyTimeBlock = doc(db, legacyTimeBlockPath);
+    await assertFails(updateDoc(legacyTimeBlock, { title: 'Still malformed' }));
+    await assertSucceeds(updateDoc(legacyTimeBlock, {
+      title: 'Normalized on legitimate update',
+      startTime: new Date('2026-08-10T08:00:00.000Z'),
+      endTime: new Date('2026-08-10T09:00:00.000Z'),
+    }));
   });
 
   it('rejects malformed or negative critical numeric fields', async () => {

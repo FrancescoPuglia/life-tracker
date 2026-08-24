@@ -476,10 +476,18 @@ export class FirebaseAdapter implements DatabaseAdapter {
 
   private convertDatesToTimestamps(data: any): void {
     Object.keys(data).forEach(key => {
-      if (data[key] instanceof Date) {
-        data[key] = Timestamp.fromDate(data[key]);
-      } else if (data[key] && typeof data[key] === 'object' && !Array.isArray(data[key])) {
-        this.convertDatesToTimestamps(data[key]);
+      const value = data[key];
+      if (value instanceof Date) {
+        data[key] = Timestamp.fromDate(value);
+      } else if (this.isLegacyTimestampRecord(value)) {
+        data[key] = new Timestamp(value.seconds, value.nanoseconds);
+      } else if (
+        value
+        && typeof value === 'object'
+        && !Array.isArray(value)
+        && this.isPlainRecord(value)
+      ) {
+        this.convertDatesToTimestamps(value);
       }
     });
   }
@@ -492,6 +500,11 @@ export class FirebaseAdapter implements DatabaseAdapter {
       if (converted[key] && typeof converted[key] === 'object') {
         if (converted[key].toDate && typeof converted[key].toDate === 'function') {
           converted[key] = converted[key].toDate();
+        } else if (this.isLegacyTimestampRecord(converted[key])) {
+          converted[key] = new Timestamp(
+            converted[key].seconds,
+            converted[key].nanoseconds,
+          ).toDate();
         } else if (Array.isArray(converted[key])) {
           converted[key] = converted[key].map((item: any) => this.convertTimestampsToDates(item));
         } else {
@@ -500,6 +513,30 @@ export class FirebaseAdapter implements DatabaseAdapter {
       }
     });
     return converted;
+  }
+
+  private isPlainRecord(value: object): boolean {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  }
+
+  private isLegacyTimestampRecord(value: unknown): value is {
+    seconds: number;
+    nanoseconds: number;
+  } {
+    if (!value || typeof value !== 'object' || !this.isPlainRecord(value)) {
+      return false;
+    }
+
+    const candidate = value as Record<string, unknown>;
+    const keys = Object.keys(candidate);
+    return keys.length === 2
+      && keys.includes('seconds')
+      && keys.includes('nanoseconds')
+      && Number.isInteger(candidate.seconds)
+      && Number.isInteger(candidate.nanoseconds)
+      && (candidate.nanoseconds as number) >= 0
+      && (candidate.nanoseconds as number) < 1_000_000_000;
   }
 
   // 🔥 NEW: Clear stored userId (for logout)
