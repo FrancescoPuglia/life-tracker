@@ -528,7 +528,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       });
 
       failureStage = 'stale_preview_rejected_without_partial_write';
-      await startNewChat(page);
+      if (EXECUTION_PROFILE !== 'create_onward') await startNewChat(page);
       const stateBeforeStalePreview = await readFixtureState(activeA, fixtureDocumentsA);
       const mutableBeforeStalePreview = await readDocument(activeA, 'timeBlocks', fixture.mutableBlockId);
       const stalePreview = await sendChat(page, proposalPrompt(fixture, fixture.times.staleTargetStart, fixture.times.staleTargetEnd));
