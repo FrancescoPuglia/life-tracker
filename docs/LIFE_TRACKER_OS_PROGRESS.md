@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `24d006500fe25c2afbf97588ad784fc36e04b68b`
+- Current implementation checkpoint SHA: `bc9d1a98dc5a8ef59f653cb78cb6076ec7ec9503`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -391,6 +391,41 @@ slice changes one of those trust boundaries.
   index, queue, API, IAM binding, billing state, secret, provider, or message
   changed.
 
+### R3/R5 Twilio WhatsApp provider and delivery-status boundary
+
+- Green implementation commit: `bc9d1a98dc5a8ef59f653cb78cb6076ec7ec9503`.
+- Added pinned Twilio Node SDK `6.1.0` behind the existing provider-neutral
+  `MessagingProvider` contract. The adapter accepts only server-fixed owner,
+  sender, recipient, callback URL, and content mode; ReminderJob, client, model,
+  and task payload data cannot redirect a paid message or supply credentials.
+  The SDK call has no internal retry, a 10-second timeout, and a 10-minute
+  provider validity window so stale queued messages expire.
+- Sandbox/session messages contain only bounded display title, deterministic
+  localized start time, and planned duration. Production template mode sends
+  one validated `ContentSid` and exactly those three variables with no `Body`.
+  Provider results/errors map to bounded generic accepted/rejected/uncertain
+  outcomes; raw provider errors never persist or enter logs.
+- Added an intentional public HTTPS status-callback factory because Twilio is
+  external to Google Cloud. It accepts only POST form callbacks up to 64 KiB,
+  reconstructs the configured exact HTTPS URL, verifies the official Twilio
+  signature over every form field, checks the exact Account SID, WhatsApp
+  channel, Message SID, status, and bounded failure code, and then translates
+  the webhook into a provider-neutral delivery-status record. CORS is disabled;
+  the auth token is a bound SecretParam and is never present in endpoint
+  metadata or logs.
+- The callback URL carries only deterministic attempt/job hashes. A server-only
+  opaque route is created atomically with the pre-send delivery claim and maps
+  that hash to exactly one owner. The callback transaction then rereads the
+  owner-scoped job and attempt, binds the exact provider message identity,
+  records only monotonic status, treats duplicates/out-of-order callbacks as
+  no-ops, and closes the callback-before-finalization race. Delivered/read
+  status advances an accepted reminder job to `delivered` but never changes a
+  TimeBlock, Task, or Session.
+- Added 90-day TTL declarations and explicit browser denial for both generic
+  provider delivery status and opaque callback-route records. Nothing was
+  deployed; no Twilio credential/account/sender/template was accessed, no
+  message was sent, and no Firebase API, IAM, billing, queue, or index changed.
+
 ## Evidence
 
 | Check | Result |
@@ -467,14 +502,20 @@ slice changes one of those trust boundaries.
 | Combined reminder transaction check before final recovery assertion | PASS; 20/20 reconciliation plus delivery emulator tests; the expected local metadata lookup warning did not affect results |
 | Functions regression after trigger/refill | PASS; 22 files / 248 tests, with 54 emulator-only tests correctly skipped outside the emulator gate |
 | Trigger/refill build/security/hygiene | PASS; Functions typecheck/bundle, index JSON parse, static security, high-confidence changed/staged credential scan, `git diff --check`, and staged diff check |
+| Twilio provider/callback focused tests | PASS; 49/49 adapter, signature, HTTP boundary, delivery-service, and failure-mapping tests |
+| Provider delivery Firestore emulator | PASS; 13/13, including callback-before-finalization, opaque route, exact provider identity, monotonic status, replay, stale authority, and single-send recovery |
+| Firestore Rules after provider delivery status | PASS; 59/59, including root callback-route and owner-scoped provider-status client denial |
+| Functions regression after Twilio boundary | PASS; 24 files / 289 tests, with 57 emulator-only tests correctly skipped outside their explicit gates |
+| Twilio dependency audit | PASS; pinned `twilio@6.1.0`, `npm audit --omit=dev --audit-level=high` found 0 vulnerabilities |
+| Twilio boundary build/security/hygiene | PASS; Functions typecheck/bundle, valid index JSON, static security, 13-file changed/staged credential scans, `git diff --check`, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts, private worker, authoritative trigger, and bounded refill factories green; provider binding/named exports and installed delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, private worker, authoritative trigger/refill, and Twilio adapter/callback factories green; secret/parameter binding, named exports, deployment, and installed delivery pending
 - R4 Daily and weekly reports: NOT STARTED
-- R5 WhatsApp Sandbox and production-ready path: NOT STARTED
+- R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider and signed delivery-status path green locally/emulator; named binding, Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
 
@@ -495,12 +536,13 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with the server-owned Twilio `MessagingProvider` adapter and secret
-binding, real provider-neutral message construction, signature-checked status
-callback boundary, and named private worker/trigger instances. Keep provider
-configuration fail-closed and locally testable; do not read secret values,
-enable Cloud Tasks, billing, APIs, create provider secrets, send messages, or
-deploy any resource. After exact human approval, separately deploy only
+Continue R3 with lazy, fail-closed runtime parameter/SecretParam binding and
+named private worker, reconciliation-trigger, refill-scheduler, and signed
+Twilio callback exports. Prove module loading never reads a secret at import
+time and malformed/missing non-secret configuration prevents provider calls.
+Do not read secret values, enable Cloud Tasks, billing, APIs, create provider
+secrets, send messages, or deploy any resource. After exact human approval,
+separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
