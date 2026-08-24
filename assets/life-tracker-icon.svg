@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Life Tracker">
+  <defs>
+    <linearGradient id="background" x1="76" y1="52" x2="442" y2="468" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="0.55" stop-color="#1748a5"/>
+      <stop offset="1" stop-color="#0f285d"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="142" y1="130" x2="358" y2="370" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#bfdbfe"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#background)"/>
+  <path d="M96 386C164 344 214 367 269 332C326 296 352 234 416 200" fill="none" stroke="#60a5fa" stroke-width="20" stroke-linecap="round" opacity="0.28"/>
+  <circle cx="256" cy="246" r="137" fill="#0b1f49" opacity="0.22"/>
+  <circle cx="256" cy="246" r="115" fill="none" stroke="url(#ring)" stroke-width="28"/>
+  <circle cx="256" cy="246" r="57" fill="#ffffff" opacity="0.12"/>
+  <path d="M187 245L235 293L332 190" fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="108" cy="389" r="14" fill="#93c5fd"/>
+  <circle cx="267" cy="333" r="14" fill="#93c5fd"/>
+  <circle cx="416" cy="200" r="14" fill="#93c5fd"/>
+</svg>

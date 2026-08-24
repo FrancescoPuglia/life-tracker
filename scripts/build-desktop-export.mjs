@@ -20,6 +20,7 @@ const profile = resolveDesktopBuildProfile(
 const buildEnvironment = toNextDesktopEnvironment(profile, commit, process.env);
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
+run(process.execPath, ['scripts/check-desktop-security.mjs'], buildEnvironment);
 run(npmCommand, ['run', 'build'], buildEnvironment);
 run(process.execPath, ['scripts/check-static-security.mjs', '--include-output'], buildEnvironment);
 

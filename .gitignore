@@ -13,6 +13,8 @@ node_modules/
 # Next.js
 /.next/
 /out/
+/src-tauri/target/
+/src-tauri/gen/
 
 # Production
 /build

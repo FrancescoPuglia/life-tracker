@@ -1,0 +1,19 @@
+{
+  "identifier": "main",
+  "description": "Minimal native access for the bundled Life Tracker main window.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-is-minimized",
+    "core:window:allow-is-visible",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "notification:allow-is-permission-granted",
+    "notification:allow-notify",
+    "notification:allow-request-permission",
+    "autostart:allow-disable",
+    "autostart:allow-enable",
+    "autostart:allow-is-enabled"
+  ]
+}
