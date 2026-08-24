@@ -62,6 +62,7 @@ const SERVER_ONLY_COLLECTIONS = [
   'deliveryAttempts',
   'deliveryReceipts',
   'notificationIdempotency',
+  'reminderDeliveryCounters',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [

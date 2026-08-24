@@ -1,4 +1,5 @@
-import type { ReminderJob, ReminderTaskPayload } from './domain';
+import type { ReminderJob, ReminderSuppressionReason, ReminderTaskPayload } from './domain';
+import type { ReminderDeliveryOutcome } from './delivery';
 
 export const REMINDER_STORAGE_SCHEMA_VERSION = 'reminder-storage-v1' as const;
 
@@ -39,6 +40,10 @@ export interface StoredReminderJob extends ReminderJob {
   readonly updatedAt: string;
   readonly supersededAt: string | null;
   readonly infrastructureFailure: 'enqueue_failed' | 'cancel_failed' | null;
+  readonly deliveryAttemptId: string | null;
+  readonly deliveryOutcome: ReminderDeliveryOutcome | null;
+  readonly deliverySuppressionReason: ReminderSuppressionReason | null;
+  readonly deliveryFinalizedAt: string | null;
 }
 
 export interface ReminderTaskCancellation {

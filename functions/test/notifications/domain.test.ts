@@ -154,7 +154,7 @@ describe('delivery-time authority checks', () => {
     ['time_block_completed', { timeBlock: timeBlock({ status: 'completed' }) }],
     ['time_block_ended', { now: '2026-08-24T11:00:00.000Z' }],
     ['idempotency_consumed', { idempotencyConsumed: true }],
-    ['delivery_limit_reached', { successfulDeliveriesForBlockAndChannel: 3 }],
+    ['delivery_limit_reached', { consumedDeliverySlotsForBlockAndChannel: 3 }],
   ] as const)('suppresses %s', (reason, changes) => {
     expect(evaluateReminderDelivery(deliveryFixture(changes))).toEqual({
       action: 'suppress',
@@ -266,7 +266,7 @@ function deliveryFixture(
     policy: ReminderPolicy;
     now: string;
     hasStartedSession: boolean;
-    successfulDeliveriesForBlockAndChannel: number;
+    consumedDeliverySlotsForBlockAndChannel: number;
     idempotencyConsumed: boolean;
   }> = {},
 ) {
@@ -284,8 +284,8 @@ function deliveryFixture(
     policy,
     now: overrides.now ?? '2026-08-24T09:45:00.000Z',
     hasStartedSession: overrides.hasStartedSession ?? false,
-    successfulDeliveriesForBlockAndChannel:
-      overrides.successfulDeliveriesForBlockAndChannel ?? 0,
+    consumedDeliverySlotsForBlockAndChannel:
+      overrides.consumedDeliverySlotsForBlockAndChannel ?? 0,
     idempotencyConsumed: overrides.idempotencyConsumed ?? false,
   };
 }

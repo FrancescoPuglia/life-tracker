@@ -124,7 +124,8 @@ export interface ReminderDeliveryInput {
   readonly policy: ReminderPolicy;
   readonly now: string;
   readonly hasStartedSession: boolean;
-  readonly successfulDeliveriesForBlockAndChannel: number;
+  /** Durable provider-call claims; consuming a slot before send bounds concurrency. */
+  readonly consumedDeliverySlotsForBlockAndChannel: number;
   readonly idempotencyConsumed: boolean;
 }
 
@@ -366,7 +367,7 @@ export function evaluateReminderDelivery(
   }
   if (input.idempotencyConsumed) return suppress('idempotency_consumed');
   if (
-    input.successfulDeliveriesForBlockAndChannel
+    input.consumedDeliverySlotsForBlockAndChannel
     >= input.policy.maxRemindersPerBlock
   ) {
     return suppress('delivery_limit_reached');

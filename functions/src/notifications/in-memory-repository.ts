@@ -85,6 +85,10 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
             updatedAt: timestamp,
             supersededAt: null,
             infrastructureFailure: null,
+            deliveryAttemptId: null,
+            deliveryOutcome: null,
+            deliverySuppressionReason: null,
+            deliveryFinalizedAt: null,
           }));
           if (state === 'client_pending') clientPendingCount += 1;
           else if (state === 'deferred_enqueue') deferredCount += 1;

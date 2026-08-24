@@ -375,6 +375,9 @@ service cloud.firestore {
       match /notificationIdempotency/{document=**} {
         allow read, write: if false;
       }
+      match /reminderDeliveryCounters/{document=**} {
+        allow read, write: if false;
+      }
     }
 
     match /aiChangePlans/{document=**} {
