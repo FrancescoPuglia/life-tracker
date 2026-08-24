@@ -3,6 +3,7 @@ import './globals.css'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { BUILD_ID } from '@/lib/buildInfo'
 import { AI_BACKEND_BUILD_ID } from '@/lib/ai/backendConfig'
+import { DEPLOYMENT_ENVIRONMENT, RUNTIME_TARGET } from '@/lib/runtimeEnvironment'
 
 // 🔥 FIX: Use system fonts instead of Google Fonts to avoid network dependency in dev
 const systemFont = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
@@ -46,6 +47,8 @@ export default function RootLayout({
         className="antialiased"
         data-life-tracker-build={BUILD_ID}
         data-life-tracker-ai-backend={AI_BACKEND_BUILD_ID}
+        data-life-tracker-environment={DEPLOYMENT_ENVIRONMENT}
+        data-life-tracker-runtime={RUNTIME_TARGET}
         style={{ fontFamily: systemFont }}
       >
         <ErrorBoundary>

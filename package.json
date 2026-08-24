@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build && node -e \"try{require('fs').closeSync(require('fs').openSync('out/.nojekyll','a'))}catch{}\"",
     "build:static": "node scripts/build-static-export.mjs",
+    "build:desktop": "node scripts/build-desktop-export.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "node scripts/refresh-next-types.mjs && next typegen && tsc --noEmit",
@@ -22,6 +23,7 @@
     "test:e2e:static": "playwright test --config playwright.static.config.ts",
     "pretest:e2e:staging": "npm --prefix functions run build",
     "test:e2e:staging": "playwright test --config playwright.staging.config.ts",
+    "test:desktop:config": "node --test scripts/desktop-build-profile.test.mjs",
     "check:static-security": "node scripts/check-static-security.mjs",
     "firebase:deploy": "npm run build && firebase deploy --project life-tracker-staging",
     "firebase:rules": "firebase deploy --project life-tracker-staging --only firestore:rules"
