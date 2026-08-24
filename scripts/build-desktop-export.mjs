@@ -4,7 +4,7 @@ import {
   resolveDesktopBuildProfile,
   toNextDesktopEnvironment,
 } from './desktop-build-profile.mjs';
-import { resolveNpmCliInvocation } from './node-cli.mjs';
+import { resolveNextCliInvocation } from './next-cli.mjs';
 
 const commit = git(['rev-parse', 'HEAD']);
 if (!/^[a-f0-9]{40}$/.test(commit)) {
@@ -19,10 +19,10 @@ const profile = resolveDesktopBuildProfile(
   process.env,
 );
 const buildEnvironment = toNextDesktopEnvironment(profile, commit, process.env);
-const npmInvocation = resolveNpmCliInvocation(['run', 'build']);
+const nextInvocation = resolveNextCliInvocation(['build']);
 
 run(process.execPath, ['scripts/check-desktop-security.mjs'], buildEnvironment);
-run(npmInvocation.executable, npmInvocation.args, buildEnvironment);
+run(nextInvocation.executable, nextInvocation.args, buildEnvironment);
 run(process.execPath, ['scripts/check-static-security.mjs', '--include-output'], buildEnvironment);
 
 const exportedHtml = readFileSync('out/index.html', 'utf8');

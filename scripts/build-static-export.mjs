@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { resolveNpmCliInvocation } from './node-cli.mjs';
+import { closeSync, openSync } from 'node:fs';
+import { resolveNextCliInvocation } from './next-cli.mjs';
 
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
   cwd: process.cwd(),
@@ -18,7 +19,7 @@ if (status !== '') {
   throw new Error('Static export verification requires a clean committed source tree.');
 }
 
-const npmInvocation = resolveNpmCliInvocation(['run', 'build']);
+const nextInvocation = resolveNextCliInvocation(['build']);
 const buildEnvironment = {
   ...process.env,
   GITHUB_PAGES: 'true',
@@ -26,13 +27,14 @@ const buildEnvironment = {
   OPENAI_API_KEY: '',
   NEXT_PUBLIC_OPENAI_API_KEY: '',
 };
-const result = spawnSync(npmInvocation.executable, npmInvocation.args, {
+const result = spawnSync(nextInvocation.executable, nextInvocation.args, {
   cwd: process.cwd(),
   env: buildEnvironment,
   stdio: 'inherit',
 });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
+closeSync(openSync('out/.nojekyll', 'a'));
 
 const scan = spawnSync(process.execPath, ['scripts/check-static-security.mjs', '--include-output'], {
   cwd: process.cwd(),
