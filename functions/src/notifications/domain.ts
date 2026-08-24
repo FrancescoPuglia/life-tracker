@@ -325,6 +325,29 @@ export function reminderTaskPayload(job: ReminderJob): ReminderTaskPayload {
   });
 }
 
+export function parseReminderTaskPayload(value: unknown): ReminderTaskPayload {
+  const source = asRecord(value);
+  if (
+    !source
+    || (Object.getPrototypeOf(source) !== Object.prototype
+      && Object.getPrototypeOf(source) !== null)
+    || Object.getOwnPropertySymbols(source).length > 0
+    || Object.keys(source).sort().join(',') !== 'jobId,schemaVersion,uid'
+    || source.schemaVersion !== REMINDER_TASK_SCHEMA_VERSION
+    || typeof source.uid !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(source.uid)
+    || typeof source.jobId !== 'string'
+    || !/^[a-f0-9]{64}$/.test(source.jobId)
+  ) {
+    throw new Error('Reminder task payload identity or schema is invalid.');
+  }
+  return Object.freeze({
+    schemaVersion: REMINDER_TASK_SCHEMA_VERSION,
+    uid: source.uid,
+    jobId: source.jobId,
+  });
+}
+
 export function evaluateReminderDelivery(
   input: ReminderDeliveryInput,
 ): ReminderDeliveryDecision {

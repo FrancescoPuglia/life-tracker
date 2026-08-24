@@ -84,7 +84,7 @@ describe('FirebaseReminderTaskQueue', () => {
     await expect(queue.enqueue(JOB_ID, {
       ...PAYLOAD,
       title: 'must not enter task payload',
-    } as ReminderTaskPayload, NOW.toISOString())).rejects.toThrow('unsupported');
+    } as ReminderTaskPayload, NOW.toISOString())).rejects.toThrow('identity');
     await expect(queue.enqueue(JOB_ID, PAYLOAD, tooFar)).rejects.toThrow('horizon');
     expect(client.enqueues).toEqual([]);
   });

@@ -1,7 +1,7 @@
 import type { App } from 'firebase-admin/app';
 import { getFunctions, type TaskOptions } from 'firebase-admin/functions';
 import {
-  REMINDER_TASK_SCHEMA_VERSION,
+  parseReminderTaskPayload,
   type ReminderTaskPayload,
 } from './domain';
 import type {
@@ -47,13 +47,17 @@ export class FirebaseReminderTaskQueue implements ReminderTaskQueue {
     payload: ReminderTaskPayload,
     scheduledFor: string,
   ): Promise<void> {
-    assertTaskIdentity(taskId, payload);
+    assertHash(taskId, 'Reminder task ID');
+    const normalizedPayload = parseReminderTaskPayload(payload);
+    if (normalizedPayload.jobId !== taskId) {
+      throw new Error('Reminder task payload identity or schema is invalid.');
+    }
     const scheduleTime = validDate(scheduledFor, 'Reminder task schedule');
     if (scheduleTime.getTime() > this.now().getTime() + this.maximumScheduleHorizonMs) {
       throw new Error('Reminder task schedule exceeds the safe Cloud Tasks horizon.');
     }
     try {
-      await this.client.enqueue(Object.freeze({ ...payload }), {
+      await this.client.enqueue(normalizedPayload, {
         id: taskId,
         scheduleTime,
         dispatchDeadlineSeconds: REMINDER_TASK_DISPATCH_DEADLINE_SECONDS,
@@ -81,20 +85,6 @@ export function createFirebaseReminderTaskQueue(app: App): FirebaseReminderTaskQ
   return new FirebaseReminderTaskQueue(
     getFunctions(app).taskQueue<ReminderTaskPayload>(REMINDER_TASK_TARGET),
   );
-}
-
-function assertTaskIdentity(taskId: string, payload: ReminderTaskPayload): void {
-  assertHash(taskId, 'Reminder task ID');
-  if (
-    payload.schemaVersion !== REMINDER_TASK_SCHEMA_VERSION
-    || payload.jobId !== taskId
-    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(payload.uid)
-  ) {
-    throw new Error('Reminder task payload identity or schema is invalid.');
-  }
-  if (Object.keys(payload).sort().join(',') !== 'jobId,schemaVersion,uid') {
-    throw new Error('Reminder task payload contains unsupported fields.');
-  }
 }
 
 function assertHash(value: string, label: string): void {
