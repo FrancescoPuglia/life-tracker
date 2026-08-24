@@ -17,6 +17,9 @@ export default defineConfig({
   use: {
     ...devices['Desktop Chrome'],
     baseURL: staging.appOrigin,
+    // Preserve time for the test's exact-resource cleanup if one UI action
+    // becomes unavailable instead of letting it consume the entire test cap.
+    actionTimeout: 45_000,
     viewport: { width: 1440, height: 900 },
     trace: 'off',
     screenshot: 'only-on-failure',

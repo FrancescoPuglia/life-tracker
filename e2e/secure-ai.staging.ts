@@ -226,7 +226,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       }
 
       failureStage = 'proposal_preview_then_reject';
-      await startNewChat(page);
+      if (EXECUTION_PROFILE === 'full') await startNewChat(page);
       const beforeRejectProposal = await readFixtureState(activeA, fixtureDocumentsA);
       const rejectPreview = await sendChat(page, proposalPrompt(fixture, fixture.times.firstTargetStart, fixture.times.firstTargetEnd));
       requireStagingHttpStatus(rejectPreview.status, rejectPreview.body, rejectPreview.requestId);
