@@ -116,8 +116,48 @@ export function hashIdempotencyKey(
 }
 
 export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
-  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
+  return canonicalValue(value, new Set<object>());
+}
+
+function canonicalValue(value: unknown, ancestors: Set<object>): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return '~NaN';
+    if (value === Number.POSITIVE_INFINITY) return '~Infinity';
+    if (value === Number.NEGATIVE_INFINITY) return '~-Infinity';
+    if (Object.is(value, -0)) return '~-0';
+    return JSON.stringify(value);
+  }
+  if (typeof value !== 'object') {
+    throw new DomainError('INVALID_ARGUMENT', 'Canonical state contains an unsupported value.');
+  }
+  if (ancestors.has(value)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Canonical state contains a cyclic value.');
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    !Array.isArray(value)
+    && prototype !== Object.prototype
+    && prototype !== null
+  ) {
+    throw new DomainError('INVALID_ARGUMENT', 'Canonical state contains an unsupported object.');
+  }
+  if (Object.getOwnPropertySymbols(value).length) {
+    throw new DomainError('INVALID_ARGUMENT', 'Canonical state contains an unsupported key.');
+  }
+
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => canonicalValue(item, ancestors)).join(',')}]`;
+    }
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, item]) => (
+      `${JSON.stringify(key)}:${canonicalValue(item, ancestors)}`
+    )).join(',')}}`;
+  } finally {
+    ancestors.delete(value);
+  }
 }

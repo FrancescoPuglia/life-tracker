@@ -1,16 +1,17 @@
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
-import { getFirestore, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { GeoPoint, getFirestore, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CapabilityIssuer } from '../../src/domain/capabilities';
+import { CapabilityIssuer, hashCapability } from '../../src/domain/capabilities';
 import {
   FirestoreRepository,
   type FirestoreRepositoryVerificationHooks,
 } from '../../src/domain/firestore-repository';
+import { hashPlan } from '../../src/domain/integrity';
 import { createLifeTrackerDomain } from '../../src/domain/factory';
 import { ChangePlanService } from '../../src/domain/services/change-plan-service';
 import { FirestoreRateLimiter } from '../../src/http/rate-limiter';
 import type { PreviewGoalArchitectureArgs, ScheduleBlockInput } from '../../src/domain/schemas';
-import type { AuthContext } from '../../src/domain/types';
+import type { AuthContext, ImmutableChangePlan } from '../../src/domain/types';
 
 const PROJECT_ID = 'demo-life-tracker-functions';
 const TEST_CAPABILITY_SECRET = 'test-only-capability-secret-that-is-longer-than-thirty-two-bytes';
@@ -1132,6 +1133,316 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
     expect((await firestore.doc(`users/${owner}/timeBlocks/block-1`).get()).data()?.title).toBe('Newer human edit');
   });
+
+  it('rejects nested Firestore special types before a destructive preview is persisted', async () => {
+    const uid = uniqueUid('special-type-preview');
+    await seedSchedule(firestore, uid);
+    const { service } = serviceFor(firestore, [
+      'plan-nested-timestamp',
+      'plan-nested-geopoint',
+    ]);
+    const fixtures = [
+      {
+        id: 'nested-timestamp',
+        field: 'when',
+        value: Timestamp.fromDate(new Date('2026-08-17T08:30:00.000Z')),
+        expectedType: Timestamp,
+      },
+      {
+        id: 'nested-geopoint',
+        field: 'where',
+        value: new GeoPoint(41.9028, 12.4964),
+        expectedType: GeoPoint,
+      },
+    ] as const;
+
+    for (const fixture of fixtures) {
+      await firestore.doc(`users/${uid}/notes/${fixture.id}`).set({
+        id: fixture.id,
+        userId: uid,
+        domainId: 'domain-1',
+        title: `Special ${fixture.id}`,
+        entityType: 'global',
+        entityId: null,
+        docJson: { type: 'doc', [fixture.field]: fixture.value, content: [] },
+        tags: [],
+        isPinned: false,
+        createdAt: Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z')),
+        updatedAt: Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z')),
+      });
+
+      await expect(service.previewChanges(context(uid, `preview-${fixture.id}`), {
+        operations: [{
+          op: 'delete',
+          collection: 'notes',
+          id: fixture.id,
+          patch: [],
+        }],
+        reason: 'Unsupported Firestore values must fail before preview persistence.',
+      })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+
+      const raw = (await firestore.doc(`users/${uid}/notes/${fixture.id}`).get()).data();
+      expect(raw?.docJson?.[fixture.field]).toBeInstanceOf(fixture.expectedType);
+    }
+
+    expect((await firestore.doc(`aiChangePlans/${uid}_plan-nested-timestamp`).get()).exists).toBe(false);
+    expect((await firestore.doc(`aiChangePlans/${uid}_plan-nested-geopoint`).get()).exists).toBe(false);
+    expect((await firestore.collection('aiAuditLogs').where('uid', '==', uid).get()).empty).toBe(true);
+  }, 30_000);
+
+  it('preserves ordinary top-level and nested ISO strings through apply and rollback', async () => {
+    const uid = uniqueUid('nested-iso-string');
+    await seedSchedule(firestore, uid);
+    const noteRef = firestore.doc(`users/${uid}/notes/nested-date-note`);
+    const nestedDate = '2026-08-24T12:00:00.000Z';
+    await noteRef.set({
+      id: 'nested-date-note',
+      userId: uid,
+      domainId: 'domain-1',
+      title: 'Original nested date',
+      entityType: 'global',
+      entityId: null,
+      date: nestedDate,
+      docJson: { type: 'doc', meta: { date: nestedDate }, content: [] },
+      tags: [],
+      isPinned: false,
+      createdAt: Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z')),
+      updatedAt: Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z')),
+    });
+    const { service } = serviceFor(firestore, [
+      'plan-nested-date',
+      'execution-nested-date',
+    ]);
+    const preview = await service.previewChanges(context(uid, 'nested-date-preview'), {
+      operations: [{
+        op: 'update',
+        collection: 'notes',
+        id: 'nested-date-note',
+        patch: [{ field: 'title', value: 'Applied nested date' }],
+      }],
+      reason: 'Only the Note title may change.',
+    });
+    const applied = await service.applyPlan(context(uid, 'nested-date-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'nested-date-apply-key-01',
+    });
+    const rawApplied = (await noteRef.get()).data();
+    expect(rawApplied?.date).toBe(nestedDate);
+    expect(rawApplied?.docJson?.meta?.date).toBe(nestedDate);
+
+    await service.rollbackExecution(context(uid, 'nested-date-rollback'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'nested-date-rollback-key-01',
+    });
+    const restored = (await noteRef.get()).data();
+    expect(restored?.title).toBe('Original nested date');
+    expect(restored?.date).toBe(nestedDate);
+    expect(restored?.docJson?.meta?.date).toBe(nestedDate);
+  }, 30_000);
+
+  it('decodes allowlisted timestamps inside Goal and GoalRoadmap arrays without flattening them', async () => {
+    const uid = uniqueUid('nested-allowed-time');
+    const instant = Timestamp.fromDate(new Date('2026-08-17T08:30:00.123Z'));
+    const createdAt = Timestamp.fromDate(new Date('2026-08-16T08:00:00.000Z'));
+    await Promise.all([
+      firestore.doc(`users/${uid}/goals/goal-with-key-result`).set({
+        id: 'goal-with-key-result',
+        userId: uid,
+        title: 'Goal with embedded result',
+        keyResults: [{ id: 'embedded-kr', createdAt: instant, updatedAt: instant }],
+        createdAt,
+        updatedAt: createdAt,
+      }),
+      firestore.doc(`users/${uid}/goalRoadmaps/roadmap-with-milestone`).set({
+        id: 'roadmap-with-milestone',
+        userId: uid,
+        goalId: 'goal-with-key-result',
+        milestones: [{ id: 'milestone-1', completedAt: instant }],
+        createdAt,
+        updatedAt: createdAt,
+      }),
+    ]);
+    const repository = new FirestoreRepository(firestore);
+
+    const goal = await repository.getEntity(uid, 'goals', 'goal-with-key-result');
+    const roadmap = await repository.getEntity(uid, 'goalRoadmaps', 'roadmap-with-milestone');
+    expect((goal?.keyResults as Array<{ createdAt: string; updatedAt: string }>)[0]).toMatchObject({
+      createdAt: '2026-08-17T08:30:00.123Z',
+      updatedAt: '2026-08-17T08:30:00.123Z',
+    });
+    expect((roadmap?.milestones as Array<{ completedAt: string }>)[0]?.completedAt)
+      .toBe('2026-08-17T08:30:00.123Z');
+  }, 30_000);
+
+  it('rejects sub-millisecond entity timestamps before preview persistence', async () => {
+    const uid = uniqueUid('sub-millisecond-time');
+    await seedSchedule(firestore, uid);
+    const blockRef = firestore.doc(`users/${uid}/timeBlocks/block-1`);
+    const seconds = Math.floor(Date.parse('2026-08-17T09:00:00.000Z') / 1_000);
+    const preciseStart = new Timestamp(seconds, 123_456_000);
+    await blockRef.update({ startTime: preciseStart });
+    const { service } = serviceFor(firestore, ['plan-sub-millisecond']);
+
+    await expect(previewTitle(service, uid, 'Unsafe precision rewrite'))
+      .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+
+    const raw = (await blockRef.get()).data();
+    expect(raw?.startTime).toBeInstanceOf(Timestamp);
+    expect(raw?.startTime.nanoseconds).toBe(preciseStart.nanoseconds);
+    expect((await firestore.doc(`aiChangePlans/${uid}_plan-sub-millisecond`).get()).exists).toBe(false);
+    expect((await firestore.collection('aiAuditLogs').where('uid', '==', uid).get()).empty).toBe(true);
+  }, 30_000);
+
+  it('canonicalizes offset datetimes before a verified apply and rollback', async () => {
+    const uid = uniqueUid('offset-datetime');
+    await seedSchedule(firestore, uid);
+    const blockRef = firestore.doc(`users/${uid}/timeBlocks/block-1`);
+    const { service } = serviceFor(firestore, [
+      'plan-offset-datetime',
+      'execution-offset-datetime',
+    ]);
+    const preview = await service.previewChanges(context(uid, 'offset-datetime-preview'), {
+      operations: [{
+        op: 'update',
+        collection: 'timeBlocks',
+        id: 'block-1',
+        patch: [
+          { field: 'startTime', value: '2026-08-17T14:00:00+02:00' },
+          { field: 'endTime', value: '2026-08-17T15:00:00+02:00' },
+        ],
+      }],
+      reason: 'Canonicalize accepted offset instants before approval.',
+    });
+    const applied = await service.applyPlan(context(uid, 'offset-datetime-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'offset-datetime-apply-key-01',
+    });
+
+    expect(applied.verified).toBe(true);
+    expect(preview.diff[0]?.after).toMatchObject({
+      startTime: '2026-08-17T12:00:00.000Z',
+      endTime: '2026-08-17T13:00:00.000Z',
+    });
+    const rawApplied = (await blockRef.get()).data();
+    expect(rawApplied?.startTime.toDate().toISOString()).toBe('2026-08-17T12:00:00.000Z');
+    expect(rawApplied?.endTime.toDate().toISOString()).toBe('2026-08-17T13:00:00.000Z');
+
+    const rolledBack = await service.rollbackExecution(context(uid, 'offset-datetime-rollback'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'offset-datetime-rollback-key-01',
+    });
+    expect(rolledBack.verified).toBe(true);
+    const restored = (await blockRef.get()).data();
+    expect(restored?.startTime.toDate().toISOString()).toBe('2026-08-17T09:00:00.000Z');
+    expect(restored?.endTime.toDate().toISOString()).toBe('2026-08-17T10:00:00.000Z');
+  }, 30_000);
+
+  it('rejects a valid old preview containing noncanonical instants before any apply write', async () => {
+    const uid = uniqueUid('old-offset-plan');
+    await seedSchedule(firestore, uid);
+    const blockRef = firestore.doc(`users/${uid}/timeBlocks/block-1`);
+    const { service } = serviceFor(firestore, [
+      'plan-old-offset',
+      'execution-old-offset',
+    ]);
+    const preview = await service.previewChanges(context(uid, 'old-offset-preview'), {
+      operations: [{
+        op: 'update',
+        collection: 'timeBlocks',
+        id: 'block-1',
+        patch: [
+          { field: 'startTime', value: '2026-08-17T12:00:00.000Z' },
+          { field: 'endTime', value: '2026-08-17T13:00:00.000Z' },
+        ],
+      }],
+      reason: 'Create a preview that will emulate an older runtime.',
+    });
+    const planRef = firestore.doc(`aiChangePlans/${uid}_${preview.id}`);
+    const approvalRef = firestore.doc(`aiApprovals/${uid}_${preview.id}`);
+    const stored = (await planRef.get()).data();
+    if (!stored) throw new Error('Expected stored preview.');
+    const storedPlan = stored as unknown as ImmutableChangePlan;
+    const operations = storedPlan.operations.map((operation, index) => index === 0
+      ? {
+          ...operation,
+          values: {
+            ...operation.values,
+            startTime: '2026-08-17T14:00:00+02:00',
+            endTime: '2026-08-17T15:00:00+02:00',
+          },
+        }
+      : operation);
+    const diff = storedPlan.diff.map((entry, index) => index === 0
+      ? {
+          ...entry,
+          after: {
+            ...entry.after,
+            startTime: '2026-08-17T14:00:00+02:00',
+            endTime: '2026-08-17T15:00:00+02:00',
+          },
+        }
+      : entry);
+    const immutable: Omit<ImmutableChangePlan, 'hash'> = {
+      id: storedPlan.id,
+      uid: storedPlan.uid,
+      requestId: storedPlan.requestId,
+      tool: storedPlan.tool,
+      createdAt: storedPlan.createdAt,
+      expiresAt: storedPlan.expiresAt,
+      snapshotId: storedPlan.snapshotId,
+      baseStateHash: storedPlan.baseStateHash,
+      orchestration: storedPlan.orchestration,
+      operations,
+      diff,
+      reason: storedPlan.reason,
+      warnings: storedPlan.warnings,
+      conflicts: storedPlan.conflicts,
+      assumptions: storedPlan.assumptions,
+      expectedImpact: storedPlan.expectedImpact,
+      destructiveOperationCount: storedPlan.destructiveOperationCount,
+    };
+    const oldFormatHash = hashPlan(immutable);
+    const capability = new CapabilityIssuer(TEST_CAPABILITY_SECRET).issue(
+      'approval',
+      uid,
+      preview.id,
+      oldFormatHash,
+    );
+    await Promise.all([
+      planRef.update({ operations, diff, hash: oldFormatHash }),
+      approvalRef.update({
+        planHash: oldFormatHash,
+        capabilityHash: hashCapability(capability),
+      }),
+    ]);
+
+    await expect(service.applyPlan(context(uid, 'old-offset-apply'), {
+      planId: preview.id,
+      approvalCapability: capability,
+      idempotencyKey: 'old-offset-apply-key-0001',
+    })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+
+    const raw = (await blockRef.get()).data();
+    expect(raw?.startTime.toDate().toISOString()).toBe('2026-08-17T09:00:00.000Z');
+    expect(raw?.endTime.toDate().toISOString()).toBe('2026-08-17T10:00:00.000Z');
+    expect(raw?._version).toBeUndefined();
+    expect((await planRef.get()).data()?.status).toBe('previewed');
+    expect((await approvalRef.get()).data()?.status).toBe('pending');
+    expect((await firestore.collection('aiExecutions').where('uid', '==', uid).get()).empty).toBe(true);
+    const audits = await firestore.collection('aiAuditLogs').where('uid', '==', uid).get();
+    expect(audits.docs.some((document) => (
+      document.data().action === 'apply' && document.data().outcome === 'success'
+    ))).toBe(false);
+    expect(audits.docs.some((document) => (
+      document.data().action === 'apply'
+      && document.data().outcome === 'rejected'
+      && document.data().metadata?.errorCode === 'INVALID_ARGUMENT'
+    ))).toBe(true);
+  }, 30_000);
 
   it('keeps all entity writes unapplied when an audit write in the transaction conflicts', async () => {
     const uid = uniqueUid('audit-failure');

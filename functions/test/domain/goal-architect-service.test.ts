@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseLifePlanPreview } from '../../../packages/ai-contract';
 import { CapabilityIssuer } from '../../src/domain/capabilities';
 import { createLifeTrackerDomain } from '../../src/domain/factory';
 import { InMemoryRepository } from '../../src/domain/in-memory-repository';
@@ -14,6 +15,7 @@ describe('Goal Architect deterministic backend adapter', () => {
     const { repository, domain } = harness(['plan-goal', 'execution-goal', 'execution-retry']);
     const preview = await domain.goalArchitect.preview(context(UID, 'preview'), validDraft());
 
+    expect(parseLifePlanPreview(preview)).toEqual(preview);
     expect(preview.conflicts).toEqual([]);
     expect(preview.operations).toEqual(expect.arrayContaining([
       { action: 'create', entityType: 'goals', entityId: 'goal-new' },

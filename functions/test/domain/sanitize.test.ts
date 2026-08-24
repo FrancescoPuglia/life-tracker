@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeEntity } from '../../src/domain/sanitize';
+import { sanitizeChangeEntity, sanitizeEntity } from '../../src/domain/sanitize';
 
 describe('model-facing entity sanitization', () => {
   it('drops prototype-mutation keys from nested untrusted document content', () => {
@@ -19,5 +19,19 @@ describe('model-facing entity sanitization', () => {
 
     expect(docJson).toEqual({ safe: 'visible' });
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it('normalizes signed zero so an approval guard can detect transport loss', () => {
+    const sanitized = sanitizeChangeEntity('notes', {
+      id: 'note-signed-zero',
+      title: 'Signed zero',
+      docJson: { score: -0 },
+      _version: 0,
+      createdAt: '2026-08-16T12:00:00.000Z',
+      updatedAt: '2026-08-16T12:00:00.000Z',
+    }, ['docJson']);
+
+    expect((sanitized.docJson as { score: number }).score).toBe(0);
+    expect(Object.is((sanitized.docJson as { score: number }).score, -0)).toBe(false);
   });
 });

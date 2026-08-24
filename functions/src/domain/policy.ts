@@ -35,7 +35,10 @@ export function assertEntityId(id: string): void {
 }
 
 const nullableId = z.string().regex(ENTITY_ID).nullable();
-const nullableDateTime = z.string().datetime({ offset: true }).nullable();
+const dateTime = z.string().datetime({ offset: true }).transform((value) => (
+  new Date(value).toISOString()
+));
+const nullableDateTime = dateTime.nullable();
 const shortText = z.string().trim().min(1).max(240);
 const longText = z.string().max(20_000);
 
@@ -95,8 +98,8 @@ const FIELD_SCHEMAS: Readonly<
   },
   timeBlocks: {
     title: shortText,
-    startTime: z.string().datetime({ offset: true }),
-    endTime: z.string().datetime({ offset: true }),
+    startTime: dateTime,
+    endTime: dateTime,
     type: z.enum(['work', 'break', 'buffer', 'travel', 'meeting', 'focus', 'admin', 'deep', 'shallow']),
     status: z.enum(['planned', 'in_progress', 'completed', 'cancelled', 'overrun']),
     taskId: nullableId,

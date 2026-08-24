@@ -78,21 +78,29 @@ const PRODUCT_DEFAULT_PREFERENCES: UserPlanningPreferences = Object.freeze({
   maxConsecutiveHighEnergyBlocks: 2,
 });
 
-const ENTITY_DATE_FIELDS = new Set([
-  'createdAt',
-  'updatedAt',
-  'startTime',
-  'endTime',
-  'actualStartTime',
-  'actualEndTime',
-  'completedAt',
-  'dueDate',
-  'deadline',
-  'targetDate',
-  'date',
-  'timestamp',
-  'earnedAt',
+const COMMON_ENTITY_TIMESTAMP_PATHS = ['createdAt', 'updatedAt'] as const;
+const timestampPaths = (...paths: readonly string[]): ReadonlySet<string> => new Set([
+  ...COMMON_ENTITY_TIMESTAMP_PATHS,
+  ...paths,
 ]);
+const ENTITY_TIMESTAMP_PATHS: Readonly<Record<EntityCollection, ReadonlySet<string>>> = {
+  goals: timestampPaths(
+    'targetDate',
+    'deadline',
+    'keyResults.*.createdAt',
+    'keyResults.*.updatedAt',
+  ),
+  keyResults: timestampPaths(),
+  projects: timestampPaths('dueDate'),
+  tasks: timestampPaths('dueDate', 'deadline', 'completedAt'),
+  timeBlocks: timestampPaths('startTime', 'endTime', 'actualStartTime', 'actualEndTime'),
+  habits: timestampPaths(),
+  habitLogs: timestampPaths('date'),
+  sessions: timestampPaths('startTime', 'endTime'),
+  notes: timestampPaths(),
+  goalRoadmaps: timestampPaths('milestones.*.completedAt'),
+  domains: timestampPaths(),
+};
 
 interface TransactionResult {
   readonly result: PlanActionResult;
@@ -169,7 +177,7 @@ export class FirestoreRepository implements AuditableRepository {
       for (const document of snapshot.docs) {
         lastId = document.id;
         scanned += 1;
-        const record = normalizeEntitySnapshot(uid, document);
+        const record = normalizeEntitySnapshot(uid, collection, document);
         if (!isSoftDeleted(record) && matchesFilter(record, request)) items.push(record);
         if (items.length >= request.limit || scanned >= MAX_SCAN_PER_PAGE) break;
       }
@@ -190,7 +198,7 @@ export class FirestoreRepository implements AuditableRepository {
     assertEntityId(id);
     const snapshot = await this.entityRef(uid, collection, id).get();
     if (!snapshot.exists) return null;
-    const record = normalizeEntitySnapshot(uid, snapshot);
+    const record = normalizeEntitySnapshot(uid, collection, snapshot);
     return isSoftDeleted(record) ? null : record;
   }
 
@@ -224,7 +232,9 @@ export class FirestoreRepository implements AuditableRepository {
     const entries = documents.map((document, index) => {
       const reference = refs[index];
       if (!reference) throw new DomainError('INTERNAL', 'Snapshot reference mismatch.');
-      const record = document.exists ? normalizeEntitySnapshot(uid, document) : null;
+      const record = document.exists
+        ? normalizeEntitySnapshot(uid, reference.collection, document)
+        : null;
       return {
         collection: reference.collection,
         id: reference.id,
@@ -411,9 +421,13 @@ export class FirestoreRepository implements AuditableRepository {
       const snapshotEntityRefs = snapshot.entries.map(({ collection, id }) =>
         this.entityRef(request.uid, collection, id));
       const entitySnapshots = await transaction.getAll(...snapshotEntityRefs);
-      const snapshotRecords = entitySnapshots.map((document) =>
-        document.exists ? normalizeEntitySnapshot(request.uid, document) : null,
-      );
+      const snapshotRecords = entitySnapshots.map((document, index) => {
+        const entry = snapshot.entries[index];
+        if (!entry) throw new DomainError('INTERNAL', 'Snapshot entry mismatch.');
+        return document.exists
+          ? normalizeEntitySnapshot(request.uid, entry.collection, document)
+          : null;
+      });
       const scopeRecords: EntityRecord[][] = [];
       for (const scope of snapshot.scopes) {
         scopeRecords.push([...(await this.readValidationScope(request.uid, scope, transaction))]);
@@ -477,7 +491,7 @@ export class FirestoreRepository implements AuditableRepository {
             operation.values,
             request.now,
           );
-          transaction.create(entityRef, encodeEntity(created));
+          transaction.create(entityRef, encodeEntity(operation.collection, created));
           appliedVersions[key] = created._version;
           appliedStateHashes[key] = hashEntityState(created);
           afterByKey.set(key, created);
@@ -490,7 +504,7 @@ export class FirestoreRepository implements AuditableRepository {
             operation.values,
             request.now,
           );
-          transaction.set(entityRef, encodeEntity(updated));
+          transaction.set(entityRef, encodeEntity(operation.collection, updated));
           appliedVersions[key] = updated._version;
           appliedStateHashes[key] = hashEntityState(updated);
           afterByKey.set(key, updated);
@@ -655,9 +669,13 @@ export class FirestoreRepository implements AuditableRepository {
       const snapshotEntityRefs = snapshot.entries.map(({ collection, id }) =>
         this.entityRef(request.uid, collection, id));
       const entitySnapshots = await transaction.getAll(...snapshotEntityRefs);
-      const snapshotRecords = entitySnapshots.map((document) =>
-        document.exists ? normalizeEntitySnapshot(request.uid, document) : null,
-      );
+      const snapshotRecords = entitySnapshots.map((document, index) => {
+        const entry = snapshot.entries[index];
+        if (!entry) throw new DomainError('INTERNAL', 'Snapshot entry mismatch.');
+        return document.exists
+          ? normalizeEntitySnapshot(request.uid, entry.collection, document)
+          : null;
+      });
       const scopeRecords: EntityRecord[][] = [];
       for (const scope of snapshot.scopes) {
         scopeRecords.push([...(await this.readValidationScope(request.uid, scope, transaction))]);
@@ -705,7 +723,7 @@ export class FirestoreRepository implements AuditableRepository {
             _version: (current?._version ?? entry.version ?? 0) + 1,
             updatedAt: request.now,
           };
-          transaction.set(entityRef, encodeEntity(restored));
+          transaction.set(entityRef, encodeEntity(entry.collection, restored));
           restoredStateHashes[key] = hashEntityState(restored);
         } else {
           throw new DomainError('INTERNAL', 'Rollback snapshot is incomplete.');
@@ -922,8 +940,10 @@ export class FirestoreRepository implements AuditableRepository {
       const expectedHash = entries[index]?.[1];
       const document = documents[index];
       if (!document) throw new DomainError('COMMITTED_UNVERIFIED', 'Verification read is incomplete.');
+      const [collection] = entries[index]?.[0].split('/') ?? [];
+      if (!collection) throw new DomainError('COMMITTED_UNVERIFIED', 'Verification reference is incomplete.');
       const actualHash = document.exists
-        ? hashEntityState(normalizeEntitySnapshot(uid, document))
+        ? hashEntityState(normalizeEntitySnapshot(uid, collection as EntityCollection, document))
         : null;
       if (actualHash !== expectedHash) {
         throw new DomainError('COMMITTED_UNVERIFIED', 'Committed state changed before verification.');
@@ -960,7 +980,7 @@ export class FirestoreRepository implements AuditableRepository {
       throw new DomainError('LIMIT_EXCEEDED', 'Validation scope exceeds its safe bound.');
     }
     return snapshot.docs
-      .map((document) => normalizeEntitySnapshot(uid, document))
+      .map((document) => normalizeEntitySnapshot(uid, scope.collection, document))
       .filter((record) => !isSoftDeleted(record) && matchesValidationScope(record, scope))
       .sort((a, b) => a.id.localeCompare(b.id));
   }
@@ -1254,8 +1274,12 @@ function actionAudit(
   };
 }
 
-function normalizeEntitySnapshot(uid: string, snapshot: DocumentSnapshot): EntityRecord {
-  const decoded = decodeFirestore(snapshot.data() ?? {});
+function normalizeEntitySnapshot(
+  uid: string,
+  collection: EntityCollection,
+  snapshot: DocumentSnapshot,
+): EntityRecord {
+  const decoded = decodeEntityValue(collection, snapshot.data() ?? {}, []);
   if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
     throw new DomainError('INTERNAL', 'Entity data is invalid.');
   }
@@ -1296,23 +1320,110 @@ function assertEmbeddedOwnership(uid: string, data: Record<string, unknown>): vo
   }
 }
 
-function encodeEntity(value: EntityRecord): DocumentData {
-  return encodeEntityValue(value) as DocumentData;
+function encodeEntity(collection: EntityCollection, value: EntityRecord): DocumentData {
+  return encodeEntityValue(collection, value, []) as DocumentData;
 }
 
-function encodeEntityValue(value: unknown, key?: string): unknown {
-  if (typeof value === 'string' && key && ENTITY_DATE_FIELDS.has(key) && isIsoInstant(value)) {
+function encodeEntityValue(
+  collection: EntityCollection,
+  value: unknown,
+  path: readonly string[],
+): unknown {
+  if (isEntityTimestampPath(collection, path) && value !== null && value !== undefined) {
+    if (typeof value !== 'string' || !isCanonicalMillisecondInstant(value)) {
+      throw new DomainError('INVALID_ARGUMENT', 'Entity timestamp must be a canonical millisecond instant.');
+    }
     return Timestamp.fromDate(new Date(value));
   }
-  if (Array.isArray(value)) return value.map((item) => encodeEntityValue(item));
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (item === undefined) {
+        throw new DomainError('INVALID_ARGUMENT', 'Entity data contains an unsupported value.');
+      }
+      return encodeEntityValue(collection, item, [...path, '*']);
+    });
+  }
   if (value && typeof value === 'object') {
+    assertPlainEntityObject(value);
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, item]) => item !== undefined)
-        .map(([entryKey, item]) => [entryKey, encodeEntityValue(item, entryKey)]),
+        .map(([entryKey, item]) => [
+          entryKey,
+          encodeEntityValue(collection, item, [...path, entryKey]),
+        ]),
     );
   }
+  if (
+    value !== null
+    && typeof value !== 'string'
+    && typeof value !== 'number'
+    && typeof value !== 'boolean'
+    && value !== undefined
+  ) {
+    throw new DomainError('INVALID_ARGUMENT', 'Entity data contains an unsupported value.');
+  }
   return value;
+}
+
+function decodeEntityValue(
+  collection: EntityCollection,
+  value: unknown,
+  path: readonly string[],
+): unknown {
+  if (value instanceof Timestamp) {
+    if (!isEntityTimestampPath(collection, path) || value.nanoseconds % 1_000_000 !== 0) {
+      throw new DomainError('INVALID_ARGUMENT', 'Entity data contains an unsupported timestamp.');
+    }
+    return value.toDate().toISOString();
+  }
+  if (isEntityTimestampPath(collection, path) && value !== null && value !== undefined) {
+    throw new DomainError('INVALID_ARGUMENT', 'Entity timestamp has an unsupported stored representation.');
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => decodeEntityValue(collection, item, [...path, '*']));
+  }
+  if (value && typeof value === 'object') {
+    assertPlainEntityObject(value);
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        decodeEntityValue(collection, item, [...path, key]),
+      ]),
+    );
+  }
+  if (
+    value !== null
+    && typeof value !== 'string'
+    && typeof value !== 'number'
+    && typeof value !== 'boolean'
+  ) {
+    throw new DomainError('INVALID_ARGUMENT', 'Entity data contains an unsupported value.');
+  }
+  return value;
+}
+
+function isEntityTimestampPath(
+  collection: EntityCollection,
+  path: readonly string[],
+): boolean {
+  return ENTITY_TIMESTAMP_PATHS[collection].has(path.join('.'));
+}
+
+function isCanonicalMillisecondInstant(value: string): boolean {
+  if (!isIsoInstant(value)) return false;
+  const parsed = new Date(value);
+  return parsed.toISOString() === value;
+}
+
+function assertPlainEntityObject(value: object): void {
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (
+    (prototype !== Object.prototype && prototype !== null)
+    || Object.getOwnPropertySymbols(value).length > 0
+  ) {
+    throw new DomainError('INVALID_ARGUMENT', 'Entity data contains an unsupported Firestore type.');
+  }
 }
 
 function encodeServer(value: unknown): DocumentData {

@@ -185,6 +185,42 @@ describe('ChangePlanService authorization and lifecycle', () => {
     expect(await harness.repository.getEntity(UID, 'timeBlocks', 'block-2')).toBeNull();
   });
 
+  it('detects non-finite content drift even when canonical JSON would alias it to null', async () => {
+    const harness = createHarness(['plan-non-finite-drift', 'execution-non-finite-drift']);
+    harness.repository.seed(UID, 'notes', [{
+      id: 'drift-note',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Original note',
+      entityType: 'global',
+      entityId: null,
+      docJson: { type: 'doc', score: null, content: [] },
+      tags: [],
+      isPinned: false,
+    }]);
+    const preview = await harness.service.previewChanges(context(UID, 'non-finite-drift-preview'), {
+      operations: [{
+        op: 'update',
+        collection: 'notes',
+        id: 'drift-note',
+        patch: [{ field: 'title', value: 'AI title' }],
+      }],
+      reason: 'Bind the exact Note content.',
+    });
+    harness.repository.mutateWithoutVersionForTest(UID, 'notes', 'drift-note', {
+      docJson: { type: 'doc', score: Number.NaN, content: [] },
+    });
+
+    await expect(harness.service.applyPlan(context(UID, 'non-finite-drift-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'non-finite-drift-apply-01',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    const current = await harness.repository.getEntity(UID, 'notes', 'drift-note');
+    expect(current?.title).toBe('Original note');
+    expect((current?.docJson as { score?: unknown }).score).toBeNaN();
+  });
+
   it('rolls back with owner-bound one-time capability and refuses to overwrite newer edits', async () => {
     const harness = createHarness(['plan-rollback', 'execution-rollback', 'plan-newer', 'execution-newer']);
     const preview = await updateTitlePreview(harness.service, UID, 'Temporary title');
@@ -222,6 +258,47 @@ describe('ChangePlanService authorization and lifecycle', () => {
       idempotencyKey: 'unsafe-rollback-key-000001',
     })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
     expect((await harness.repository.getEntity(UID, 'timeBlocks', 'block-1'))?.title).toBe('Human title after AI');
+  });
+
+  it('refuses rollback over a newer non-finite edit that canonical JSON would alias to null', async () => {
+    const harness = createHarness(['plan-non-finite-rollback', 'execution-non-finite-rollback']);
+    harness.repository.seed(UID, 'notes', [{
+      id: 'rollback-note',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Original note',
+      entityType: 'global',
+      entityId: null,
+      docJson: { type: 'doc', score: null, content: [] },
+      tags: [],
+      isPinned: false,
+    }]);
+    const preview = await harness.service.previewChanges(context(UID, 'non-finite-rollback-preview'), {
+      operations: [{
+        op: 'update',
+        collection: 'notes',
+        id: 'rollback-note',
+        patch: [{ field: 'title', value: 'Applied title' }],
+      }],
+      reason: 'Protect a later user edit from rollback.',
+    });
+    const applied = await harness.service.applyPlan(context(UID, 'non-finite-rollback-apply'), {
+      planId: preview.id,
+      approvalCapability: preview.approval.capability,
+      idempotencyKey: 'non-finite-rollback-apply-01',
+    });
+    harness.repository.mutateWithoutVersionForTest(UID, 'notes', 'rollback-note', {
+      docJson: { type: 'doc', score: Number.NaN, content: [] },
+    });
+
+    await expect(harness.service.rollbackExecution(context(UID, 'non-finite-rollback-action'), {
+      executionId: applied.executionId,
+      rollbackCapability: applied.rollback?.capability ?? '',
+      idempotencyKey: 'non-finite-rollback-action-01',
+    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    const current = await harness.repository.getEntity(UID, 'notes', 'rollback-note');
+    expect(current?.title).toBe('Applied title');
+    expect((current?.docJson as { score?: unknown }).score).toBeNaN();
   });
 
   it('normalizes cross-user entity IDs as unavailable without reading the other namespace', async () => {
@@ -300,6 +377,31 @@ describe('ChangePlanService authorization and lifecycle', () => {
     expect(preview.diff[0]?.summary).toMatch(/^Move /);
   });
 
+  it('canonicalizes every accepted writable instant before the preview hash is created', async () => {
+    const harness = createHarness(['plan-canonical-time']);
+    const preview = await harness.service.previewChanges(context(UID, 'canonical-time'), {
+      operations: [{
+        op: 'update',
+        collection: 'timeBlocks',
+        id: 'block-1',
+        patch: [
+          { field: 'startTime', value: '2026-08-17T14:00:00+02:00' },
+          { field: 'endTime', value: '2026-08-17T15:00:00+02:00' },
+        ],
+      }],
+      reason: 'Canonicalize equivalent offset instants.',
+    });
+
+    expect(preview.diff[0]?.after).toMatchObject({
+      startTime: '2026-08-17T12:00:00.000Z',
+      endTime: '2026-08-17T13:00:00.000Z',
+    });
+    expect((await harness.repository.getPlan(UID, preview.id))?.operations[0]?.values).toMatchObject({
+      startTime: '2026-08-17T12:00:00.000Z',
+      endTime: '2026-08-17T13:00:00.000Z',
+    });
+  });
+
   it('fails closed for protected blocks, invalid intervals, and unmapped productive blocks', async () => {
     const harness = createHarness();
     harness.repository.seed(UID, 'timeBlocks', [{
@@ -372,6 +474,167 @@ describe('ChangePlanService authorization and lifecycle', () => {
       .rejects.toMatchObject({ code: 'CONFLICT' });
     expect((await harness.repository.getEntity(UID, 'timeBlocks', 'block-1'))?.title)
       .toBe('Original block');
+  });
+
+  it('rejects a lossy preview before it can hide an over-limit field mutation', async () => {
+    const harness = createHarness(['plan-lossy-preview']);
+    const projectedNotes = 'a'.repeat(8_000);
+    const protectedSuffix = 'KEEP-ME';
+    harness.repository.seed(UID, 'timeBlocks', [{
+      id: 'block-1',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Original block',
+      notes: `${projectedNotes}${protectedSuffix}`,
+      startTime: '2026-08-17T09:00:00.000Z',
+      endTime: '2026-08-17T10:00:00.000Z',
+      status: 'planned',
+      type: 'buffer',
+    }]);
+
+    await expect(harness.service.previewChanges(context(UID, 'lossy-preview'), {
+      operations: [{
+        op: 'update',
+        collection: 'timeBlocks',
+        id: 'block-1',
+        patch: [
+          { field: 'notes', value: projectedNotes },
+          { field: 'startTime', value: '2026-08-17T11:00:00.000Z' },
+          { field: 'endTime', value: '2026-08-17T12:00:00.000Z' },
+        ],
+      }],
+      reason: 'Reproduce a lossy approval preview.',
+    })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+
+    expect(await harness.repository.getPlan(UID, 'plan-lossy-preview')).toBeNull();
+    expect(await harness.repository.listAuditEventsForUser(UID)).toEqual([]);
+    expect(await harness.repository.getEntity(UID, 'timeBlocks', 'block-1')).toMatchObject({
+      notes: `${projectedNotes}${protectedSuffix}`,
+      startTime: '2026-08-17T09:00:00.000Z',
+      endTime: '2026-08-17T10:00:00.000Z',
+    });
+  });
+
+  it('rejects deletion when the complete material entity cannot fit the approval preview', async () => {
+    const harness = createHarness(['plan-lossy-delete']);
+    const protectedSuffix = 'DELETE-ME-ONLY-WITH-EXACT-PREVIEW';
+    harness.repository.seed(UID, 'notes', [{
+      id: 'long-note',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Long note',
+      entityType: 'global',
+      entityId: null,
+      docJson: `${'a'.repeat(8_000)}${protectedSuffix}`,
+      tags: [],
+      isPinned: false,
+    }]);
+
+    await expect(harness.service.previewChanges(context(UID, 'lossy-delete'), {
+      operations: [{
+        op: 'delete',
+        collection: 'notes',
+        id: 'long-note',
+        patch: [],
+      }],
+      reason: 'Delete only after an exact preview.',
+    })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+
+    expect(await harness.repository.getPlan(UID, 'plan-lossy-delete')).toBeNull();
+    expect(await harness.repository.listAuditEventsForUser(UID)).toEqual([]);
+    expect((await harness.repository.getEntity(UID, 'notes', 'long-note'))?.docJson)
+      .toContain(protectedSuffix);
+  });
+
+  it('includes every known semantic field in a destructive approval preview', async () => {
+    const harness = createHarness(['plan-complete-delete']);
+    harness.repository.seed(UID, 'notes', [{
+      id: 'templated-note',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Templated note',
+      entityType: 'global',
+      entityId: null,
+      docJson: { type: 'doc', content: [] },
+      templateId: 'valuable-template',
+      tags: [],
+      isPinned: false,
+    }]);
+
+    const preview = await harness.service.previewChanges(context(UID, 'complete-delete'), {
+      operations: [{
+        op: 'delete',
+        collection: 'notes',
+        id: 'templated-note',
+        patch: [],
+      }],
+      reason: 'Show the complete destructive change.',
+    });
+    expect(preview.diff[0]?.before).toHaveProperty('templateId', 'valuable-template');
+    expect(preview.diff[0]?.changedFields).toContain('templateId');
+    expect((await harness.repository.getEntity(UID, 'notes', 'templated-note'))?.templateId)
+      .toBe('valuable-template');
+  });
+
+  it('fails closed when a deleted entity contains an unknown semantic field', async () => {
+    const harness = createHarness(['plan-unknown-delete']);
+    harness.repository.seed(UID, 'notes', [{
+      id: 'future-note',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Future note',
+      entityType: 'global',
+      entityId: null,
+      docJson: { type: 'doc', content: [] },
+      futureSemanticField: 'must-not-disappear-silently',
+      tags: [],
+      isPinned: false,
+    }]);
+
+    await expect(harness.service.previewChanges(context(UID, 'unknown-delete'), {
+      operations: [{
+        op: 'delete',
+        collection: 'notes',
+        id: 'future-note',
+        patch: [],
+      }],
+      reason: 'Unknown fields require an explicit product contract.',
+    })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+
+    expect(await harness.repository.getPlan(UID, 'plan-unknown-delete')).toBeNull();
+    expect(await harness.repository.listAuditEventsForUser(UID)).toEqual([]);
+    expect((await harness.repository.getEntity(UID, 'notes', 'future-note'))?.futureSemanticField)
+      .toBe('must-not-disappear-silently');
+  });
+
+  it('rejects a delete preview that would alias a non-finite number to null', async () => {
+    const harness = createHarness(['plan-non-finite-delete']);
+    harness.repository.seed(UID, 'notes', [{
+      id: 'non-finite-note',
+      userId: UID,
+      domainId: 'domain-1',
+      title: 'Non-finite note',
+      entityType: 'global',
+      entityId: null,
+      docJson: { type: 'doc', score: Number.NaN, content: [] },
+      tags: [],
+      isPinned: false,
+    }]);
+
+    await expect(harness.service.previewChanges(context(UID, 'non-finite-delete'), {
+      operations: [{
+        op: 'delete',
+        collection: 'notes',
+        id: 'non-finite-note',
+        patch: [],
+      }],
+      reason: 'Reproduce non-finite numeric projection loss.',
+    })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' });
+
+    expect(await harness.repository.getPlan(UID, 'plan-non-finite-delete')).toBeNull();
+    expect(await harness.repository.listAuditEventsForUser(UID)).toEqual([]);
+    const original = await harness.repository.getEntity(UID, 'notes', 'non-finite-note');
+    expect((original?.docJson as { score?: unknown }).score).toBeNaN();
   });
 
   it('refuses a preview that cannot be returned within the bounded public contract', async () => {

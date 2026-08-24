@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { CapabilityIssuer, hashCapability } from '../capabilities';
 import { DomainError, isDomainError } from '../errors';
 import { taskCompletionValuesForPreview } from '../entity-mutation';
@@ -18,7 +19,7 @@ import {
   validateWritableField,
 } from '../policy';
 import type { Repository } from '../repository';
-import { sanitizeEntity } from '../sanitize';
+import { sanitizeChangeEntity } from '../sanitize';
 import { isProtectedTimeBlock } from '../timeblock-policy';
 import type { PreviewChangesArgs } from '../schemas';
 import type {
@@ -78,6 +79,13 @@ const MAX_PUBLIC_PREVIEW_BYTES = 240_000;
 const AI_DELETABLE_COLLECTIONS = new Set<EntityCollection>(['timeBlocks', 'notes']);
 const UNMAPPED_TIMEBLOCK_TYPES = new Set(['break', 'buffer', 'travel', 'admin']);
 const MAX_VALIDATION_SCOPE_ITEMS = 2_000;
+const DELETE_PREVIEW_INTERNAL_FIELDS = new Set([
+  '_version',
+  'userId',
+  'uid',
+  'ownerId',
+  'ownerUid',
+]);
 
 export class ChangePlanService {
   private readonly clock: () => Date;
@@ -228,8 +236,14 @@ export class ChangePlanService {
     previewedAt: string,
   ): Promise<readonly ChangeOperation[]> {
     return Promise.all(operations.map(async (operation) => {
+      const values = Object.fromEntries(
+        Object.entries(operation.values).map(([field, value]) => [
+          field,
+          validateWritableField(operation.collection, field, value),
+        ]),
+      ) as Readonly<Record<string, WriteValue>>;
       if (operation.collection !== 'tasks' || operation.op === 'delete') {
-        return structuredClone(operation);
+        return { ...structuredClone(operation), values };
       }
       const current = operation.op === 'create'
         ? null
@@ -238,7 +252,7 @@ export class ChangePlanService {
         ...structuredClone(operation),
         values: taskCompletionValuesForPreview(
           operation.collection,
-          operation.values,
+          values,
           current,
           previewedAt,
         ) as Readonly<Record<string, WriteValue>>,
@@ -714,13 +728,59 @@ function buildDiff(operation: ChangeOperation, before: EntityRecord | null): Cha
   const after = operation.op === 'delete'
     ? null
     : ({ ...(before ?? {}), id: operation.id, ...operation.values } as EntityRecord);
+  const materialFields = materialFieldsForPreview(operation, before, after);
+  const additionalFields = operation.op === 'delete' ? [] : materialFields;
+  const safeBefore = before
+    ? sanitizeChangeEntity(operation.collection, before, additionalFields)
+    : null;
+  const safeAfter = after
+    ? sanitizeChangeEntity(operation.collection, after, additionalFields)
+    : null;
+  assertMaterialFieldsArePreviewable(materialFields, before, after, safeBefore, safeAfter);
   return {
     collection: operation.collection,
     id: operation.id,
     op: operation.op,
-    before: before ? sanitizeEntity(operation.collection, before) : null,
-    after: after ? sanitizeEntity(operation.collection, after) : null,
+    before: safeBefore,
+    after: safeAfter,
   };
+}
+
+function materialFieldsForPreview(
+  operation: ChangeOperation,
+  before: EntityRecord | null,
+  after: EntityRecord | null,
+): readonly string[] {
+  if (operation.op === 'delete') {
+    return Object.keys(before ?? {}).filter((field) => !DELETE_PREVIEW_INTERNAL_FIELDS.has(field));
+  }
+  if (operation.op === 'create') return ['id', ...Object.keys(operation.values)];
+  return Object.keys(operation.values).filter(
+    (field) => !sameMaterialValue(before?.[field], after?.[field]),
+  );
+}
+
+function assertMaterialFieldsArePreviewable(
+  materialFields: readonly string[],
+  before: EntityRecord | null,
+  after: EntityRecord | null,
+  safeBefore: Readonly<Record<string, unknown>> | null,
+  safeAfter: Readonly<Record<string, unknown>> | null,
+): void {
+  const lossy = materialFields.some((field) => (
+    (before !== null && !sameMaterialValue(before[field], safeBefore?.[field]))
+    || (after !== null && !sameMaterialValue(after[field], safeAfter?.[field]))
+  ));
+  if (lossy) {
+    throw new DomainError(
+      'LIMIT_EXCEEDED',
+      'The exact material change cannot be represented safely in an approval preview.',
+    );
+  }
+}
+
+function sameMaterialValue(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(left, right);
 }
 
 function publicPlan(plan: StoredChangePlan, approvalCapability: string): PublicChangePlan {
