@@ -216,6 +216,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       await startNewChat(page);
       const beforeRejectProposal = await readFixtureState(activeA, fixtureDocumentsA);
       const rejectPreview = await sendChat(page, proposalPrompt(fixture, fixture.times.firstTargetStart, fixture.times.firstTargetEnd));
+      requireStagingHttpStatus(rejectPreview.status, rejectPreview.body, rejectPreview.requestId);
       const rejectedPlan = requireExactPlan(rejectPreview.status, rejectPreview.body.plan, expectedMove(
         fixture,
         fixture.times.firstTargetStart,
@@ -246,6 +247,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       const fixtureBeforeApply = await readFixtureState(activeA, fixtureDocumentsA);
       const mutableBeforeApply = await readDocument(activeA, 'timeBlocks', fixture.mutableBlockId);
       const applyPreview = await sendChat(page, proposalPrompt(fixture, fixture.times.firstTargetStart, fixture.times.firstTargetEnd));
+      requireStagingHttpStatus(applyPreview.status, applyPreview.body, applyPreview.requestId);
       const appliedPlan = requireExactPlan(applyPreview.status, applyPreview.body.plan, expectedMove(
         fixture,
         fixture.times.firstTargetStart,
@@ -401,6 +403,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         mode: 'plan',
         history: [],
       });
+      requireStagingHttpStatus(createPreview.status, createPreview.body, createPreview.requestId);
       const createPlan = requireExactPlan(createPreview.status, createPreview.body.plan, {
         tool: 'preview_timeblock_change',
         action: 'create',
@@ -513,6 +516,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       await startNewChat(page);
       const stateBeforeStalePreview = await readFixtureState(activeA, fixtureDocumentsA);
       const stalePreview = await sendChat(page, proposalPrompt(fixture, fixture.times.staleTargetStart, fixture.times.staleTargetEnd));
+      requireStagingHttpStatus(stalePreview.status, stalePreview.body, stalePreview.requestId);
       requireExactPlan(stalePreview.status, stalePreview.body.plan, expectedMove(
         fixture,
         fixture.times.staleTargetStart,
@@ -581,6 +585,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         mode: 'plan',
         history: [],
       });
+      requireStagingHttpStatus(bPlanResponse.status, bPlanResponse.body, bPlanResponse.requestId);
       const bPlan = requireExactPlan(bPlanResponse.status, bPlanResponse.body.plan, {
         tool: 'preview_timeblock_change',
         action: 'move',
