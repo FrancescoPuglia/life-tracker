@@ -19,6 +19,7 @@ import {
   cleanupStagingResources,
   type CleanupDocumentReference as DocumentReference,
 } from './staging/cleanup';
+import { fetchReadOnlyWithRetry } from './staging/read-only-transport';
 import { readStagingEnvironment } from './staging/safety';
 
 const staging = readStagingEnvironment();
@@ -792,9 +793,8 @@ async function verifyHealthAndCors(
 
   const expectedReleaseId = await expectedBackendReleaseId();
   const expectedRuntimeConfigId = runtimeConfigId();
-  const health = await fetch(`${staging.aiApiBaseUrl}/v1/health`, {
+  const health = await fetchReadOnlyWithRetry(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: staging.appOrigin },
-    signal: AbortSignal.timeout(30_000),
   });
   expect(health.status).toBe(200);
   const healthBody = await safeJson(health);
@@ -810,9 +810,8 @@ async function verifyHealthAndCors(
       schemaVersion: EXPECTED_SCHEMA_VERSION,
     },
   });
-  const evil = await fetch(`${staging.aiApiBaseUrl}/v1/health`, {
+  const evil = await fetchReadOnlyWithRetry(`${staging.aiApiBaseUrl}/v1/health`, {
     headers: { Origin: 'https://untrusted-origin.example' },
-    signal: AbortSignal.timeout(30_000),
   });
   expect(evil.status).toBe(403);
   records.push({
@@ -1261,9 +1260,8 @@ async function readDocument(
   collection: string,
   id: string,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(firestoreUrl(identity.uid, collection, id), {
+  const response = await fetchReadOnlyWithRetry(firestoreUrl(identity.uid, collection, id), {
     headers: { Authorization: `Bearer ${identity.idToken}` },
-    signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`Staging Firestore read failed safely (${response.status}).`);
   return safeJson(response);
@@ -1288,7 +1286,7 @@ async function countDocumentsWithTitle(
   collection: string,
   title: string,
 ): Promise<number> {
-  const response = await fetch(`${firestoreUserUrl(identity.uid)}:runQuery`, {
+  const response = await fetchReadOnlyWithRetry(`${firestoreUserUrl(identity.uid)}:runQuery`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${identity.idToken}`,
@@ -1307,7 +1305,6 @@ async function countDocumentsWithTitle(
         limit: 100,
       },
     }),
-    signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`Staging Firestore collection read failed safely (${response.status}).`);
   const results = await response.json() as unknown;
@@ -1330,9 +1327,8 @@ async function rawFirestoreGet(
   collection: string,
   id: string,
 ): Promise<Response> {
-  return fetch(firestoreUrl(pathUid, collection, id), {
+  return fetchReadOnlyWithRetry(firestoreUrl(pathUid, collection, id), {
     headers: { Authorization: `Bearer ${identity.idToken}` },
-    signal: AbortSignal.timeout(30_000),
   });
 }
 
@@ -1343,9 +1339,8 @@ async function rawRootFirestoreGet(
 ): Promise<Response> {
   const root = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(staging.projectId)}`
     + '/databases/(default)/documents';
-  return fetch(`${root}/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`, {
+  return fetchReadOnlyWithRetry(`${root}/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`, {
     headers: { Authorization: `Bearer ${identity.idToken}` },
-    signal: AbortSignal.timeout(30_000),
   });
 }
 
