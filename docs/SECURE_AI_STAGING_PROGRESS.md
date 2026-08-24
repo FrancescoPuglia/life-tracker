@@ -5,8 +5,9 @@ Date: 2026-08-17
 Branch: `codex/secure-ai-staging`
 Verified source baseline: `ae26be152cb550c495c548bb271f3704bcda5202`
 
-This is a resumable progress checkpoint, not a final staging-verification
-receipt.
+This began as a resumable progress checkpoint. The final 2026-08-24 completion
+section at the end of this file supersedes its former external-blocker state;
+the authoritative final evidence is in `SECURE_AI_VERIFICATION_RECEIPT.md`.
 
 ## Isolated environment
 
@@ -363,3 +364,69 @@ firebase deploy --project life-tracker-staging --only functions:lifeTrackerAiApi
 ```
 
 Never paste the key into chat, a file, or command-line arguments.
+
+## Goal 1 completed from the verified checkpoint
+
+Completion date: 2026-08-24 (Europe/Rome)
+
+The resumed work began from clean local and remote SHA
+`3eaf30f051a2ed8e56d2a19f18f5a7274ee6229c` on
+`codex/secure-ai-staging`. The five cheap consistency checks matched, so no
+recovery or implementation reconstruction was performed.
+
+The two former external prerequisites are resolved:
+
+- Firebase CLI authentication was verified as
+  `pugliafrancesco3@gmail.com` without displaying credential material.
+- Explicit Firebase discovery resolved staging project
+  `life-tracker-staging` (number `675076431391`) and positively distinguished
+  production/reference project `life-tracker-12000` (number `970402762590`).
+- A single minimal authenticated Responses smoke reached `gpt-5.6-sol` and
+  completed successfully. It used 4,326 total tokens, created no Firestore
+  fixture, and its temporary Auth account was deleted. No additional credit was
+  purchased and no billing setting was changed.
+
+Independent review and focused emulator reproduction found state-fidelity
+issues in approval projection, canonical hashes, Firestore transport values,
+and writable date-time normalization. Commit
+`bef7b11c3ea2881b82b72faf52ebea61f251766b` contains the smallest causal
+remediation and negative coverage. The final read-only adversarial review
+found no remaining reproducible P0 or P1.
+
+Only `functions:lifeTrackerAiApi` was deployed, always with explicit target
+`--project life-tracker-staging`. The exact deployed state is:
+
+- reviewed/deployed source commit:
+  `bef7b11c3ea2881b82b72faf52ebea61f251766b`;
+- Cloud Run revision: `lifetrackeraiapi-00010-les`, generation 10, Ready, 100%
+  of traffic in `europe-west1`;
+- backend release fingerprint:
+  `sha256:5bfec76cae50f689f2d3da0fc445044364d96294e8ddafb6d9a4a0415a8a33b4`;
+- runtime configuration fingerprint:
+  `sha256:16636fe0025aa4db11ce7d875dfc341e3fc2d69f817945321c7812aff82393a9`;
+- Firebase source generation `1787586849180704` and source hash
+  `50d67b3457a2d8167d13f657848c5585804cef65`;
+- Node 22 runtime with metadata-only bindings to `OPENAI_API_KEY` version 2
+  and `AI_CAPABILITY_SIGNING_SECRET` version 1. No secret value was accessed.
+
+The bounded full live run `stg-20260824160753-930702` passed all 14 required
+flows against real staging Auth, Firestore, the deployed Function, and the real
+OpenAI Responses API. It proved grounded unique-fixture retrieval,
+Sessions-based 60 planned versus 40 actual minutes, hostile Note containment,
+preview/reject with zero mutation, fresh approve/apply/verify/audit, replay
+protection, stale-state rejection, owner-bound rollback, non-clobbering
+rollback, concurrent idempotency, cross-user isolation, and the browser network
+boundary. All 16/16 mutable synthetic user documents and 2/2 Auth accounts were
+deleted. Durable audit receipts remain by design; ephemeral server records are
+TTL-managed. Production was not contacted or mutated.
+
+The final regression passed 624 root unit tests, 174 Functions unit tests,
+49 Rules emulator tests, 2 Auth emulator tests, 32 Functions transaction
+emulator tests, 3 integrated emulator/browser tests, and 1 static-export
+browser test, together with both typechecks, both builds, the output-inclusive
+static security scan, the changed/staged high-confidence secret scan, and
+`git diff --check`.
+
+Goal 1 is complete. See `SECURE_AI_VERIFICATION_RECEIPT.md` for the complete
+evidence, bounded failed-attempt accounting, residual P2/P3 follow-ups, and the
+final verdict.

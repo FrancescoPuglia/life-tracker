@@ -6,6 +6,11 @@ Scope: local verification of the recovered Life Tracker secure OpenAI
 integration. This receipt records evidence; it does not authorize a merge,
 deployment, production-data change, or secret rotation.
 
+> **Supersession notice (2026-08-24):** Sections A-M preserve the original
+> recovery receipt. Section N is the authoritative Goal 1 staging completion
+> receipt and supersedes earlier statements that staging/provider gates were
+> not run or that external actions remained.
+
 ## A. Recovery and Git state
 
 - Repository: `/mnt/c/Users/Franc/Desktop/LIFE_TRACKING`
@@ -263,6 +268,216 @@ are documented in `docs/SECURE_AI_INTEGRATION.md`. They were not executed.
   separate clean checkout. Rules and indexes must be restored separately only
   after their local emulator verification.
 
-## M. Verdict
+## M. Historical recovery verdict (superseded by N.10)
 
 `SECURE OPENAI INTEGRATION CONDITIONALLY VERIFIED — HUMAN EXTERNAL ACTIONS PENDING`
+
+## N. Final Goal 1 staging verification
+
+Date: 2026-08-24 (Europe/Rome)
+
+### N.1 Git continuity and target identity
+
+| Field | Final evidence |
+| --- | --- |
+| Repository | `FrancescoPuglia/life-tracker` at `/mnt/c/Users/Franc/Desktop/LIFE_TRACKING` |
+| Branch | `codex/secure-ai-staging` |
+| Verified resume SHA | `3eaf30f051a2ed8e56d2a19f18f5a7274ee6229c` |
+| Final reviewed and deployed source SHA | `bef7b11c3ea2881b82b72faf52ebea61f251766b` |
+| Final receipt SHA | The containing commit of this section; the exact resolved local/remote SHA is reported in the final handoff because a Git commit cannot embed its own object ID. |
+| Remote | `origin/codex/secure-ai-staging`; matched local HEAD before receipt editing and is required to match the receipt commit after push. |
+| Final tree | Required clean after the receipt commit and push. Generated `out/`, `.next/`, `functions/lib/`, and ignored test evidence were not manually edited or committed. |
+
+The initial `pwd`, branch, `HEAD`, short status, and remote-ref checks matched
+the preserved checkpoint exactly. No recovery archaeology, reset, merge,
+force-push, or history rewrite occurred.
+
+### N.2 Authenticated staging deployment attestation
+
+- Firebase CLI identity: `pugliafrancesco3@gmail.com`, verified without
+  displaying tokens or credential metadata.
+- Explicit staging target: `life-tracker-staging`, project number
+  `675076431391`.
+- Positively identified production/reference target: `life-tracker-12000`,
+  project number `970402762590`.
+- Production deployment, production Rules/index mutation, production data
+  access, and production Auth mutation: **none**.
+- Deployment scope: only `functions:lifeTrackerAiApi`, with explicit
+  `--project life-tracker-staging`.
+- Runtime: Gen 2, Node 22, `europe-west1`.
+- Cloud Run service: `lifetrackeraiapi`; revision
+  `lifetrackeraiapi-00010-les`; service generation and observed generation 10;
+  Ready `True`; 100% of traffic on that revision.
+- Firebase source generation: `1787586849180704`; source hash:
+  `50d67b3457a2d8167d13f657848c5585804cef65`.
+- Backend release fingerprint:
+  `sha256:5bfec76cae50f689f2d3da0fc445044364d96294e8ddafb6d9a4a0415a8a33b4`.
+- Runtime configuration fingerprint:
+  `sha256:16636fe0025aa4db11ce7d875dfc341e3fc2d69f817945321c7812aff82393a9`.
+- Reviewed runtime contract: model `gpt-5.6-sol`, reasoning effort `medium`,
+  prompt `life-tracker-secure-v1`, schema `life-plan-v1`.
+- Secret bindings, metadata only: `OPENAI_API_KEY` version 2 and
+  `AI_CAPABILITY_SIGNING_SECRET` version 1. No secret value was accessed,
+  printed, rotated, or copied.
+- Exact approved-origin health returned 200 with both fingerprints and exact
+  frontend source SHA. An unapproved origin returned 403.
+
+### N.3 Bounded real-provider evidence
+
+Provider funding/model availability was tested once with the smallest separate
+authenticated smoke before fixture creation. It completed on `gpt-5.6-sol`
+with provider response ID
+`resp_0e85acff431b073b016a8c6a36953c87d2bdbb108e62d7dddd`, one provider call,
+4,312 input tokens, 14 output tokens, and 4,326 total tokens. It created no
+Firestore fixture and its one temporary Auth user was deleted.
+
+The single successful full run then used eight Responses calls: two turns for
+each of the four necessary tool-mediated provider flows. Those flows used
+57,173 total tokens. Including the smoke, all successful final provider
+evidence used nine calls and 61,499 total tokens. No successful live call was
+repeated merely for confidence; no provider loop was uncontrolled; no credit,
+auto-reload, budget, alert, or billing setting was changed.
+
+Those numbers describe the accepted final evidence runs, not cumulative
+provider-account billing across earlier causal failing runs in the preserved
+Goal 1 history. The billing dashboard and secret were intentionally not
+accessed. Every earlier attempt remained bounded by the same per-request,
+per-turn, timeout, and tool-call limits and was run only to reproduce or verify
+a specific failed gate.
+
+The final live evidence artifact is the ignored, secret-safe
+`test-results/staging/live-verification.json`, run
+`stg-20260824160753-930702`, generated from immutable source commit
+`bef7b11c3ea2881b82b72faf52ebea61f251766b`. Its status is `PASS`, its
+execution profile is `full`, all 14 flows are complete, and `notRunFlows` is
+empty.
+
+### N.4 Real staging lifecycle results
+
+| Required result | Real staging evidence | Result |
+| --- | --- | --- |
+| Auth/UID authority | A valid Firebase token was accepted; an otherwise valid authenticated payload containing client `userId` was rejected. | PASS |
+| Grounded read | The model called only `get_life_tracker_state` and returned the run-unique synthetic fixture evidence. Two Responses turns, one tool call, provider model `gpt-5.6-sol`, 12,137 total tokens. Plausible invention without the fixture could not satisfy the exact assertion. | PASS |
+| Planned versus actual | The deterministic `planned_vs_actual` tool reread the persisted TimeBlock and Session and returned exactly 60 planned and 40 actual minutes. Two Responses turns, one tool call, 10,840 total tokens. | PASS |
+| Hostile Note | A real Note containing an instruction/canary was passed only as untrusted data. The model used `get_notes`; no plan or mutation was created; mutation count remained zero. | PASS |
+| Preview/reject | `preview_timeblock_change` produced plan `f05a28aa-8c7e-426c-b66b-5541aa9269b4` and exact changeset hash `d771aea1e6b0a14166c0da79c2fbc844566154e6aa3cea447d576dc1e2e7789d`. State was unchanged before approval and remained unchanged after reject. | PASS |
+| Fresh approve/apply | A fresh controlled plan `347d0aa1-a2f5-430d-96f0-7e7bcbc01ed5` was approved through the authenticated backend. Execution `579683d5-bd2d-4915-99d1-4b643b56874d` committed and reread as verified. | PASS |
+| Exact postcondition | The intended affected set matched exactly; the unrelated fixed block was byte/semantically unchanged; the UI disabled duplicate approval. | PASS |
+| Durable audit | The execution returned a durable verified receipt bound to owner, plan, changeset, and execution. Durable audit records were retained as required. | PASS |
+| Replay/one-time approval | Replaying the same execution converged idempotently; a second approval was rejected; mutation count after replay was zero. | PASS |
+| Concurrent idempotency | Two concurrent create approvals yielded one committed execution, one idempotent replay, and one entity; rollback removed that entity. | PASS |
+| Drift protection | After a legitimate V2 user edit, applying stale V1 returned `STATE_CHANGED`; V2 was preserved and partial mutation count was zero. | PASS |
+| Rollback restoration | Owner-bound Undo restored the exact semantic scope and was itself replay-safe. | PASS |
+| Rollback non-clobber | Wrong-owner rollback was indistinguishable from missing. A later legitimate user edit caused stale rollback denial; the newer edit remained and mutation count was zero. | PASS |
+| Cross-user isolation | Real staging Rules, repository reads, proposal lookup, apply, and server-only namespaces denied user B access to user A. Existing and missing foreign IDs were indistinguishable. | PASS |
+| Browser boundary | Nine requests went only to the project-bound backend; direct OpenAI requests, legacy AI requests, authoritative payload `userId`, and unexpected console errors were all zero. | PASS |
+
+### N.5 Cleanup and production isolation
+
+- Mutable synthetic staging user documents: 16 attempted, 16 deleted.
+- Synthetic Firebase Auth accounts in the full run: 2 attempted, 2 deleted.
+- Separate minimal-smoke Auth account: deleted.
+- Cleanup status: complete for all mutable user fixture state.
+- Server-owned audit receipts were intentionally preserved because deleting
+  them would violate the audit invariant. Ephemeral server-owned plans,
+  snapshots, capabilities, rate records, and idempotency records are governed
+  by the deployed TTL policy.
+- Production/reference project `life-tracker-12000`: explicitly untouched.
+
+### N.6 Regression and security gates
+
+All final commands below exited 0. Counts refer to the final unchanged source
+unless a diagnostic is explicitly noted.
+
+| Gate | Command | Final evidence |
+| --- | --- | --- |
+| Frontend types | `npm run typecheck` | PASS |
+| Functions types | `npm --prefix functions run typecheck` | PASS; exact release fingerprint generated |
+| Frontend unit | `npm run test:run` | 50 files, 624/624 tests PASS |
+| Functions unit | `npm --prefix functions run test:run` | 16 files, 174/174 unit tests PASS; 34 emulator-only tests skipped here and executed below |
+| Frontend static build | `OPENAI_API_KEY= NEXT_PUBLIC_OPENAI_API_KEY= NEXT_PUBLIC_OPENAI_MODEL= npm run build` | PASS; static export completed with the established warning set only |
+| Functions build | `npm --prefix functions run build` | PASS |
+| Firestore Rules | `npm run test:rules` | 49/49 on the official emulator PASS |
+| Firebase Auth boundary | `npm run test:auth:emulator` | 2/2 PASS |
+| Transaction/failure injection | `npm run test:functions:emulator` | 32/32 on the Firestore emulator PASS |
+| Integrated browser/emulators | `npm run test:e2e:emulator` | 3/3 with real emulator Auth/Firestore/Functions and fake provider transport PASS |
+| Static export browser | `OPENAI_API_KEY= NEXT_PUBLIC_OPENAI_API_KEY= NEXT_PUBLIC_OPENAI_MODEL= npm run test:e2e:static` | 1/1 PASS; output-inclusive static security scan PASS |
+| Static/secret security | `npm run check:static-security`; output-inclusive scan; high-confidence changed/staged credential-pattern scan | PASS; no provider secret in browser, tracked source, docs, output, or diff |
+| Patch hygiene | `git diff --check` | PASS |
+
+One root unit test missed its UI timing deadline when the root and Functions
+full suites were first launched concurrently under host CPU pressure (623/624).
+The exact unchanged test immediately passed 1/1, and the isolated unchanged
+full root suite passed 624/624. This was retained as an honest diagnostic, not
+suppressed or weakened.
+
+Two pre-success live harness attempts did not consume a provider call or leave
+state: the first timed out while warming the local Next server before identity
+creation; the second encountered a transient read-only health transport error
+before identity creation. Its safe receipt proved zero documents, zero Auth
+accounts, complete cleanup, and no production access. The unchanged exact warm
+build then produced the single successful full live run above.
+
+### N.7 Independent adversarial review and remediation
+
+The independent reviewer was read-only. It inspected the exact approval,
+hashing, Firestore transport, transaction, rollback, browser, and live-harness
+paths and did not mutate the worktree or cloud state.
+
+The writer reproduced every substantive P1 candidate before remediation,
+including a focused real Firestore-emulator case where an accepted offset
+date-time plan committed and then ended `COMMITTED_UNVERIFIED`. Negative tests
+also captured projection truncation/unknown values/deletions, non-finite and
+signed-zero hashing, nested Firestore Timestamp/GeoPoint handling, sub-
+millisecond timestamps, and ordinary ISO-looking string preservation.
+
+Commit `bef7b11c3ea2881b82b72faf52ebea61f251766b` made approval projection exact
+and fail-closed, introduced compatible collision-safe canonical hashing,
+implemented collection/path-aware Firestore transport validation, and
+canonicalized writable date-times before diff/hash/approval. Focused, adjacent,
+unit, emulator, build, live, and full-regression gates then passed. The final
+review verdict was P0: none; reproducible P1: none remaining.
+
+### N.8 Residual P2/P3 follow-ups
+
+No residual item authorizes a cross-user access, direct model mutation,
+approval replay, stale-state write, unsafe rollback, provider-secret exposure,
+or production access. The read-only review retained these lower-severity
+follow-ups:
+
+1. A provider deadline after server-side preview creation can leave an
+   inaccessible TTL-managed preview even though no capability reaches the
+   client and no domain write is possible.
+2. Read sanitization truncates bounded data without a user-facing truncation
+   marker.
+3. Cleanup cannot distinguish a missing document from a corrupt foreign-owned
+   document when the owner-safe interface correctly returns an equivalent 403.
+4. Legacy persisted date fields that are valid strings but not the canonical
+   storage form fail closed and may require an explicit migration.
+5. Some UI rendering treats `null` and empty optional values equivalently.
+6. Approval capability storage in `sessionStorage` inherits the browser's XSS
+   threat model; CSP and the project-bound backend reduce but cannot eliminate
+   that architectural risk.
+7. The exact staging-configured frontend was served locally for the real cloud
+   run; Firebase Hosting itself was not redeployed or used for this verification.
+8. Firestore integer/double equivalence and inherited classifier field-name
+   edge cases remain P3 fidelity hardening opportunities.
+
+### N.9 Deliberately not run or changed
+
+- Production deployment, production data/Auth access, production Rules/index
+  mutation, merge to `main`, force-push, and history rewrite: **NOT RUN by
+  design**.
+- Firebase Hosting deployment: **NOT RUN**. The user-authorized minimum deploy
+  was the exact staging Function; the full real run used an exact
+  staging-configured local frontend and the deployed cloud backend.
+- Billing changes, additional credit purchase, auto-reload enablement, spend
+  limit changes, alert changes, and API-key rotation: **NOT RUN**.
+- Secret value inspection: **NOT RUN**. Binding metadata and successful
+  secret-backed execution supplied the required evidence.
+- No required Goal 1 lifecycle item is NOT VERIFIED. No human action remains
+  for Goal 1.
+
+### N.10 Final verdict
+
+LIFE TRACKER SECURE AI STAGING VERIFIED
