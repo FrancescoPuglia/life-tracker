@@ -45,6 +45,16 @@ export interface TwilioStatusCallbackFunctionDependencies
   readonly secrets?: readonly SecretParam[];
 }
 
+export interface LazyTwilioStatusCallbackHandlerDependencies {
+  readonly resolve: () => TwilioStatusCallbackDependencies;
+  readonly logger?: TwilioStatusCallbackLogger;
+}
+
+export interface LazyTwilioStatusCallbackFunctionDependencies
+  extends LazyTwilioStatusCallbackHandlerDependencies {
+  readonly secrets?: readonly SecretParam[];
+}
+
 interface HttpRequestLike {
   readonly method?: string;
   readonly headers?: Readonly<Record<string, unknown>>;
@@ -175,6 +185,58 @@ export function createTwilioStatusCallbackFunction(
       response as unknown as HttpResponseLike,
     );
   });
+}
+
+/**
+ * Deployable callback wrapper that resolves SecretParam/runtime parameter
+ * values only inside the first real invocation. Module loading and deployment
+ * discovery therefore never read provider credentials.
+ */
+export function createLazyTwilioStatusCallbackFunction(
+  dependencies: LazyTwilioStatusCallbackFunctionDependencies,
+) {
+  const secrets = dependencies.secrets ? [...dependencies.secrets] : [];
+  const handler = createLazyTwilioStatusCallbackHandler(dependencies);
+  return onRequest({
+    region: TWILIO_STATUS_CALLBACK_REGION,
+    invoker: 'public',
+    ingressSettings: 'ALLOW_ALL',
+    timeoutSeconds: 15,
+    memory: '256MiB',
+    minInstances: 0,
+    maxInstances: 2,
+    concurrency: 10,
+    cors: false,
+    secrets,
+  }, async (request, response) => {
+    await handler(
+      request as unknown as HttpRequestLike,
+      response as unknown as HttpResponseLike,
+    );
+  });
+}
+
+export function createLazyTwilioStatusCallbackHandler(
+  dependencies: LazyTwilioStatusCallbackHandlerDependencies,
+) {
+  const logger = dependencies.logger ?? functionsLogger;
+  let handler: ReturnType<typeof createTwilioStatusCallbackHandler> | undefined;
+  return async (request: HttpRequestLike, response: HttpResponseLike): Promise<void> => {
+    if (!handler) {
+      try {
+        handler = createTwilioStatusCallbackHandler(dependencies.resolve());
+      } catch {
+        logger.error('Twilio status callback runtime configuration is unavailable.', {
+          code: 'TWILIO_STATUS_RUNTIME_CONFIG_INVALID',
+        });
+        response.setHeader('Cache-Control', 'no-store');
+        response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        response.status(500).send('Internal Server Error');
+        return;
+      }
+    }
+    await handler(request, response);
+  };
 }
 
 function normalizedCallback(

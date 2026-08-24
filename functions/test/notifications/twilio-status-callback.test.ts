@@ -8,6 +8,7 @@ import type {
 } from '../../src/notifications/delivery';
 import { createTwilioSignatureValidator } from '../../src/notifications/twilio-provider';
 import {
+  createLazyTwilioStatusCallbackHandler,
   createTwilioStatusCallbackFunction,
   createTwilioStatusCallbackHandler,
   TWILIO_STATUS_CALLBACK_MAX_BODY_BYTES,
@@ -25,6 +26,44 @@ const CALLBACK_BASE_URL =
 const EXACT_URL = `${CALLBACK_BASE_URL}?attemptId=${ATTEMPT_ID}&jobId=${JOB_ID}`;
 
 describe('Twilio status callback boundary', () => {
+  it('resolves runtime parameters and secrets only inside the first callback', async () => {
+    const repository = new FakeRepository('recorded');
+    const logger = new FakeLogger();
+    let resolutions = 0;
+    const handler = createLazyTwilioStatusCallbackHandler({
+      resolve: () => {
+        resolutions += 1;
+        return dependencies(repository, logger);
+      },
+      logger,
+    });
+
+    expect(resolutions).toBe(0);
+    await handler(signedRequest(callbackBody()), new FakeResponse());
+    await handler(signedRequest(callbackBody()), new FakeResponse());
+
+    expect(resolutions).toBe(1);
+    expect(repository.inputs).toHaveLength(2);
+  });
+
+  it('sanitizes lazy runtime configuration failure without reading request content', async () => {
+    const logger = new FakeLogger();
+    const response = new FakeResponse();
+    const handler = createLazyTwilioStatusCallbackHandler({
+      resolve: () => {
+        throw new Error('private secret or runtime parameter value');
+      },
+      logger,
+    });
+
+    await handler(signedRequest(callbackBody({ PrivateField: 'must-not-log' })), response);
+
+    expect(response).toMatchObject({ statusCode: 500, body: 'Internal Server Error' });
+    expect(response.headers['Cache-Control']).toBe('no-store');
+    expect(JSON.stringify(logger)).not.toContain('private secret');
+    expect(JSON.stringify(logger)).not.toContain('must-not-log');
+  });
+
   it('validates all form fields and records one signed WhatsApp status', async () => {
     const repository = new FakeRepository('recorded');
     const logger = new FakeLogger();

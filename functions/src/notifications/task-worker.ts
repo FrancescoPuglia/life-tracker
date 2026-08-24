@@ -4,6 +4,7 @@ import {
   type TaskQueueFunction,
   type TaskQueueOptions,
 } from 'firebase-functions/v2/tasks';
+import type { SecretParam } from 'firebase-functions/params';
 import { REMINDER_TASK_REGION } from './cloud-tasks-queue';
 import type { ReminderDeliveryServiceResult } from './delivery';
 import { parseReminderTaskPayload } from './domain';
@@ -52,6 +53,10 @@ export interface ReminderTaskWorkerDependencies {
   readonly delivery: ReminderDeliveryExecutor;
   readonly now?: () => Date;
   readonly logger?: ReminderTaskWorkerLogger;
+}
+
+export interface ReminderTaskFunctionDependencies extends ReminderTaskWorkerDependencies {
+  readonly secrets?: readonly SecretParam[];
 }
 
 export class ReminderTaskRetryError extends Error {
@@ -127,13 +132,16 @@ export function createReminderTaskHandler(
 }
 
 export function createPrivateReminderTaskFunction(
-  dependencies: ReminderTaskWorkerDependencies,
+  dependencies: ReminderTaskFunctionDependencies,
 ): TaskQueueFunction<unknown> {
   // Outside the emulator, Firebase's task wrapper requires a bearer token
   // before this handler runs. Internal ingress and private IAM remain the
   // deployment authority; task payload fields never substitute for them.
   return onTaskDispatched<unknown>(
-    REMINDER_TASK_QUEUE_OPTIONS,
+    {
+      ...REMINDER_TASK_QUEUE_OPTIONS,
+      secrets: dependencies.secrets ? [...dependencies.secrets] : [],
+    },
     createReminderTaskHandler(dependencies),
   );
 }
