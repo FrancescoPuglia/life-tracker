@@ -7,7 +7,7 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `4d821b3a8ec7e241fc7f27d802b412c2b589e451`
+- Current implementation checkpoint SHA: `7ee89d2f8647231f0672fd4bdd09e11b4cf14e95`
 - Remote master branch: not created yet
 - Worktree at checkpoint start: clean
 
@@ -249,6 +249,36 @@ slice changes one of those trust boundaries.
   also exited before tests until the verified Java and repository-local
   Firebase CLI were explicitly selected.
 
+### R3 bounded Cloud Tasks adapter and scheduling horizon
+
+- Green implementation commit: `7ee89d2f8647231f0672fd4bdd09e11b4cf14e95`.
+- Added a Firebase Admin task-queue adapter targeting only the named private
+  worker `locations/europe-west1/functions/deliverReminderTask`. Payloads have
+  exactly `schemaVersion`, `uid`, and deterministic hashed `jobId`; no title,
+  Note, provider identity, arbitrary header, URL, or raw Firestore path is
+  accepted.
+- Current official Cloud Tasks limits allow scheduling at most 30 days ahead
+  and retain tasks at most 31 days. The adapter deliberately uses a 29-day
+  safety horizon. Farther WhatsApp jobs persist as `deferred_enqueue`; a later
+  reconciliation atomically promotes them when eligible. Desktop jobs remain
+  independent `client_pending` records.
+  See [Cloud Tasks quotas](https://docs.cloud.google.com/tasks/docs/quotas).
+- Explicit hashed task IDs provide provider deduplication, but current official
+  documentation says recently completed/deleted names can remain unavailable
+  for up to 24 hours. Durable Firestore idempotency remains required beyond
+  queue deduplication. See the
+  [tasks.create reference](https://docs.cloud.google.com/tasks/docs/reference/rest/v2/projects.locations.queues.tasks/create).
+- Firebase Admin intentionally resolves task deletion whether the task was
+  deleted or already absent. The provider-neutral audit state is therefore
+  named `resolved`; it never overclaims a confirmed cancellation. Duplicate
+  `task-already-exists` enqueue responses are idempotent success, while other
+  errors are sanitized.
+- The future worker will use `invoker: private`, bounded retries, and bounded
+  rate/concurrency as supported by the official
+  [Firebase task queue options](https://firebase.google.com/docs/reference/functions/firebase-functions.tasks.taskqueueoptions).
+  No queue, worker, API, scheduler, billing state, IAM role, or cloud task was
+  created in this slice.
+
 ## Evidence
 
 | Check | Result |
@@ -305,6 +335,10 @@ slice changes one of those trust boundaries.
 | Reminder Firestore transaction emulator | PASS; 6/6 against isolated local emulator; no cloud project contacted |
 | Functions regression after Firestore adapter | PASS; 18 files / 213 tests, with 40 emulator-only tests correctly skipped in the non-emulator gate |
 | Firestore adapter build/security/hygiene | PASS; typecheck/bundle, index JSON parse, static security, 8-file credential scan, and staged diff check |
+| Cloud Tasks/reconciliation focused tests | PASS; 14/14 minimal payload, duplicate, sanitized failure, cancellation, horizon deferral/refill, and concurrency tests |
+| Reminder Firestore emulator after horizon change | PASS; 7/7, including durable deferred-to-pending promotion |
+| Functions regression after Cloud Tasks adapter | PASS; 19 files / 220 tests, with 41 emulator-only tests correctly skipped in the non-emulator gate |
+| Cloud Tasks build/security/hygiene | PASS; Functions bundle/typecheck, static security, 9-file credential scan, and staged diff check |
 
 ## Release status
 
@@ -333,11 +367,11 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with the Cloud Tasks adapter, TimeBlock/preference reconciliation
-triggers, and authenticated bounded-retry worker behind the green repository
-interfaces. Add transactionally claimed delivery attempts/idempotency before
-any provider adapter. Do not enable Cloud Tasks, billing, APIs, provider
-secrets, or deploy any resource. After exact human approval, separately deploy only
+Continue R3 with TimeBlock/preference reconciliation triggers and the bounded
+horizon refill. Add the authenticated private worker only after transactionally
+claimed delivery attempts/idempotency and provider-timeout uncertainty handling
+are green. Do not enable Cloud Tasks, billing, APIs, provider secrets, or deploy
+any resource. After exact human approval, separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
