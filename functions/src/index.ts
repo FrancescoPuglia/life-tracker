@@ -222,4 +222,7 @@ export * from './domain/tool-definitions';
 export * from './domain/types';
 export * from './mcp/read-only-adapter';
 export * from './notifications/domain';
+export * from './notifications/in-memory-repository';
+export * from './notifications/reconciliation-service';
+export * from './notifications/repository';
 export * from './runtime-config';
