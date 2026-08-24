@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   assertReviewedProjectFields,
+  createStagingBuildEnvironment,
   extractFirebaseWebManifest,
 } from './run-staging-desktop.mjs';
 
@@ -43,5 +44,19 @@ describe('staging Desktop Firebase resolver', () => {
       ),
       /field is not reviewed: projectId/,
     );
+  });
+
+  it('hands off an explicit staging profile while clearing provider credentials', () => {
+    const environment = createStagingBuildEnvironment({
+      OPENAI_API_KEY: 'non-secret-test-value',
+      TWILIO_AUTH_TOKEN: 'non-secret-test-value',
+      RESEND_API_KEY: 'non-secret-test-value',
+    }, 'synthetic-public-web-key');
+
+    assert.equal(environment.LIFE_TRACKER_DESKTOP_PROFILE, 'staging');
+    assert.equal(environment.LIFE_TRACKER_DESKTOP_FIREBASE_API_KEY, 'synthetic-public-web-key');
+    assert.equal(environment.OPENAI_API_KEY, '');
+    assert.equal(environment.TWILIO_AUTH_TOKEN, '');
+    assert.equal(environment.RESEND_API_KEY, '');
   });
 });

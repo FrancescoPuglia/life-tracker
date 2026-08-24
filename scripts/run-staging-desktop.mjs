@@ -82,11 +82,16 @@ function publicBuildEnvironment(environment) {
   };
 }
 
-function run(command, profile) {
-  const environment = publicBuildEnvironment({
-    ...process.env,
-    LIFE_TRACKER_DESKTOP_FIREBASE_API_KEY: profile.apiKey,
+export function createStagingBuildEnvironment(environment, apiKey) {
+  return publicBuildEnvironment({
+    ...environment,
+    LIFE_TRACKER_DESKTOP_PROFILE: 'staging',
+    LIFE_TRACKER_DESKTOP_FIREBASE_API_KEY: apiKey,
   });
+}
+
+function run(command, profile) {
+  const environment = createStagingBuildEnvironment(process.env, profile.apiKey);
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const invocation = command === 'export'
     ? [npmCommand, ['run', 'build:desktop']]
