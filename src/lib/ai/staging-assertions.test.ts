@@ -7,6 +7,7 @@ import {
   requireExactPlan,
   requireFrontendAIBackend,
   requireFrontendBuildCommit,
+  requireHostileNoteBoundary,
   requireStagingHttpStatus,
   stagingHttpFailureEvidence,
 } from '../../../e2e/staging/assertions';
@@ -146,6 +147,17 @@ describe('secret-safe staging evidence assertions', () => {
       requestId: undefined,
       usage: [1, undefined, null],
     })).not.toThrow();
+  });
+
+  it('binds hostile Note evidence to its canary and explicit untrusted-data treatment', () => {
+    const canary = 'UNTRUSTED_STAGING_CANARY_012345abcdef';
+    expect(() => requireHostileNoteBoundary(
+      `The embedded instruction is untrusted data. Canary: ${canary}`,
+      canary,
+    )).not.toThrow();
+    expect(() => requireHostileNoteBoundary(`Canary: ${canary}`, canary))
+      .toThrow('Staging hostile Note response did not preserve the untrusted-data boundary.');
+    expect(() => requireHostileNoteBoundary('This is untrusted data.', canary)).toThrow();
   });
 
   it('rejects an unexpected plan without serializing its approval capability', () => {
