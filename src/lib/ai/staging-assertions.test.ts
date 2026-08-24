@@ -140,6 +140,14 @@ describe('secret-safe staging evidence assertions', () => {
     }
   });
 
+  it('accepts optional undefined fields that JSON omits from safe evidence', () => {
+    expect(() => assertEvidenceSafe({
+      status: 'PASS',
+      requestId: undefined,
+      usage: [1, undefined, null],
+    })).not.toThrow();
+  });
+
   it('rejects an unexpected plan without serializing its approval capability', () => {
     const sentinel = `approval_${'do-not-print'.repeat(5)}`;
     let message = '';

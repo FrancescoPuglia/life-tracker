@@ -304,6 +304,11 @@ function escapeRegExp(value: string): string {
 
 function visitEvidence(value: unknown, depth: number): void {
   if (depth > 12) fail('Staging evidence exceeded its safe nesting bound.');
+  // Optional record fields are represented as undefined in memory and are
+  // omitted (or normalized to null inside arrays) by JSON.stringify. Treat
+  // that non-serializing value as safe so the evidence guard inspects the
+  // artifact that can actually be persisted instead of masking live results.
+  if (value === undefined) return;
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return;
   if (typeof value === 'string') return;
   if (Array.isArray(value)) {
