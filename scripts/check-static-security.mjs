@@ -2,11 +2,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { resolveLifeTrackerAiBackendBaseUrl } = require('../packages/ai-contract');
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const includeOutput = process.argv.includes('--include-output');
 const findings = [];
 

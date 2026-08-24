@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const findings = [];
 const base = readJson('src-tauri/tauri.conf.json');
 const production = readJson('src-tauri/tauri.production.conf.json');
