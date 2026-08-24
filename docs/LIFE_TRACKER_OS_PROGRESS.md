@@ -1,13 +1,13 @@
 # Life Tracker OS progress checkpoint
 
-Last updated: 2026-08-24 (Europe/Rome)
+Last updated: 2026-08-25 (Europe/Rome)
 
 ## Resume identity
 
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `a7b5c64b878c2e36b42f3aebb8e68ebf13f5d856`
+- Current implementation checkpoint SHA: `a90c0b91c76fd0b556de3917c9958022c05de605`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -297,6 +297,35 @@ slice changes one of those trust boundaries.
   trust boundary; no cloud resource, credential, API, billing state, or message
   was touched.
 
+### R3 transactional Firestore delivery claims and receipts
+
+- Green implementation commit: `a90c0b91c76fd0b556de3917c9958022c05de605`.
+- The owner-scoped repository now atomically rereads the stored job, current
+  TimeBlock, notification preferences, persisted user timezone, durable
+  per-block/channel claim counter, and (only for missed-start jobs) one linked
+  authoritative Session before allowing a provider call. Moved, deleted,
+  completed, ended, disabled, quiet-hours, changed-policy, already-started,
+  exhausted-limit, wrong-task, and wrong-owner paths cannot create an attempt.
+- A send transaction writes the job claim, deterministic attempt,
+  notification-idempotency record, and consumed delivery slot before returning
+  any provider message. Duplicate workers serialize; a five-minute claim lease
+  exceeds the configured 60-second task dispatch deadline, and abandoned
+  claims recover as uncertain without another provider call.
+- Finalization is atomic and idempotent across the job, attempt, receipt,
+  idempotency record, and accepted counter. Exact replay succeeds; conflicting
+  results and incoherent/cross-owner records fail closed. Only bounded reason
+  enums and a validated provider message identity persist; raw provider errors,
+  Notes, descriptions, credentials, and storage metadata do not cross the
+  provider request boundary.
+- Added additive 90-day TTL declarations for attempts, receipts,
+  notification idempotency, and counters, plus explicit browser denial for the
+  counter namespace. Nothing was deployed and no API, IAM, billing, queue,
+  provider credential, or external message was touched.
+- The first delivery-emulator run was 9/10 only because the test treated a
+  Firestore `QuerySnapshot` like an array. Changing the assertion to its real
+  `size` property produced 10/10; combined reconciliation/delivery transactions
+  then passed 17/17.
+
 ## Evidence
 
 | Check | Result |
@@ -360,12 +389,17 @@ slice changes one of those trust boundaries.
 | Delivery-service focused tests | PASS; 8/8 no-op, retry, accepted, rejected, timeout/throw, invalid identity, and recovery-without-resend cases |
 | Functions regression after delivery service | PASS; 20 files / 228 tests, with 41 emulator-only tests correctly skipped in the non-emulator gate |
 | Delivery-service build/security/hygiene | PASS; Functions bundle/typecheck, static security, four-file high-confidence credential scan, and staged diff check |
+| Firestore delivery transaction emulator | PASS; 10/10 claim-before-send, exact replay, concurrent single-send, abandoned-claim recovery, stale authority, Session, owner/task, and conflict cases |
+| Combined reminder Firestore emulator | PASS; 17/17 reconciliation and delivery transactions on the same exact job codec |
+| Firestore Rules after delivery persistence | PASS; 57/57, including client denial of attempts, receipts, notification idempotency, and delivery counters |
+| Functions regression after delivery persistence | PASS; 20 files / 228 tests, with 51 emulator-only tests correctly skipped in the non-emulator gate |
+| Delivery persistence build/security/hygiene | PASS; Functions bundle/typecheck, valid index JSON, static security, ten-file high-confidence credential scan, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, and at-most-once delivery service green; Firestore delivery claims, authenticated queue worker, triggers, and installed delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, and Firestore delivery claims/receipts green; authenticated queue worker, triggers, provider binding, and installed delivery pending
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: NOT STARTED
 - R6 ChatGPT read integration: NOT STARTED
@@ -388,14 +422,13 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with the owner-scoped Firestore delivery repository: atomically
-reread current TimeBlock/preferences/execution state, consume idempotency before
-send, and idempotently persist bounded attempt/receipt finalization. Prove
-cross-owner isolation and crash recovery in the transaction emulator before
-exporting the private worker. Then add TimeBlock/preference reconciliation
-triggers and bounded horizon refill. Do not enable Cloud Tasks, billing, APIs,
-provider secrets, or deploy any resource. After exact human approval,
-separately deploy only
+Continue R3 with a strict private task-worker boundary: validate the exact task
+payload and identity, use `invoker: private`, bound retry/rate/concurrency, map
+`retry_later` without acknowledging work early, and inject the already-tested
+delivery service/provider abstraction. Add TimeBlock/preference reconciliation
+triggers and bounded horizon refill after the worker factory is green. Do not
+enable Cloud Tasks, billing, APIs, provider secrets, or deploy any resource.
+After exact human approval, separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
