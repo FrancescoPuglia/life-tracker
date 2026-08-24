@@ -16,6 +16,7 @@ import {
 
 const PROJECT_ID = 'demo-life-tracker-reminders';
 const NOW = '2026-08-24T08:00:00.000Z';
+const ENQUEUE_THROUGH = '2026-09-22T08:00:00.000Z';
 
 describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
   'FirestoreReminderRepository emulator transactions',
@@ -37,7 +38,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       const repository = new FirestoreReminderRepository(firestore);
       const jobs = desiredJobs(uid);
 
-      const first = await repository.reconcileTimeBlock(uid, 'block-1', jobs, NOW);
+      const first = await repository.reconcileTimeBlock(
+        uid, 'block-1', jobs, NOW, ENQUEUE_THROUGH,
+      );
       const cloudJob = first.toEnqueue[0] as ReminderJob;
       expect(first).toMatchObject({
         supersededCount: 0,
@@ -70,7 +73,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
         expect(JSON.stringify(snapshot.data())).not.toContain('hostile note');
       }
 
-      await expect(repository.reconcileTimeBlock(uid, 'block-1', jobs, NOW))
+      await expect(repository.reconcileTimeBlock(
+        uid, 'block-1', jobs, NOW, ENQUEUE_THROUGH,
+      ))
         .resolves.toMatchObject({ toEnqueue: [], toCancel: [], clientPendingCount: 1 });
       expect((await repository.getStoredJob(uid, cloudJob.id))?.state).toBe('scheduled');
     }, 30_000);
@@ -79,7 +84,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       const uid = uniqueUid('move');
       const repository = new FirestoreReminderRepository(firestore);
       const originalJobs = desiredJobs(uid);
-      const first = await repository.reconcileTimeBlock(uid, 'block-1', originalJobs, NOW);
+      const first = await repository.reconcileTimeBlock(
+        uid, 'block-1', originalJobs, NOW, ENQUEUE_THROUGH,
+      );
       const originalCloudJob = first.toEnqueue[0] as ReminderJob;
       await repository.markTaskScheduled(uid, originalCloudJob.id, originalCloudJob.id, NOW);
       const movedJobs = desiredJobs(uid, {
@@ -87,7 +94,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
         endTime: '2026-08-24T12:00:00.000Z',
       });
 
-      const moved = await repository.reconcileTimeBlock(uid, 'block-1', movedJobs, NOW);
+      const moved = await repository.reconcileTimeBlock(
+        uid, 'block-1', movedJobs, NOW, ENQUEUE_THROUGH,
+      );
 
       expect(moved.supersededCount).toBe(2);
       expect(moved.toCancel).toEqual([{
@@ -96,11 +105,44 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
         taskId: originalCloudJob.id,
       }]);
       expect(moved.toEnqueue).toHaveLength(1);
-      await repository.recordTaskCancellation(moved.toCancel[0]!, 'cancelled', NOW);
+      await repository.recordTaskCancellation(moved.toCancel[0]!, 'resolved', NOW);
       expect(await repository.getStoredJob(uid, originalCloudJob.id)).toMatchObject({
         state: 'superseded',
-        cancellationState: 'cancelled',
+        cancellationState: 'resolved',
       });
+    });
+
+    it('durably defers cloud work outside the queue horizon and promotes it later', async () => {
+      const uid = uniqueUid('deferred');
+      const repository = new FirestoreReminderRepository(firestore);
+      const jobs = desiredJobs(uid, {
+        startTime: '2026-10-24T10:00:00.000Z',
+        endTime: '2026-10-24T11:00:00.000Z',
+      });
+
+      const deferred = await repository.reconcileTimeBlock(
+        uid, 'block-1', jobs, NOW, ENQUEUE_THROUGH,
+      );
+      const cloudJob = jobs.find((job) => job.channel === 'whatsapp') as ReminderJob;
+      expect(deferred).toMatchObject({
+        toEnqueue: [],
+        clientPendingCount: 1,
+        deferredCount: 1,
+      });
+      expect(await repository.getStoredJob(uid, cloudJob.id))
+        .toMatchObject({ state: 'deferred_enqueue' });
+
+      const promoted = await repository.reconcileTimeBlock(
+        uid,
+        'block-1',
+        jobs,
+        '2026-09-30T08:00:00.000Z',
+        '2026-10-29T08:00:00.000Z',
+      );
+      expect(promoted).toMatchObject({ deferredCount: 0 });
+      expect(promoted.toEnqueue.map((job) => job.id)).toEqual([cloudJob.id]);
+      expect(await repository.getStoredJob(uid, cloudJob.id))
+        .toMatchObject({ state: 'pending_enqueue' });
     });
 
     it('fails closed when a post-enqueue race has already superseded the job', async () => {
@@ -111,23 +153,24 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
         'block-1',
         desiredJobs(uid),
         NOW,
+        ENQUEUE_THROUGH,
       );
       const enqueued = original.toEnqueue[0] as ReminderJob;
       await repository.reconcileTimeBlock(uid, 'block-1', desiredJobs(uid, {
         startTime: '2026-08-24T11:00:00.000Z',
         endTime: '2026-08-24T12:00:00.000Z',
-      }), NOW);
+      }), NOW, ENQUEUE_THROUGH);
 
       expect(await repository.markTaskScheduled(uid, enqueued.id, enqueued.id, NOW)).toBe(false);
       await repository.recordTaskCancellation({
         uid,
         jobId: enqueued.id,
         taskId: enqueued.id,
-      }, 'not_found', NOW);
+      }, 'resolved', NOW);
       expect(await repository.getStoredJob(uid, enqueued.id)).toMatchObject({
         state: 'superseded',
         taskId: enqueued.id,
-        cancellationState: 'not_found',
+        cancellationState: 'resolved',
       });
     });
 
@@ -137,8 +180,8 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       const jobs = desiredJobs(uid);
 
       const results = await Promise.all([
-        repository.reconcileTimeBlock(uid, 'block-1', jobs, NOW),
-        repository.reconcileTimeBlock(uid, 'block-1', jobs, NOW),
+        repository.reconcileTimeBlock(uid, 'block-1', jobs, NOW, ENQUEUE_THROUGH),
+        repository.reconcileTimeBlock(uid, 'block-1', jobs, NOW, ENQUEUE_THROUGH),
       ]);
 
       expect(results.every((result) => result.toEnqueue.length === 1)).toBe(true);
@@ -159,7 +202,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
         updatedAt: Timestamp.fromDate(new Date(NOW)),
       });
 
-      await expect(repository.reconcileTimeBlock(uid, 'block-1', desiredJobs(uid), NOW))
+      await expect(repository.reconcileTimeBlock(
+        uid, 'block-1', desiredJobs(uid), NOW, ENQUEUE_THROUGH,
+      ))
         .rejects.toThrow('identity');
       expect((await firestore.collection(`users/${uid}/reminderJobs`).get()).empty).toBe(true);
       await expect(repository.reconcileTimeBlock(
@@ -170,6 +215,7 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
           id: String(index).padStart(64, 'a'),
         })),
         NOW,
+        ENQUEUE_THROUGH,
       )).rejects.toThrow('limit');
     });
 
@@ -178,7 +224,9 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       const bob = uniqueUid('bob');
       const repository = new FirestoreReminderRepository(firestore);
       const aliceJob = desiredJobs(alice)[0] as ReminderJob;
-      await repository.reconcileTimeBlock(alice, 'block-1', desiredJobs(alice), NOW);
+      await repository.reconcileTimeBlock(
+        alice, 'block-1', desiredJobs(alice), NOW, ENQUEUE_THROUGH,
+      );
 
       await expect(repository.getStoredJob(bob, aliceJob.id)).resolves.toBeNull();
       expect(await repository.getStoredJob(alice, aliceJob.id)).toMatchObject({ uid: alice });

@@ -26,6 +26,7 @@ export interface ReconcileReminderResult {
   readonly desiredJobCount: number;
   readonly clientPendingCount: number;
   readonly enqueuedCount: number;
+  readonly deferredCount: number;
   readonly supersededCount: number;
   readonly cancellationResolvedCount: number;
   readonly cancellationFailureCount: number;
@@ -56,6 +57,9 @@ export class ReminderReconciliationService {
 
   async reconcile(input: ReconcileReminderInput): Promise<ReconcileReminderResult> {
     const now = normalizeInstant(input.now);
+    const enqueueThrough = new Date(
+      Date.parse(now) + validQueueHorizon(this.queue.maximumScheduleHorizonMs),
+    ).toISOString();
     const preferences = normalizeNotificationPreferences(
       input.uid,
       input.notificationPreferencesValue,
@@ -74,6 +78,7 @@ export class ReminderReconciliationService {
       input.timeBlockId,
       desiredJobs,
       now,
+      enqueueThrough,
     );
 
     let cancellationResolvedCount = 0;
@@ -121,6 +126,7 @@ export class ReminderReconciliationService {
       desiredJobCount: desiredJobs.length,
       clientPendingCount: delta.clientPendingCount,
       enqueuedCount,
+      deferredCount: delta.deferredCount,
       supersededCount: delta.supersededCount,
       cancellationResolvedCount,
       cancellationFailureCount,
@@ -146,4 +152,11 @@ function normalizeInstant(value: string): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) throw new Error('Reminder reconciliation time is invalid.');
   return date.toISOString();
+}
+
+function validQueueHorizon(value: number): number {
+  if (!Number.isInteger(value) || value < 60_000 || value > 30 * 24 * 60 * 60 * 1_000) {
+    throw new Error('Reminder task queue schedule horizon is invalid.');
+  }
+  return value;
 }

@@ -19,6 +19,7 @@ import type {
 
 const UID = 'owner-1';
 const NOW = '2026-08-24T08:00:00.000Z';
+const TASK_HORIZON_MS = 29 * 24 * 60 * 60 * 1_000;
 
 describe('ReminderReconciliationService', () => {
   it('persists Desktop jobs locally and enqueues only provider-neutral WhatsApp tasks', async () => {
@@ -33,6 +34,7 @@ describe('ReminderReconciliationService', () => {
       desiredJobCount: 2,
       clientPendingCount: 1,
       enqueuedCount: 1,
+      deferredCount: 0,
       supersededCount: 0,
       cancellationResolvedCount: 0,
       cancellationFailureCount: 0,
@@ -41,6 +43,7 @@ describe('ReminderReconciliationService', () => {
       desiredJobCount: 2,
       clientPendingCount: 1,
       enqueuedCount: 0,
+      deferredCount: 0,
       supersededCount: 0,
       cancellationResolvedCount: 0,
       cancellationFailureCount: 0,
@@ -85,7 +88,7 @@ describe('ReminderReconciliationService', () => {
     expect(queue.tasks.has(originalTaskId)).toBe(false);
     expect(queue.tasks.size).toBe(1);
     const original = repository.listJobsForTest(UID).find((job) => job.id === originalTaskId);
-    expect(original).toMatchObject({ state: 'superseded', cancellationState: 'cancelled' });
+    expect(original).toMatchObject({ state: 'superseded', cancellationState: 'resolved' });
   });
 
   it('records a failed cancellation but safely completes deletion reconciliation', async () => {
@@ -100,6 +103,7 @@ describe('ReminderReconciliationService', () => {
       desiredJobCount: 0,
       clientPendingCount: 0,
       enqueuedCount: 0,
+      deferredCount: 0,
       supersededCount: 2,
       cancellationResolvedCount: 0,
       cancellationFailureCount: 1,
@@ -110,6 +114,32 @@ describe('ReminderReconciliationService', () => {
         cancellationState: 'failed',
         infrastructureFailure: 'cancel_failed',
       });
+  });
+
+  it('defers work beyond the safe task horizon and schedules it on a later refill', async () => {
+    const repository = new InMemoryReminderRepository();
+    const queue = new FakeReminderQueue();
+    const service = new ReminderReconciliationService(repository, queue);
+    const futureBlock = timeBlockValue({
+      startTime: '2026-10-24T10:00:00.000Z',
+      endTime: '2026-10-24T11:00:00.000Z',
+    });
+
+    await expect(service.reconcile(input({ timeBlockValue: futureBlock }))).resolves.toMatchObject({
+      desiredJobCount: 2,
+      clientPendingCount: 1,
+      deferredCount: 1,
+      enqueuedCount: 0,
+    });
+    expect(queue.tasks.size).toBe(0);
+    expect(repository.listJobsForTest(UID).find((job) => job.channel === 'whatsapp'))
+      .toMatchObject({ state: 'deferred_enqueue' });
+
+    await expect(service.reconcile(input({
+      timeBlockValue: futureBlock,
+      now: '2026-09-30T08:00:00.000Z',
+    }))).resolves.toMatchObject({ deferredCount: 0, enqueuedCount: 1 });
+    expect(queue.tasks.size).toBe(1);
   });
 
   it('persists an enqueue failure and retries only the unscheduled cloud job', async () => {
@@ -138,7 +168,13 @@ describe('ReminderReconciliationService', () => {
       endTime: '2026-08-24T12:00:00.000Z',
     }));
     queue.afterNextEnqueue = async () => {
-      await repository.reconcileTimeBlock(UID, 'block-1', movedJobs, NOW);
+      await repository.reconcileTimeBlock(
+        UID,
+        'block-1',
+        movedJobs,
+        NOW,
+        enqueueThrough(NOW),
+      );
     };
 
     await expect(service.reconcile(input())).resolves.toMatchObject({
@@ -151,7 +187,7 @@ describe('ReminderReconciliationService', () => {
     expect(queue.cancelCalls).toHaveLength(1);
     const staleTaskId = queue.cancelCalls[0] as string;
     expect(repository.listJobsForTest(UID).find((job) => job.id === staleTaskId))
-      .toMatchObject({ state: 'superseded', cancellationState: 'cancelled' });
+      .toMatchObject({ state: 'superseded', cancellationState: 'resolved' });
   });
 
   it('keeps concurrent identical reconciliation to one deterministic external task', async () => {
@@ -183,6 +219,7 @@ describe('ReminderReconciliationService', () => {
 });
 
 class FakeReminderQueue implements ReminderTaskQueue {
+  readonly maximumScheduleHorizonMs = TASK_HORIZON_MS;
   readonly tasks = new Map<string, { payload: ReminderTaskPayload; scheduledFor: string }>();
   readonly enqueueCalls: Array<{
     taskId: string;
@@ -217,8 +254,13 @@ class FakeReminderQueue implements ReminderTaskQueue {
   async cancel(taskId: string): Promise<ReminderQueueCancellationOutcome> {
     this.cancelCalls.push(taskId);
     if (this.failCancellationFor.has(taskId)) throw new Error('queue cancellation failed');
-    return this.tasks.delete(taskId) ? 'cancelled' : 'not_found';
+    this.tasks.delete(taskId);
+    return 'resolved';
   }
+}
+
+function enqueueThrough(now: string): string {
+  return new Date(Date.parse(now) + TASK_HORIZON_MS).toISOString();
 }
 
 function input(overrides: Partial<ReconcileReminderInput> = {}): ReconcileReminderInput {

@@ -1,6 +1,7 @@
 import type { ReminderJob } from './domain';
 import {
   REMINDER_STORAGE_SCHEMA_VERSION,
+  desiredReminderStorageState,
   isReconciliationActiveJobState,
   sameImmutableReminderJob,
   type ReminderReconciliationDelta,
@@ -8,7 +9,6 @@ import {
   type ReminderTaskCancellation,
   type ReminderTaskCancellationState,
   type StoredReminderJob,
-  type StoredReminderJobState,
 } from './repository';
 
 /** Deterministic transactional adapter for unit tests; it never contacts Firebase. */
@@ -21,11 +21,16 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
     timeBlockId: string,
     desiredJobs: readonly ReminderJob[],
     now: string,
+    enqueueThrough: string,
   ): Promise<ReminderReconciliationDelta> {
     return this.withTransaction(() => {
       assertIdentity(uid, 'UID');
       assertIdentity(timeBlockId, 'TimeBlock ID');
       const timestamp = validInstant(now, 'Reconciliation time');
+      const enqueueBoundary = validInstant(enqueueThrough, 'Task enqueue horizon');
+      if (Date.parse(enqueueBoundary) < Date.parse(timestamp)) {
+        throw new Error('Task enqueue horizon cannot be before reconciliation time.');
+      }
       const desired = new Map<string, ReminderJob>();
       for (const job of desiredJobs) {
         assertDesiredJob(uid, timeBlockId, job);
@@ -61,6 +66,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
 
       const toEnqueue: ReminderJob[] = [];
       let clientPendingCount = 0;
+      let deferredCount = 0;
       for (const job of desired.values()) {
         const key = jobKey(uid, job.id);
         const current = this.jobs.get(key);
@@ -68,9 +74,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
           throw new Error('Stored reminder job does not match its deterministic identity.');
         }
         if (!current) {
-          const state: StoredReminderJobState = job.channel === 'desktop'
-            ? 'client_pending'
-            : 'pending_enqueue';
+          const state = desiredReminderStorageState(job, enqueueBoundary);
           this.jobs.set(key, Object.freeze({
             ...clone(job),
             storageSchemaVersion: REMINDER_STORAGE_SCHEMA_VERSION,
@@ -83,17 +87,29 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
             infrastructureFailure: null,
           }));
           if (state === 'client_pending') clientPendingCount += 1;
+          else if (state === 'deferred_enqueue') deferredCount += 1;
           else toEnqueue.push(clone(job));
           continue;
         }
         if (current.state === 'client_pending') {
           clientPendingCount += 1;
+        } else if (current.state === 'deferred_enqueue') {
+          const state = desiredReminderStorageState(job, enqueueBoundary);
+          if (state === 'deferred_enqueue') {
+            deferredCount += 1;
+          } else {
+            this.jobs.set(key, Object.freeze({
+              ...current,
+              state,
+              updatedAt: timestamp,
+              infrastructureFailure: null,
+            }));
+            toEnqueue.push(clone(job));
+          }
         } else if (current.state === 'pending_enqueue' || current.state === 'schedule_failed') {
           toEnqueue.push(clone(job));
         } else if (current.state === 'superseded') {
-          const state: StoredReminderJobState = job.channel === 'desktop'
-            ? 'client_pending'
-            : 'pending_enqueue';
+          const state = desiredReminderStorageState(job, enqueueBoundary);
           this.jobs.set(key, Object.freeze({
             ...current,
             state,
@@ -104,6 +120,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
             infrastructureFailure: null,
           }));
           if (state === 'client_pending') clientPendingCount += 1;
+          else if (state === 'deferred_enqueue') deferredCount += 1;
           else toEnqueue.push(clone(job));
         }
       }
@@ -113,6 +130,7 @@ export class InMemoryReminderRepository implements ReminderReconciliationReposit
         toCancel: Object.freeze(toCancel),
         supersededCount,
         clientPendingCount,
+        deferredCount,
       });
     });
   }

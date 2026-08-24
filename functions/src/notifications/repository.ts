@@ -4,6 +4,7 @@ export const REMINDER_STORAGE_SCHEMA_VERSION = 'reminder-storage-v1' as const;
 
 export type StoredReminderJobState =
   | 'client_pending'
+  | 'deferred_enqueue'
   | 'pending_enqueue'
   | 'schedule_failed'
   | 'scheduled'
@@ -17,6 +18,7 @@ export type StoredReminderJobState =
 
 export const RECONCILIATION_ACTIVE_JOB_STATES: ReadonlySet<StoredReminderJobState> = new Set([
   'client_pending',
+  'deferred_enqueue',
   'pending_enqueue',
   'schedule_failed',
   'scheduled',
@@ -25,8 +27,7 @@ export const RECONCILIATION_ACTIVE_JOB_STATES: ReadonlySet<StoredReminderJobStat
 export type ReminderTaskCancellationState =
   | 'not_applicable'
   | 'pending'
-  | 'cancelled'
-  | 'not_found'
+  | 'resolved'
   | 'failed';
 
 export interface StoredReminderJob extends ReminderJob {
@@ -51,6 +52,7 @@ export interface ReminderReconciliationDelta {
   readonly toCancel: readonly ReminderTaskCancellation[];
   readonly supersededCount: number;
   readonly clientPendingCount: number;
+  readonly deferredCount: number;
 }
 
 export interface ReminderReconciliationRepository {
@@ -63,6 +65,7 @@ export interface ReminderReconciliationRepository {
     timeBlockId: string,
     desiredJobs: readonly ReminderJob[],
     now: string,
+    enqueueThrough: string,
   ): Promise<ReminderReconciliationDelta>;
 
   /**
@@ -85,9 +88,12 @@ export interface ReminderReconciliationRepository {
   ): Promise<void>;
 }
 
-export type ReminderQueueCancellationOutcome = 'cancelled' | 'not_found';
+export type ReminderQueueCancellationOutcome = 'resolved';
 
 export interface ReminderTaskQueue {
+  /** Must stay below the provider's documented absolute maximum. */
+  readonly maximumScheduleHorizonMs: number;
+
   enqueue(
     taskId: string,
     payload: ReminderTaskPayload,
@@ -116,4 +122,14 @@ export function sameImmutableReminderJob(
     && stored.expectedTimeBlockVersion === desired.expectedTimeBlockVersion
     && stored.expectedPolicyVersion === desired.expectedPolicyVersion
     && stored.idempotencyKey === desired.idempotencyKey;
+}
+
+export function desiredReminderStorageState(
+  job: ReminderJob,
+  enqueueThrough: string,
+): Extract<StoredReminderJobState, 'client_pending' | 'deferred_enqueue' | 'pending_enqueue'> {
+  if (job.channel === 'desktop') return 'client_pending';
+  return Date.parse(job.scheduledFor) <= Date.parse(enqueueThrough)
+    ? 'pending_enqueue'
+    : 'deferred_enqueue';
 }

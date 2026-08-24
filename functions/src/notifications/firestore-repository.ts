@@ -12,6 +12,7 @@ import {
 } from './domain';
 import {
   REMINDER_STORAGE_SCHEMA_VERSION,
+  desiredReminderStorageState,
   isReconciliationActiveJobState,
   sameImmutableReminderJob,
   type ReminderReconciliationDelta,
@@ -45,10 +46,15 @@ export class FirestoreReminderRepository implements ReminderReconciliationReposi
     timeBlockId: string,
     desiredJobs: readonly ReminderJob[],
     now: string,
+    enqueueThrough: string,
   ): Promise<ReminderReconciliationDelta> {
     assertIdentity(uid, 'UID');
     assertIdentity(timeBlockId, 'TimeBlock ID');
     const timestamp = normalizeInstant(now, 'Reconciliation time');
+    const enqueueBoundary = normalizeInstant(enqueueThrough, 'Task enqueue horizon');
+    if (Date.parse(enqueueBoundary) < Date.parse(timestamp)) {
+      throw new Error('Task enqueue horizon cannot be before reconciliation time.');
+    }
     if (desiredJobs.length > MAX_ACTIVE_REMINDER_JOBS_PER_BLOCK) {
       throw new Error('Reminder reconciliation exceeds the per-block job limit.');
     }
@@ -102,15 +108,14 @@ export class FirestoreReminderRepository implements ReminderReconciliationReposi
 
       const toEnqueue: ReminderJob[] = [];
       let clientPendingCount = 0;
+      let deferredCount = 0;
       for (const job of desired.values()) {
         const current = currentJobs.get(job.id);
         if (current && !sameImmutableReminderJob(current, job)) {
           throw new Error('Stored reminder job does not match its deterministic identity.');
         }
         if (!current) {
-          const state: StoredReminderJobState = job.channel === 'desktop'
-            ? 'client_pending'
-            : 'pending_enqueue';
+          const state = desiredReminderStorageState(job, enqueueBoundary);
           writeJob(transaction, this.jobRef(uid, job.id), Object.freeze({
             ...clone(job),
             storageSchemaVersion: REMINDER_STORAGE_SCHEMA_VERSION,
@@ -123,17 +128,29 @@ export class FirestoreReminderRepository implements ReminderReconciliationReposi
             infrastructureFailure: null,
           }));
           if (state === 'client_pending') clientPendingCount += 1;
+          else if (state === 'deferred_enqueue') deferredCount += 1;
           else toEnqueue.push(clone(job));
           continue;
         }
         if (current.state === 'client_pending') {
           clientPendingCount += 1;
+        } else if (current.state === 'deferred_enqueue') {
+          const state = desiredReminderStorageState(job, enqueueBoundary);
+          if (state === 'deferred_enqueue') {
+            deferredCount += 1;
+          } else {
+            writeJob(transaction, this.jobRef(uid, job.id), Object.freeze({
+              ...current,
+              state,
+              updatedAt: timestamp,
+              infrastructureFailure: null,
+            }));
+            toEnqueue.push(clone(job));
+          }
         } else if (current.state === 'pending_enqueue' || current.state === 'schedule_failed') {
           toEnqueue.push(clone(job));
         } else if (current.state === 'superseded') {
-          const state: StoredReminderJobState = job.channel === 'desktop'
-            ? 'client_pending'
-            : 'pending_enqueue';
+          const state = desiredReminderStorageState(job, enqueueBoundary);
           writeJob(transaction, this.jobRef(uid, job.id), Object.freeze({
             ...current,
             state,
@@ -144,6 +161,7 @@ export class FirestoreReminderRepository implements ReminderReconciliationReposi
             infrastructureFailure: null,
           }));
           if (state === 'client_pending') clientPendingCount += 1;
+          else if (state === 'deferred_enqueue') deferredCount += 1;
           else toEnqueue.push(clone(job));
         }
       }
@@ -161,6 +179,7 @@ export class FirestoreReminderRepository implements ReminderReconciliationReposi
         toCancel: Object.freeze(toCancel),
         supersededCount,
         clientPendingCount,
+        deferredCount,
       });
     });
   }
@@ -213,7 +232,7 @@ export class FirestoreReminderRepository implements ReminderReconciliationReposi
     now: string,
   ): Promise<void> {
     assertJobIdentity(cancellation.uid, cancellation.jobId, cancellation.taskId);
-    if (outcome !== 'cancelled' && outcome !== 'not_found' && outcome !== 'failed') {
+    if (outcome !== 'resolved' && outcome !== 'failed') {
       throw new Error('Reminder task cancellation outcome is invalid.');
     }
     const timestamp = normalizeInstant(now, 'Task cancellation time');
@@ -387,6 +406,7 @@ function decodeManifest(
 function storedState(value: unknown): StoredReminderJobState {
   if (
     value === 'client_pending'
+    || value === 'deferred_enqueue'
     || value === 'pending_enqueue'
     || value === 'schedule_failed'
     || value === 'scheduled'
@@ -407,8 +427,7 @@ function storedCancellationState(value: unknown): ReminderTaskCancellationState 
   if (
     value === 'not_applicable'
     || value === 'pending'
-    || value === 'cancelled'
-    || value === 'not_found'
+    || value === 'resolved'
     || value === 'failed'
   ) {
     return value;
