@@ -7,7 +7,7 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `95985185aa52b3612b394d85879af2cf737fa45f`
+- Current implementation checkpoint SHA: `1bb03cb8a36a615f3a8b1485ec31dca6f75bf202`
 - Remote master branch: not created yet
 - Worktree at checkpoint start: clean
 
@@ -197,6 +197,28 @@ slice changes one of those trust boundaries.
   Task, deploy a Function, send a notification, call a provider, or mutate any
   Firebase project.
 
+### R3 durable reconciliation and queue boundary
+
+- Green implementation commit: `1bb03cb8a36a615f3a8b1485ec31dca6f75bf202`.
+- Added an atomic repository contract for durable reminder jobs and an
+  injectable provider-neutral task queue. Stored states distinguish local
+  Desktop availability, pending/scheduled cloud work, supersession, delivery
+  outcomes, and sanitized enqueue/cancellation failures.
+- Reconciliation persists the exact desired job set before external queue work.
+  It schedules only WhatsApp jobs in the cloud queue; Desktop jobs stay
+  `client_pending` for the native client path.
+- Replays do not enqueue an already scheduled job. Concurrent identical runs
+  converge on one deterministic task ID. If a block moves after enqueue but
+  before the scheduled-state transaction, the newly created stale task is
+  immediately cancelled best effort and remains superseded in durable state.
+- A cancellation failure does not reactivate obsolete work: it is recorded as
+  sanitized infrastructure state and the future authenticated worker must still
+  reread and suppress the superseded/version-mismatched job. An enqueue failure
+  becomes `schedule_failed` and only that unscheduled job is retried.
+- Tests use a serialized in-memory transactional repository and idempotent fake
+  queue. No Firebase project, Cloud Tasks API, provider, secret, billing state,
+  or external message was touched.
+
 ## Evidence
 
 | Check | Result |
@@ -246,6 +268,9 @@ slice changes one of those trust boundaries.
 | Functions regression after reminder domain | PASS; 17 files / 206 tests, with 34 emulator-only tests correctly skipped outside the emulator gate |
 | Functions typecheck/build after reminder domain | PASS; Node 22 bundle generated locally; generated `functions/lib/` remains untracked |
 | Reminder changed-material security/hygiene | PASS; static frontend security, refined high-confidence credential scan, `git diff --check`, and staged diff check |
+| Reminder reconciliation focused tests | PASS; 7/7 persistence-before-queue, replay, move, delete, failure, concurrency, and forged-owner tests |
+| Functions regression after reconciliation | PASS; 18 files / 213 tests, with 34 emulator-only tests correctly skipped outside the emulator gate |
+| Reconciliation typecheck/build/security | PASS; Functions bundle, static security, changed-material credential scan, and staged diff hygiene |
 
 ## Release status
 
@@ -274,11 +299,12 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue the independent R3 implementation with owner-scoped Firestore reminder
-storage, transactional delivery/idempotency state, TimeBlock reconciliation,
-and an authenticated bounded-retry task worker. Keep provider delivery behind
-an abstraction and do not enable Cloud Tasks, billing, APIs, provider secrets,
-or deploy any resource. After exact human approval, separately deploy only
+Continue R3 with the owner-scoped Firestore implementation of the green
+reconciliation contract, strict client preference/server-job Rules, and real
+Rules/transaction emulator tests. Then add the Cloud Tasks adapter and
+authenticated bounded-retry worker behind the same interfaces. Do not enable
+Cloud Tasks, billing, APIs, provider secrets, or deploy any resource. After
+exact human approval, separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
