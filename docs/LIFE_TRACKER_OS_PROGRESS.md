@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `a90c0b91c76fd0b556de3917c9958022c05de605`
+- Current implementation checkpoint SHA: `c4daf4311a73990357870e14819564ba6a0bf005`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -326,6 +326,33 @@ slice changes one of those trust boundaries.
   `size` property produced 10/10; combined reconciliation/delivery transactions
   then passed 17/17.
 
+### R3 private/internal task-worker boundary
+
+- Green implementation commit: `c4daf4311a73990357870e14819564ba6a0bf005`.
+- Added one canonical parser for the exact three-field task payload and reused
+  it on both enqueue and dispatch. It rejects extra fields, hostile content,
+  malformed UID/job identity, non-plain values, symbols, and task-ID mismatch
+  before delivery.
+- The deployable worker factory fixes `invoker: private`, same-project
+  internal-only ingress, one concurrent dispatch, one dispatch per second, one
+  warm-cost-free instance minimum, one maximum instance, a 45-second handler
+  timeout, and five attempts within a 15-minute retry window. Current Google
+  documentation explicitly recognizes same-project Cloud Tasks as internal
+  Cloud Run ingress; see
+  [Cloud Run ingress](https://docs.cloud.google.com/run/docs/securing/ingress)
+  and [Firebase task functions](https://firebase.google.com/docs/functions/task-functions).
+- Platform task ID must equal the deterministic job ID. Retry/execution counts
+  and scheduled context are bounded, while current time comes from the server
+  clock. `retry_later` and transient execution failures throw only a sanitized
+  bounded-retry error; malformed tasks acknowledge with zero delivery so they
+  cannot create a poison retry loop. Logs contain only a hash task ID, bounded
+  outcome/reason, retry count, and optional canonical retry time—never UID,
+  title, Note, payload, auth token, or raw error.
+- This checkpoint deliberately exports only the deployable factory, not a
+  `deliverReminderTask` function instance. A real provider binding must be
+  complete before the named worker can be exported. No function, queue, API,
+  IAM binding, provider, secret, billing state, or external message changed.
+
 ## Evidence
 
 | Check | Result |
@@ -394,12 +421,15 @@ slice changes one of those trust boundaries.
 | Firestore Rules after delivery persistence | PASS; 57/57, including client denial of attempts, receipts, notification idempotency, and delivery counters |
 | Functions regression after delivery persistence | PASS; 20 files / 228 tests, with 51 emulator-only tests correctly skipped in the non-emulator gate |
 | Delivery persistence build/security/hygiene | PASS; Functions bundle/typecheck, valid index JSON, static security, ten-file high-confidence credential scan, and staged diff check |
+| Task payload/worker focused tests | PASS; 45/45 parser, enqueue, deployment metadata, identity, malformed input, terminal outcome, retry, clock, and log-privacy cases |
+| Functions regression after worker boundary | PASS; 21 files / 237 tests, with 51 emulator-only tests correctly skipped in the non-emulator gate |
+| Worker build/security/hygiene | PASS; Functions bundle/typecheck, static security, six-file high-confidence credential scan, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, and Firestore delivery claims/receipts green; authenticated queue worker, triggers, provider binding, and installed delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts, and private worker factory green; triggers, provider binding/export, and installed delivery pending
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: NOT STARTED
 - R6 ChatGPT read integration: NOT STARTED
@@ -422,13 +452,13 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with a strict private task-worker boundary: validate the exact task
-payload and identity, use `invoker: private`, bound retry/rate/concurrency, map
-`retry_later` without acknowledging work early, and inject the already-tested
-delivery service/provider abstraction. Add TimeBlock/preference reconciliation
-triggers and bounded horizon refill after the worker factory is green. Do not
-enable Cloud Tasks, billing, APIs, provider secrets, or deploy any resource.
-After exact human approval, separately deploy only
+Continue R3 with dependency-injected TimeBlock and notification-preference
+reconciliation trigger handlers plus a bounded deferred-horizon refill. Prove
+create/move/delete/preference-disable races and no unbounded global polling
+locally before exporting any trigger. Then implement the server-owned provider
+binding/Twilio adapter and instantiate the named private worker. Do not enable
+Cloud Tasks, billing, APIs, provider secrets, or deploy any resource. After
+exact human approval, separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
