@@ -4,6 +4,7 @@ import {
   assertReviewedProjectFields,
   createStagingBuildEnvironment,
   extractFirebaseWebManifest,
+  resolveTauriBuildInvocation,
 } from './run-staging-desktop.mjs';
 
 const REVIEWED_PUBLIC_CONFIG = {
@@ -58,5 +59,20 @@ describe('staging Desktop Firebase resolver', () => {
     assert.equal(environment.OPENAI_API_KEY, '');
     assert.equal(environment.TWILIO_AUTH_TOKEN, '');
     assert.equal(environment.RESEND_API_KEY, '');
+  });
+
+  it('uses the native toolchain on Windows and a fixed no-secret command from WSL', () => {
+    assert.deepEqual(resolveTauriBuildInvocation('win32', 'C:\\node.exe'), [
+      'C:\\node.exe',
+      ['scripts/run-tauri.mjs', 'build', 'staging'],
+    ]);
+    assert.deepEqual(resolveTauriBuildInvocation('linux', '/usr/bin/node'), [
+      'cmd.exe',
+      ['/d', '/s', '/c', 'npm run tauri:build:staging:resolved-config'],
+    ]);
+    assert.throws(
+      () => resolveTauriBuildInvocation('darwin', '/usr/bin/node'),
+      /only with the Windows toolchain/,
+    );
   });
 });

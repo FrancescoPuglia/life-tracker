@@ -10,6 +10,7 @@
     "build:desktop:staging": "node scripts/run-staging-desktop.mjs export",
     "tauri:dev:staging": "node scripts/run-tauri.mjs dev staging",
     "tauri:build:staging": "node scripts/run-staging-desktop.mjs tauri-build",
+    "tauri:build:staging:resolved-config": "node scripts/run-tauri.mjs build staging",
     "tauri:build:production": "node scripts/run-tauri.mjs build production",
     "start": "next start",
     "lint": "next lint",

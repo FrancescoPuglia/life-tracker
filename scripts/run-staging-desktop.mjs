@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { lstatSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -8,6 +9,7 @@ import {
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const firebaseCli = resolve(root, 'node_modules/firebase-tools/lib/bin/firebase.js');
+const ROOT_WSL_INTEROP_SOCKET = '/run/WSL/2_interop';
 
 export function extractFirebaseWebManifest(rawJson) {
   let payload;
@@ -90,15 +92,38 @@ export function createStagingBuildEnvironment(environment, apiKey) {
   });
 }
 
+export function resolveTauriBuildInvocation(platform, nodeExecutable) {
+  if (platform === 'win32') {
+    return [nodeExecutable, ['scripts/run-tauri.mjs', 'build', 'staging']];
+  }
+  if (platform === 'linux') {
+    return [
+      'cmd.exe',
+      ['/d', '/s', '/c', 'npm run tauri:build:staging:resolved-config'],
+    ];
+  }
+  throw new Error('The R1 installer can be built only with the Windows toolchain.');
+}
+
+function windowsBuildEnvironment(environment) {
+  if (process.platform === 'win32') return environment;
+  try {
+    if (!lstatSync(ROOT_WSL_INTEROP_SOCKET).isSocket()) throw new Error('not a socket');
+  } catch {
+    throw new Error('The root WSL Windows-interoperability socket is unavailable.');
+  }
+  return { ...environment, WSL_INTEROP: ROOT_WSL_INTEROP_SOCKET };
+}
+
 function run(command, profile) {
   const environment = createStagingBuildEnvironment(process.env, profile.apiKey);
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const invocation = command === 'export'
     ? [npmCommand, ['run', 'build:desktop']]
-    : [process.execPath, ['scripts/run-tauri.mjs', 'build', 'staging']];
+    : resolveTauriBuildInvocation(process.platform, process.execPath);
   const result = spawnSync(invocation[0], invocation[1], {
     cwd: root,
-    env: environment,
+    env: command === 'tauri-build' ? windowsBuildEnvironment(environment) : environment,
     stdio: 'inherit',
     windowsHide: true,
   });
