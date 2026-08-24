@@ -7,7 +7,7 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `6482346d40aeaac21a0c2851bc984eaed643c3b8`
+- Current implementation checkpoint SHA: `52ee54f03976de81fb4b8488b3e9ba599a91330e`
 - Remote master branch: not created yet
 - Worktree at checkpoint start: clean
 
@@ -98,6 +98,51 @@ slice changes one of those trust boundaries.
   until the allowlist is updated, affected CORS tests pass, the exact Function
   is redeployed to staging, and the installed Beta proves the request.
 
+### R1 native controls and installed Windows Beta
+
+- Green implementation commits through `52ee54f03976de81fb4b8488b3e9ba599a91330e`.
+- Added a Settings surface backed by a dynamically loaded native bridge. It
+  exposes explicit notification permission/test controls, user-controlled
+  autostart, runtime/environment/backend status, and normalized non-secret
+  failures. Merely opening Settings never requests permission.
+- Notification interaction can only unminimize, show, and focus the app. It has
+  no Task, TimeBlock, Session, completion, apply, or rollback mutation path.
+- Added only `notification:allow-register-listener` to support that focus path;
+  the exact capability allowlist remains otherwise unchanged and still denies
+  shell, filesystem, process, native HTTP, updater, and custom Rust commands.
+- Added the exact installed Tauri WebView origin `https://tauri.localhost` to
+  the Function CORS policy with negative tests for HTTP, subdomain, and explicit
+  port near-matches. The ignored staging runtime parameter now retains the two
+  verified Goal 1 origins and adds exactly this Desktop origin.
+- Affected Secure AI regression passed locally: 32/32 CORS, HTTP boundary, and
+  runtime-attestation tests; Functions typecheck/build passed. The staging
+  Function was **not deployed** because the managed approval gate requires a
+  separate exact human approval for deployment. Goal 1 revision `00010-les`
+  therefore remains authoritative until that approval is received.
+- Added a no-key-logging resolver for the registered staging Firebase Web app.
+  It captures Firebase CLI JSON in memory, validates the exact project-bound
+  fields and pinned public API-key hash, clears provider-secret variables, and
+  never prints the public key.
+- Replaced Windows `.cmd` shim execution with direct pinned JavaScript CLI
+  entry points for Tauri, npm, and Next. A bounded read-only diagnostic review
+  confirmed the causal Node/Windows launcher failure and recommended the
+  no-shell remediation. Cross-platform tests cover discrete arguments and
+  reject ambiguous/shim inputs.
+- Bound the private `@life-tracker/ai-contract` workspace package directly to
+  reviewed repository source for TypeScript/Webpack so the Windows build does
+  not depend on a WSL-created symlink.
+- Produced a real Windows x64 NSIS installer from the clean checkpoint and
+  installed it current-user. Windows registry records Life Tracker Beta
+  `1.0.0` at `C:\Users\Franc\AppData\Local\Life Tracker Beta`; a normal Start
+  Menu shortcut exists.
+- Installed launch passed with the exact title `Life Tracker Beta - Staging`.
+  Close hid the window while retaining one process; a second launch restored
+  and focused that same PID; a full idle-process restart created a new healthy
+  PID and visible window.
+- Installed authentication, entity workflows, Ask AI, and the notification
+  permission/toast interaction remain **NOT VERIFIED** pending the CORS deploy
+  approval and direct installed-UI acceptance. R1 remains in progress.
+
 ## Evidence
 
 | Check | Result |
@@ -109,7 +154,7 @@ slice changes one of those trust boundaries.
 | Master branch creation | PASS; now on `codex/life-tracker-os` |
 | Local Node/npm | Node `22.22.0`; npm `10.9.4` |
 | Local WSL Rust/Cargo | NOT AVAILABLE |
-| Desktop profile tests | `npm run test:desktop:config`: PASS (5 assertions) |
+| Desktop build-script tests | `npm run test:desktop:config`: PASS (6 test files) |
 | Runtime marker tests | `npx vitest run src/lib/runtimeEnvironment.test.ts`: 2/2 PASS |
 | Frontend typecheck | `npm run typecheck`: PASS |
 | Desktop static export | `TAURI_DESKTOP=true ... npm run build`: PASS; 4 static pages, root route 222 kB |
@@ -123,8 +168,21 @@ slice changes one of those trust boundaries.
 | Desktop attack-surface scan | `npm run check:desktop-security`: PASS |
 | Tauri dependency audit | Exact npm/Cargo pins verified; root high-severity npm audit gate PASS with the established three moderate `firebase-tools` development-only findings |
 | Final icon generation | Production and badged Beta SVG sources generated all required Windows icon formats: PASS |
-| Post-icon Windows cargo rerun | NOT RUN due a subsequent transient WSL/Windows interop `UtilAcceptVsock` transport failure; no Rust source changed after the passing compile |
-| Windows installer | NOT RUN |
+| Post-icon Windows native build | PASS in the later clean Tauri release build; the earlier transient WSL/Windows interop failure is superseded |
+| Windows installer | PASS; x64 current-user NSIS bundle built and installed from the clean `52ee54f` checkpoint |
+| Native bridge/UI tests | 20/20 PASS across bridge, Settings, sidebar, and runtime markers |
+| Affected Functions boundary tests | 32/32 PASS (`cors`, HTTP handler, runtime config) |
+| Functions typecheck/build | PASS after Desktop-origin policy change |
+| Cross-platform build-script tests | 6 test files PASS; Tauri CLI Windows smoke reports `2.11.4` |
+| Clean staging export | PASS at `52ee54f`; 4 static pages; output-inclusive security scan PASS |
+| Windows Tauri release build | PASS; optimized MSVC build and one x64 NSIS bundle |
+| Release executable | 6,463,488 bytes; SHA-256 `ba853bed54d195208a1ccd67f58a921b91cdb38574fea002b813c3ca27d8f634` |
+| NSIS installer | 2,371,470 bytes; SHA-256 `4fe3c1f5d772b957399457623baea96c49c2f498626f11c7e4734e3148557e70` |
+| Binary provider-secret scan | PASS; no high-confidence OpenAI/Twilio/Resend/private-key signatures in app or installer |
+| Current-user install | PASS; registry version `1.0.0`, install location, uninstaller, and Start Menu shortcut verified |
+| Installed launch/tray/single-instance/restart | PASS; visible staging title, hide-to-tray, same-PID focus, new-PID restart |
+| Staging Function Desktop-origin deploy | NOT RUN — exact human deployment approval required |
+| Installed auth/domain/AI/notification acceptance | NOT VERIFIED |
 
 ## Release status
 
@@ -138,18 +196,19 @@ slice changes one of those trust boundaries.
 
 ## External blockers
 
-None established at this checkpoint. Windows Rust `1.95.0`, Cargo `1.95.0`,
-and the MSVC compiler used successfully by Cargo are available. A transient
-WSL/Windows interop transport failure prevented only the redundant post-icon
-incremental rerun and must be retried before bundling. No provider credential,
-billing change, production mutation, GitHub visibility change, or public Pages
-change is authorized implicitly.
+The R1 installer is built and installed. The remaining explicit human gate is
+approval to deploy only `lifeTrackerAiApi` to the positively identified
+`life-tracker-staging` project with the reviewed Desktop-origin allowlist. The
+managed gate rejected the first attempt before execution; no staging resource
+changed. Installed UI authentication/notification acceptance will then require
+Francesco to interact with the visible Beta. No production resource, provider
+credential, billing setting, GitHub visibility, or public Pages state changed.
 
 ## Exact next step
 
-Add the tested browser-to-native bridge and compact Desktop settings for native
-notification permission/test, autostart preference, runtime/environment status,
-and safe error states. In parallel with that local slice, extend only the
-staging Function CORS configuration to the exact Tauri origin, run affected
-Goal 1 CORS/backend regressions, redeploy only the reviewed staging Function,
-then build the clean staging NSIS installer and perform installed-app acceptance.
+After exact human approval, deploy only `functions:lifeTrackerAiApi` to explicit
+project `life-tracker-staging`, verify health/runtime attestation and exact CORS
+allow/deny behavior, then complete installed authentication, core-domain, Ask
+AI Preview/Apply/Undo, notification, autostart, offline/backend-unavailable, and
+expired-auth acceptance. Then begin the required read-only production audit and
+recovery classification without making any production change.
