@@ -225,7 +225,7 @@ test.describe.serial('real secure AI staging boundary', () => {
         await selectPlanMode(page);
       }
 
-      if (EXECUTION_PROFILE !== 'create_onward') {
+      if (EXECUTION_PROFILE !== 'create_onward' && EXECUTION_PROFILE !== 'stale_onward') {
         failureStage = 'proposal_preview_then_reject';
         if (EXECUTION_PROFILE === 'full') await startNewChat(page);
       const beforeRejectProposal = await readFixtureState(activeA, fixtureDocumentsA);
@@ -410,8 +410,9 @@ test.describe.serial('real secure AI staging boundary', () => {
         await page.screenshot({ path: `test-results/staging/${runId}-rolled-back.png`, fullPage: true });
       }
 
-      failureStage = 'concurrent_create_is_idempotent';
-      const createTitle = `STAGING Concurrent create ${runId}`;
+      if (EXECUTION_PROFILE !== 'stale_onward') {
+        failureStage = 'concurrent_create_is_idempotent';
+        const createTitle = `STAGING Concurrent create ${runId}`;
       const fixtureBeforeCreatePreview = await readFixtureState(activeA, fixtureDocumentsA);
       const createPreview = await backendJson(activeA, '/v1/chat', {
         message: createTimeBlockPrompt(fixture, createTitle),
@@ -511,7 +512,7 @@ test.describe.serial('real secure AI staging boundary', () => {
       });
       expect(await countDocumentsWithId(activeA, 'timeBlocks', createEntityId)).toBe(0);
       expect(await countDocumentsWithTitle(activeA, 'timeBlocks', createTitle)).toBe(0);
-      records.push({
+        records.push({
         name: 'concurrent_create_is_idempotent',
         status: 'PASS',
         requestId: concurrentResponses[0]?.requestId ?? undefined,
@@ -525,10 +526,13 @@ test.describe.serial('real secure AI staging boundary', () => {
           createdEntityCount: 1,
           rollbackRemovedEntity: true,
         },
-      });
+        });
+      }
 
       failureStage = 'stale_preview_rejected_without_partial_write';
-      if (EXECUTION_PROFILE !== 'create_onward') await startNewChat(page);
+      if (EXECUTION_PROFILE !== 'create_onward' && EXECUTION_PROFILE !== 'stale_onward') {
+        await startNewChat(page);
+      }
       const stateBeforeStalePreview = await readFixtureState(activeA, fixtureDocumentsA);
       const mutableBeforeStalePreview = await readDocument(activeA, 'timeBlocks', fixture.mutableBlockId);
       const stalePreview = await sendChat(page, proposalPrompt(fixture, fixture.times.staleTargetStart, fixture.times.staleTargetEnd));
@@ -803,9 +807,11 @@ test.describe.serial('real secure AI staging boundary', () => {
   });
 });
 
-function stagingExecutionProfile(value: string | undefined): 'full' | 'proposal_onward' | 'create_onward' {
+function stagingExecutionProfile(
+  value: string | undefined,
+): 'full' | 'proposal_onward' | 'create_onward' | 'stale_onward' {
   if (value === undefined || value === '' || value === 'full') return 'full';
-  if (value === 'proposal_onward' || value === 'create_onward') return value;
+  if (value === 'proposal_onward' || value === 'create_onward' || value === 'stale_onward') return value;
   throw new Error('Invalid live staging execution profile.');
 }
 
