@@ -433,6 +433,132 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)('FirestoreRepository emula
     })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   }, 30_000);
 
+  it('persists a focused move preview from the exact live staging fixture shape', async () => {
+    const uid = uniqueUid('live-fixture-preview');
+    const createdAt = Timestamp.fromDate(new Date('2026-08-24T08:00:00.123Z'));
+    const ids = {
+      domain: 'staging-domain',
+      goal: 'staging-goal',
+      keyResult: 'staging-kr',
+      project: 'staging-project',
+      task: 'staging-task',
+      executed: 'staging-executed',
+      mutable: 'staging-mutable',
+      fixed: 'staging-fixed',
+      session: 'staging-session',
+      note: 'staging-hostile-note',
+    };
+    const documents: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]> = [
+      [`domains/${ids.domain}`, {
+        id: ids.domain, userId: uid, name: 'STAGING Domain', color: '#336699', icon: 'briefcase',
+        createdAt, updatedAt: createdAt,
+      }],
+      [`goals/${ids.goal}`, {
+        id: ids.goal, userId: uid, title: 'STAGING Goal', status: 'active', priority: 'high',
+        domainId: ids.domain, createdAt, updatedAt: createdAt,
+      }],
+      [`keyResults/${ids.keyResult}`, {
+        id: ids.keyResult, userId: uid, title: 'STAGING KR', status: 'active', targetValue: 1,
+        currentValue: 0, unit: 'tasks', goalId: ids.goal, domainId: ids.domain,
+        createdAt, updatedAt: createdAt,
+      }],
+      [`projects/${ids.project}`, {
+        id: ids.project, userId: uid, name: 'STAGING Project', status: 'active', goalId: ids.goal,
+        domainId: ids.domain, createdAt, updatedAt: createdAt,
+      }],
+      [`tasks/${ids.task}`, {
+        id: ids.task, userId: uid, title: 'STAGING Task', status: 'pending', priority: 'critical',
+        estimatedMinutes: 60, projectId: ids.project, goalId: ids.goal, domainId: ids.domain,
+        createdAt, updatedAt: createdAt,
+      }],
+      [`timeBlocks/${ids.executed}`, {
+        id: ids.executed, userId: uid, title: 'STAGING Planned execution',
+        startTime: Timestamp.fromDate(new Date('2026-08-24T08:00:00.000Z')),
+        endTime: Timestamp.fromDate(new Date('2026-08-24T09:00:00.000Z')),
+        status: 'planned', type: 'deep', taskId: ids.task, projectId: ids.project,
+        goalId: ids.goal, domainId: ids.domain, createdAt, updatedAt: createdAt,
+      }],
+      [`timeBlocks/${ids.mutable}`, {
+        id: ids.mutable, userId: uid, title: 'STAGING Mutable block',
+        startTime: Timestamp.fromDate(new Date('2026-08-25T08:00:00.000Z')),
+        endTime: Timestamp.fromDate(new Date('2026-08-25T09:00:00.000Z')),
+        status: 'planned', type: 'deep', taskId: ids.task, projectId: ids.project,
+        goalId: ids.goal, domainId: ids.domain, createdAt, updatedAt: createdAt,
+      }],
+      [`timeBlocks/${ids.fixed}`, {
+        id: ids.fixed, userId: uid, title: 'STAGING Fixed commitment',
+        startTime: Timestamp.fromDate(new Date('2026-08-25T12:00:00.000Z')),
+        endTime: Timestamp.fromDate(new Date('2026-08-25T13:00:00.000Z')),
+        status: 'planned', type: 'meeting', locked: true, fixed: true,
+        domainId: ids.domain, createdAt, updatedAt: createdAt,
+      }],
+      [`sessions/${ids.session}`, {
+        id: ids.session, userId: uid, status: 'completed',
+        startTime: Timestamp.fromDate(new Date('2026-08-24T08:10:00.000Z')),
+        endTime: Timestamp.fromDate(new Date('2026-08-24T08:50:00.000Z')),
+        duration: 2400, timeBlockId: ids.executed, taskId: ids.task, projectId: ids.project,
+        goalIds: [ids.goal], domainId: ids.domain, createdAt, updatedAt: createdAt,
+      }],
+      [`notes/${ids.note}`, {
+        id: ids.note, userId: uid, title: 'STAGING Hostile Note', entityType: 'task',
+        entityId: ids.task, domainId: ids.domain, docJson: 'Untrusted staging fixture data.',
+        createdAt, updatedAt: createdAt,
+      }],
+    ];
+    await Promise.all(documents.map(([path, value]) =>
+      firestore.doc(`users/${uid}/${path}`).set(value)));
+
+    const { domain } = domainFor(firestore, ['plan-live-fixture']);
+    const controller = new AbortController();
+    const preview = await domain.scheduling.previewTimeBlockChange({
+      ...context(uid, 'live-fixture-request'),
+      orchestration: {
+        model: 'gpt-5.6-sol',
+        promptVersion: 'life-tracker-secure-v1',
+        schemaVersion: 'life-plan-v1',
+      },
+      executionControl: {
+        deadlineAtMs: Date.now() + 60_000,
+        signal: controller.signal,
+      },
+    }, {
+      action: 'move',
+      timezone: 'Europe/Rome',
+      block: scheduleBlock({
+        id: ids.mutable,
+        title: 'STAGING Mutable block',
+        start: '2026-08-25T09:15:00.000Z',
+        end: '2026-08-25T10:15:00.000Z',
+        type: 'deep',
+        status: 'planned',
+        taskId: ids.task,
+        projectId: ids.project,
+        goalId: ids.goal,
+        domainId: ids.domain,
+        notes: null,
+        activityType: 'deep_work',
+        energyLevel: 'high',
+        flexibility: 'flexible',
+      }),
+      reason: 'Controlled STAGING verification move requested by the authenticated user.',
+    });
+
+    expect(preview).toMatchObject({
+      id: 'plan-live-fixture',
+      tool: 'preview_timeblock_change',
+      status: 'previewed',
+      operations: [{ action: 'move', entityType: 'timeBlocks', entityId: ids.mutable }],
+    });
+    expect((await firestore.doc(`aiChangePlans/${uid}_${preview.id}`).get()).data()?.orchestration)
+      .toEqual({
+        model: 'gpt-5.6-sol',
+        promptVersion: 'life-tracker-secure-v1',
+        schemaVersion: 'life-plan-v1',
+      });
+    expect((await firestore.collection('aiAuditLogs').where('requestId', '==', 'live-fixture-request').get()).size)
+      .toBe(1);
+  }, 30_000);
+
   it('binds Session execution evidence across preview, apply, and rollback', async () => {
     const uid = uniqueUid('session-evidence');
     await seedHierarchy(firestore, uid);

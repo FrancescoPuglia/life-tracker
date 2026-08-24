@@ -99,6 +99,19 @@ interface TransactionResult {
   readonly replay: boolean;
 }
 
+/** @internal Exported only so the cloud-index-sensitive query shape has a unit regression. */
+export function applyValidationIntervalBounds(
+  query: Query<DocumentData>,
+  from: string,
+  to: string,
+): Query<DocumentData> {
+  return query
+    .where('startTime', '<', Timestamp.fromDate(new Date(to)))
+    .where('endTime', '>', Timestamp.fromDate(new Date(from)))
+    .orderBy('startTime', 'asc')
+    .orderBy('endTime', 'asc');
+}
+
 /** Injectable verification seam used by emulator failure-injection tests. */
 export interface FirestoreRepositoryVerificationHooks {
   readonly beforeVerification?: (
@@ -939,9 +952,7 @@ export class FirestoreRepository implements AuditableRepository {
       if (!scope.from || !scope.to || Date.parse(scope.from) >= Date.parse(scope.to)) {
         throw new DomainError('INVALID_ARGUMENT', 'Validation scope interval is invalid.');
       }
-      query = query
-        .where('startTime', '<', Timestamp.fromDate(new Date(scope.to)))
-        .where('endTime', '>', Timestamp.fromDate(new Date(scope.from)));
+      query = applyValidationIntervalBounds(query, scope.from, scope.to);
     }
     query = query.limit(scope.maxItems + 1);
     const snapshot = transaction ? await transaction.get(query) : await query.get();
