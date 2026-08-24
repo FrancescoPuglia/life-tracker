@@ -202,9 +202,13 @@ export function requireExactPlan(
   if (expected.requiresWpiMarker) {
     const notes = diff.after.notes;
     const escapedId = escapeRegExp(operation.entityId);
+    const markerPattern = new RegExp(
+      `^[ \\t]*WPI_KEY:\\s*(wpi:ai_draft_[a-f0-9]{20}:${escapedId})[ \\t]*$`,
+      'gim',
+    );
     if (
       typeof notes !== 'string'
-      || !new RegExp(`^WPI_KEY: wpi:ai_draft_[a-f0-9]{20}:${escapedId}$`).test(notes)
+      || [...notes.matchAll(markerPattern)].length !== 1
     ) {
       fail('Staging proposal did not contain exactly one server-generated WPI marker.');
     }
