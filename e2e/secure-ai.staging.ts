@@ -19,6 +19,7 @@ import {
   cleanupStagingResources,
   type CleanupDocumentReference as DocumentReference,
 } from './staging/cleanup';
+import { firestoreDocumentFieldsHash } from './staging/firestore-evidence';
 import {
   discardResponseBody,
   fetchDeterministicFixtureWithRetry,
@@ -1269,7 +1270,7 @@ async function seedFixture(
     await discardResponseBody(response);
     if (!response.ok) throw new Error(`Staging Firestore fixture write failed safely (${status}).`);
     const persisted = await readDocument(identity, collection, id);
-    if (documentFieldsHash(persisted) !== documentFieldsHash(firestoreDocument(values))) {
+    if (firestoreDocumentFieldsHash(persisted) !== firestoreDocumentFieldsHash(firestoreDocument(values))) {
       throw new Error('Staging Firestore fixture post-read did not match the deterministic write.');
     }
   }
@@ -1315,7 +1316,7 @@ async function readFixtureState(
   const result: Record<string, string> = {};
   for (const [collection, id] of documents) {
     const document = await readDocument(identity, collection, id);
-    result[documentKey(collection, id)] = documentFieldsHash(document);
+    result[documentKey(collection, id)] = firestoreDocumentFieldsHash(document);
   }
   return result;
 }
@@ -1435,12 +1436,6 @@ function documentKey(collection: string, id: string): string {
   return `${collection}/${id}`;
 }
 
-function documentFieldsHash(document: Record<string, unknown>): string {
-  return createHash('sha256')
-    .update(canonicalJson(record(document.fields, 'document.fields')))
-    .digest('hex');
-}
-
 function assertSameFixtureState(before: FixtureState, after: FixtureState, label: string): void {
   if (canonicalJson(before) !== canonicalJson(after)) {
     throw new Error(`Staging fixture changed unexpectedly during ${label}.`);
@@ -1468,7 +1463,7 @@ function assertSameDocumentState(
   after: Record<string, unknown>,
   label: string,
 ): void {
-  if (documentFieldsHash(before) !== documentFieldsHash(after)) {
+  if (firestoreDocumentFieldsHash(before) !== firestoreDocumentFieldsHash(after)) {
     throw new Error(`Staging document changed unexpectedly during ${label}.`);
   }
 }
