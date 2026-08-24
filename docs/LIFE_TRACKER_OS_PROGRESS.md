@@ -7,7 +7,7 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `1bb03cb8a36a615f3a8b1485ec31dca6f75bf202`
+- Current implementation checkpoint SHA: `4d821b3a8ec7e241fc7f27d802b412c2b589e451`
 - Remote master branch: not created yet
 - Worktree at checkpoint start: clean
 
@@ -219,6 +219,36 @@ slice changes one of those trust boundaries.
   queue. No Firebase project, Cloud Tasks API, provider, secret, billing state,
   or external message was touched.
 
+### R3 owner-scoped Firestore reminder persistence
+
+- Green implementation commit: `4d821b3a8ec7e241fc7f27d802b412c2b589e451`.
+- Added an Admin SDK repository that independently validates owner/path,
+  deterministic job identity, schema, state, native timestamps, and task IDs.
+  Jobs live under `users/{uid}/reminderJobs/{hash}`; the caller cannot select an
+  arbitrary Firestore path.
+- Each TimeBlock has one server-only manifest containing at most 16 active job
+  IDs. Reconciliation transactionally reads only the old/new bounded union,
+  avoiding global polling, unbounded history queries, and a new composite
+  index. Job/manifest TTL metadata retains records for 90 days; the reviewed
+  index file contains the additive TTL declarations but nothing was deployed.
+- Added strict client Rules for exactly one normalized
+  `notificationPreferences/default` document. Clients may control only bounded
+  channel/schedule preferences; provider identity, jobs, manifests, attempts,
+  receipts, and notification idempotency remain browser-denied. Preference
+  lists require an owner-constrained query, and cross-owner/forged/malformed
+  writes fail closed.
+- Real Firestore transaction-emulator tests prove create/replay, native
+  Timestamp storage, moved-job supersession/cancellation, post-enqueue race
+  handling, concurrent convergence, corrupt manifest rejection, bounded work,
+  hostile-content exclusion, and cross-owner path isolation.
+- Superseded diagnostics are recorded honestly: the first Rules run was 55/56
+  because a list operation has no bound wildcard document ID; separating `get`
+  and owner-constrained `list` fixed it. The first transaction run was 5/6 only
+  because emulator cold start exceeded the default 5-second test timeout; the
+  established 30-second emulator timeout produced 6/6. Two launcher attempts
+  also exited before tests until the verified Java and repository-local
+  Firebase CLI were explicitly selected.
+
 ## Evidence
 
 | Check | Result |
@@ -271,6 +301,10 @@ slice changes one of those trust boundaries.
 | Reminder reconciliation focused tests | PASS; 7/7 persistence-before-queue, replay, move, delete, failure, concurrency, and forged-owner tests |
 | Functions regression after reconciliation | PASS; 18 files / 213 tests, with 34 emulator-only tests correctly skipped outside the emulator gate |
 | Reconciliation typecheck/build/security | PASS; Functions bundle, static security, changed-material credential scan, and staged diff hygiene |
+| Notification preference Rules emulator | PASS; 56/56, including owner-constrained list and five new server-only namespaces |
+| Reminder Firestore transaction emulator | PASS; 6/6 against isolated local emulator; no cloud project contacted |
+| Functions regression after Firestore adapter | PASS; 18 files / 213 tests, with 40 emulator-only tests correctly skipped in the non-emulator gate |
+| Firestore adapter build/security/hygiene | PASS; typecheck/bundle, index JSON parse, static security, 8-file credential scan, and staged diff check |
 
 ## Release status
 
@@ -299,12 +333,11 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with the owner-scoped Firestore implementation of the green
-reconciliation contract, strict client preference/server-job Rules, and real
-Rules/transaction emulator tests. Then add the Cloud Tasks adapter and
-authenticated bounded-retry worker behind the same interfaces. Do not enable
-Cloud Tasks, billing, APIs, provider secrets, or deploy any resource. After
-exact human approval, separately deploy only
+Continue R3 with the Cloud Tasks adapter, TimeBlock/preference reconciliation
+triggers, and authenticated bounded-retry worker behind the green repository
+interfaces. Add transactionally claimed delivery attempts/idempotency before
+any provider adapter. Do not enable Cloud Tasks, billing, APIs, provider
+secrets, or deploy any resource. After exact human approval, separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
