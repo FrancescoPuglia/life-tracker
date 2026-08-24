@@ -7,8 +7,8 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `7ee89d2f8647231f0672fd4bdd09e11b4cf14e95`
-- Remote master branch: not created yet
+- Current implementation checkpoint SHA: `a7b5c64b878c2e36b42f3aebb8e68ebf13f5d856`
+- Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
 ## Immutable verified prerequisite
@@ -279,6 +279,24 @@ slice changes one of those trust boundaries.
   No queue, worker, API, scheduler, billing state, IAM role, or cloud task was
   created in this slice.
 
+### R3 provider-neutral at-most-once delivery boundary
+
+- Green implementation commit: `a7b5c64b878c2e36b42f3aebb8e68ebf13f5d856`.
+- Added provider-neutral delivery claims, message requests, attempts,
+  finalization outcomes, and a `MessagingProvider` boundary. Provider-specific
+  identities and errors cannot become authorization input or unbounded stored
+  state.
+- The repository contract must atomically re-evaluate current authority and
+  consume idempotency before the first external send. After a claim exists,
+  retry recovery finalizes the attempt as uncertain without calling the
+  provider again. Provider throws, timeouts, invalid message identities, and a
+  lost finalization therefore fail conservatively without duplicate automatic
+  delivery.
+- This slice deliberately exports no queue worker and implements no Twilio or
+  other external provider. Firestore claim/finalization persistence is the next
+  trust boundary; no cloud resource, credential, API, billing state, or message
+  was touched.
+
 ## Evidence
 
 | Check | Result |
@@ -339,12 +357,15 @@ slice changes one of those trust boundaries.
 | Reminder Firestore emulator after horizon change | PASS; 7/7, including durable deferred-to-pending promotion |
 | Functions regression after Cloud Tasks adapter | PASS; 19 files / 220 tests, with 41 emulator-only tests correctly skipped in the non-emulator gate |
 | Cloud Tasks build/security/hygiene | PASS; Functions bundle/typecheck, static security, 9-file credential scan, and staged diff check |
+| Delivery-service focused tests | PASS; 8/8 no-op, retry, accepted, rejected, timeout/throw, invalid identity, and recovery-without-resend cases |
+| Functions regression after delivery service | PASS; 20 files / 228 tests, with 41 emulator-only tests correctly skipped in the non-emulator gate |
+| Delivery-service build/security/hygiene | PASS; Functions bundle/typecheck, static security, four-file high-confidence credential scan, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain green; persistence, reconciliation, authenticated queue worker, and installed delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, and at-most-once delivery service green; Firestore delivery claims, authenticated queue worker, triggers, and installed delivery pending
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: NOT STARTED
 - R6 ChatGPT read integration: NOT STARTED
@@ -367,11 +388,14 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with TimeBlock/preference reconciliation triggers and the bounded
-horizon refill. Add the authenticated private worker only after transactionally
-claimed delivery attempts/idempotency and provider-timeout uncertainty handling
-are green. Do not enable Cloud Tasks, billing, APIs, provider secrets, or deploy
-any resource. After exact human approval, separately deploy only
+Continue R3 with the owner-scoped Firestore delivery repository: atomically
+reread current TimeBlock/preferences/execution state, consume idempotency before
+send, and idempotently persist bounded attempt/receipt finalization. Prove
+cross-owner isolation and crash recovery in the transaction emulator before
+exporting the private worker. Then add TimeBlock/preference reconciliation
+triggers and bounded horizon refill. Do not enable Cloud Tasks, billing, APIs,
+provider secrets, or deploy any resource. After exact human approval,
+separately deploy only
 `functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
 health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
 the staging Beta, and complete the installed R1 acceptance matrix.
