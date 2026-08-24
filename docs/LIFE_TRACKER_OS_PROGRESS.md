@@ -7,7 +7,7 @@ Last updated: 2026-08-24 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `3545280d3b7f16543db27963a90089ca9a8fea55`
+- Current implementation checkpoint SHA: `95985185aa52b3612b394d85879af2cf737fa45f`
 - Remote master branch: not created yet
 - Worktree at checkpoint start: clean
 
@@ -170,6 +170,33 @@ slice changes one of those trust boundaries.
   are intentionally not committed while GitHub is public; recapture them after
   R7 for the private final receipt.
 
+### R3 deterministic notification domain
+
+- Green implementation commit: `95985185aa52b3612b394d85879af2cf737fa45f`.
+- Added provider-neutral, versioned `NotificationPreferences`, `ReminderPolicy`,
+  `ReminderJob`, `ReminderTaskPayload`, and delivery-decision contracts. Desktop,
+  WhatsApp, and email preferences share one owner-bound domain while reminder
+  jobs remain limited to Desktop and WhatsApp delivery channels.
+- Preferences are opt-in by default, use the persisted valid timezone when
+  present, and otherwise fall back to `Europe/Rome`. Offsets, quiet hours,
+  locale, delivery caps, and daily/weekly report schedules are normalized and
+  bounded deterministically.
+- Reminder identities and idempotency keys are privacy-safe SHA-256 values over
+  owner/path, authoritative schedule version, policy version, channel, kind,
+  and instant. User titles, Notes, descriptions, and provider content never
+  enter queue payloads or authority/version material.
+- Planning excludes deleted, disabled, cancelled, completed, overrun, and
+  actually ended blocks. The delivery decision rereads authoritative owner,
+  block, schedule, execution, policy, quiet-hour, per-channel cap, and consumed
+  idempotency state before permitting a send.
+- Stale move/policy jobs, deleted/completed blocks, already-started missed
+  reminders, duplicate retries, and disabled channels all fail closed. Quiet
+  hours use the persisted IANA timezone and are covered across Europe/Rome DST
+  start and end transitions.
+- This slice is pure deterministic domain code only. It does not create a Cloud
+  Task, deploy a Function, send a notification, call a provider, or mutate any
+  Firebase project.
+
 ## Evidence
 
 | Check | Result |
@@ -215,12 +242,16 @@ slice changes one of those trust boundaries.
 | Production backend/billing inventory | PASS; required backend APIs disabled, no billing link |
 | Production owner-marker compatibility | PASS; all projected embedded owners matched their owner paths |
 | Legacy TimeBlock timestamp remediation | PASS; unit behavior, 49/49 Rules emulator, 639 frontend regression |
+| Reminder-domain focused tests | PASS; 30/30 deterministic planning, authority, stale-state, idempotency, quiet-hours, and DST tests |
+| Functions regression after reminder domain | PASS; 17 files / 206 tests, with 34 emulator-only tests correctly skipped outside the emulator gate |
+| Functions typecheck/build after reminder domain | PASS; Node 22 bundle generated locally; generated `functions/lib/` remains untracked |
+| Reminder changed-material security/hygiene | PASS; static frontend security, refined high-confidence credential scan, `git diff --check`, and staged diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: NOT STARTED
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain green; persistence, reconciliation, authenticated queue worker, and installed delivery pending
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: NOT STARTED
 - R6 ChatGPT read integration: NOT STARTED
@@ -243,10 +274,11 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-After exact human approval, deploy only `functions:lifeTrackerAiApi` to explicit
-project `life-tracker-staging`, verify health/runtime attestation and exact CORS
-allow/deny behavior, rebuild/reinstall the staging Beta from the compatibility
-checkpoint, then complete installed authentication, core-domain, Ask AI
-Preview/Apply/Undo, notification, autostart, offline/backend-unavailable, and
-expired-auth acceptance. Continue independent production-ready implementation
-without enabling production billing or APIs.
+Continue the independent R3 implementation with owner-scoped Firestore reminder
+storage, transactional delivery/idempotency state, TimeBlock reconciliation,
+and an authenticated bounded-retry task worker. Keep provider delivery behind
+an abstraction and do not enable Cloud Tasks, billing, APIs, provider secrets,
+or deploy any resource. After exact human approval, separately deploy only
+`functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
+health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
+the staging Beta, and complete the installed R1 acceptance matrix.
