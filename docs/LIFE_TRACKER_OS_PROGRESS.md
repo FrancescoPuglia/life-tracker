@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `7a1204b91e9bb46b6c54e8bd24f63fd0fbc0cd53`
+- Current implementation checkpoint SHA: `eb34cd1fdbbbe9eced03bf1ed96905fa6ccf745d`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -1014,6 +1014,66 @@ slice changes one of those trust boundaries.
   provider, secret value, Firebase data/resource, production target, billing
   setting, GitHub state, or user application changed.
 
+### R3 native-reminder staging safety and deployment preflight
+
+- Green safety commit: `3f0d441725f95de290e8a73c2fcaeb290836ba14`.
+- Pre-deploy review found that the WhatsApp runtime switch previously gated
+  provider construction but not reconciliation. A user preference could still
+  derive a WhatsApp job and attempt Cloud Tasks enqueue while the provider was
+  disabled. The server now applies the exact switch before reminder-policy
+  derivation: false, malformed, or unavailable configuration preserves Desktop
+  jobs but permits no cloud enqueue. Existing queued work uses a lazy adapter
+  only for best-effort cancellation and remains independently authority-checked.
+- Negative tests prove exact false and parameter-read failure create Desktop
+  jobs only without constructing Cloud Tasks; a prior WhatsApp job is
+  superseded and cancellation performs no enqueue. The policy-hash transition
+  correctly supersedes both prior channel-bound jobs before creating one fresh
+  Desktop-only job.
+- Refreshed explicit `life-tracker-staging` metadata read-only. Billing is
+  already linked; Functions, Run, Build, Artifact Registry, Eventarc, Pub/Sub,
+  Firestore, and Secret Manager are enabled; Cloud Tasks and Scheduler are
+  disabled. Staging has zero Eventarc triggers and zero Pub/Sub topics. The
+  live Rules hash exactly matches Goal 1, and live indexes remain one
+  composite/six TTL policies.
+- Count-only Firestore aggregation found all nine reminder runtime namespaces
+  empty. This proves the reviewed reminder TTL enablement has no existing
+  document to delete at this checkpoint. A first transport request failed
+  without mutation; one bounded retry passed.
+- `docs/REMINDER_RUNTIME_PREDEPLOY.md` splits the proposed change into current
+  owner-scoped Rules, the exact reviewed reminder-only index manifest, and only
+  four secret-free Functions: the authenticated Desktop callable plus three
+  private/internal Firestore triggers. It explicitly excludes the AI Function,
+  task worker, refill scheduler, Twilio callback, report Functions, MCP,
+  Cloud Tasks/Scheduler API enablement, and every provider action.
+- Green deploy-isolation commit:
+  `eb34cd1fdbbbe9eced03bf1ed96905fa6ccf745d`. Firebase CLI prerequisite
+  inspection occurs before `--only` endpoint filtering, so the four native
+  endpoints now live in checked-in codebase `reminders` behind
+  `firebase.reminders.json`; it contains no Firestore/Hosting target and imports
+  none of the default AI/MCP/report or full cloud-reminder endpoint surface.
+- Full Firebase SDK discovery of the isolated bundle proves exactly four
+  endpoints, zero runtime parameters, zero secret bindings, zero task queues,
+  zero schedulers, zero custom roles, and zero required APIs. Its 119,038-byte
+  bundle has SHA-256 `1e5ba4f135cc3ad2542b7f2981691c614a90b960142c5e91fa139959e953cef2`.
+  The native reconciliation path overrides every user WhatsApp preference at
+  compile time and has no Cloud Tasks adapter or runtime switch that can enable
+  cloud delivery.
+- The ordinary default codebase now owns exactly its AI, MCP, and two report
+  endpoints and exports no reminder endpoint. Its report surface still declares
+  Cloud Scheduler, so it is explicitly not valid deployment authority for the
+  native slice. The separately proven R1 authority remains detached exact
+  one-endpoint source `3100c42`, not current default source.
+- Read-only IAM inventory found the three first-Eventarc managed grants absent:
+  Pub/Sub service-agent token creation plus default-compute Run invocation and
+  Eventarc event receipt. A later native deploy approval must name exactly
+  those principal/role additions; no IAM mutation occurred here.
+- The temporary detached `318d7a6` Functions proof worktree was removed because
+  it predates the new server gate; Git history remains intact. That commit is
+  retained only as the reviewed reminder-only index-manifest authority.
+- Nothing was deployed. No Rule, index, TTL, API, IAM, secret, provider,
+  document, billing setting, production resource, or Desktop installation was
+  changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1192,12 +1252,26 @@ slice changes one of those trust boundaries.
 | Minimal R1 expected fingerprints | Backend `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`; exact three-origin Sol/medium runtime `sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f` |
 | R1 staging deploy/install | NOT RUN; exact Function-only approval and post-deploy CORS/attestation checks are required before installer use |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
+| Native server channel gate | PASS at exact `3f0d441`; default/malformed/unavailable WhatsApp switch creates no cloud job or enqueue and preserves Desktop reconciliation |
+| Native reminder focused regression | PASS; 6 files / 71 tests, including the final 8/8 runtime-binding gate |
+| Functions regression after channel hardening | PASS; 47 files / 468 tests; 11 explicit emulator files / 97 tests correctly skipped outside emulator gates |
+| Native reminder type/build/security | PASS; strict typecheck, 962.5 kB bundle, source fingerprint `sha256:3ee25396...`, static security, changed/generated credential scan, and diff hygiene |
+| Isolated native deployment surface | PASS at exact `eb34cd1`; four endpoints, zero params/secrets/task queues/schedulers/custom roles/required APIs; 119,038-byte bundle SHA-256 `1e5ba4f1...` |
+| Default deployment separation | PASS; exactly AI/MCP/two-report endpoints and no reminder endpoint; current default config is not used for native deployment |
+| Native isolation focused regression | PASS; 3 files / 11 tests for compile-time Desktop-only behavior, endpoint metadata, and exact default deploy surface |
+| Functions regression after deploy isolation | PASS; 49 files / 471 tests; 11 explicit emulator files / 97 tests correctly skipped outside emulator gates |
+| Native isolation dependencies/build/security | PASS; both production audits 0 vulnerabilities, default and isolated strict builds, static security, isolated bundle scan, and staged diff hygiene |
+| Native staging billing/API preflight | PASS read-only; billing already linked, required APIs enabled, Cloud Tasks/Scheduler disabled, and no API/billing change required |
+| Native staging IAM preflight | PASS read-only; exact three first-Eventarc managed bindings absent and isolated for a future explicit approval |
+| Native staging resource preflight | PASS read-only; one unchanged AI Function, zero Eventarc triggers, zero Pub/Sub topics, Goal 1 Rules/index baseline intact |
+| Reminder TTL safety preflight | PASS count-only; all nine reminder runtime namespaces contain zero documents |
+| Native reminder staging deployment | NOT RUN; exact four-Function plus reviewed Rules/reminder-only-index approval remains separate from R1 |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS — current-source x64 NSIS artifact and exact minimal Function-only deployment/rollback receipt are green; staging CORS deployment, install, and visible acceptance remain pending
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, authenticated native coordinator/policy, server-side cloud-channel gate, and an exact isolated four-endpoint native staging codebase are green; staging deployment and installed/live delivery remain pending
 - R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: IN PROGRESS — the authenticated, owner-scoped, bounded, zero-write MCP/OAuth server is green locally and in the Firestore/Rules emulators; deployment and a real ChatGPT Developer Mode connection remain pending
@@ -1213,11 +1287,15 @@ desktop.
 
 The existing explicit staging gate remains approval to deploy only
 `lifeTrackerAiApi` to the positively identified `life-tracker-staging` project
-with the reviewed Desktop-origin allowlist. A separate future staging approval
-is required for the new reminder callable/triggers/worker/callback/scheduler,
-Rules, and indexes after an exact pre-deploy resource/API/cost diff. Do not
-enable the WhatsApp kill switch or configure/read provider secrets during that
-deployment. No staging or production resource changed in this slice.
+with the reviewed Desktop-origin allowlist, using detached one-endpoint source
+`3100c42`. The separate native-reminder staging boundary is now fully recorded
+in `docs/REMINDER_RUNTIME_PREDEPLOY.md`: current owner-scoped Rules, the
+reminder-only index manifest, exactly four secret-free Functions in isolated
+codebase `reminders`, and the exact three absent first-Eventarc managed IAM
+grants. Cloud Tasks, Scheduler, worker, callback, refill, Twilio, reports, MCP,
+runtime parameters, and provider configuration remain structurally excluded.
+Request that separate approval only after the immediate R1 gate. No staging or
+production resource changed in this slice.
 
 Scientific report deployment is another separately reviewed staging gate.
 `docs/REPORT_RUNTIME_PREDEPLOY.md` records the exact two Functions, one index,
@@ -1288,3 +1366,12 @@ Only after those checks pass, install the freshly hashed Beta and complete the
 visible authentication, Goal/Project/Task/TimeBlock/Session/Habit/Analytics,
 Ask AI preview/apply/undo, native notification/autostart, offline, expired-auth,
 backend-unavailable, tray, single-instance, and restart acceptance matrix.
+
+After R1 is green, the next distinct staging mutation is the native-only R3
+sequence in `docs/REMINDER_RUNTIME_PREDEPLOY.md`. Reconfirm its zero-count/API
+preconditions and request exact approval for current Rules, the reviewed
+reminder-only index manifest, only the four secret-free native Functions via
+`firebase.reminders.json`, and only the three documented first-Eventarc managed
+IAM additions that remain absent. Do not combine that future approval with
+Cloud Tasks, Scheduler, Twilio, reports, MCP, production, or any provider
+credential/action.
