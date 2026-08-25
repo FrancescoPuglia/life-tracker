@@ -28,7 +28,7 @@
     "test:e2e:static": "playwright test --config playwright.static.config.ts",
     "pretest:e2e:staging": "npm --prefix functions run build",
     "test:e2e:staging": "playwright test --config playwright.staging.config.ts",
-    "test:desktop:config": "node --test scripts/desktop-build-profile.test.mjs scripts/next-cli.test.mjs scripts/next-config.test.mjs scripts/node-cli.test.mjs scripts/run-staging-desktop.test.mjs scripts/run-tauri.test.mjs",
+    "test:desktop:config": "node --test scripts/desktop-build-profile.test.mjs scripts/desktop-runtime-independence.test.mjs scripts/next-cli.test.mjs scripts/next-config.test.mjs scripts/node-cli.test.mjs scripts/run-staging-desktop.test.mjs scripts/run-tauri.test.mjs",
     "check:static-security": "node scripts/check-static-security.mjs",
     "check:desktop-security": "node scripts/check-desktop-security.mjs",
     "firebase:deploy": "npm run build && firebase deploy --project life-tracker-staging",

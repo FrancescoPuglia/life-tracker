@@ -1,6 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { findAnonymousRepositoryRuntimeReferences } from './desktop-runtime-independence.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const findings = [];
@@ -60,6 +62,11 @@ for (const [name, version] of Object.entries(exactJavaScriptPackages)) {
   check(packageManifest?.dependencies?.[name] === version, `${name} must remain pinned to ${version}.`);
 }
 check(packageManifest?.devDependencies?.['@tauri-apps/cli'] === '2.11.4', 'Tauri CLI must remain pinned to 2.11.4.');
+check(
+  !packageManifest?.dependencies?.['@tauri-apps/plugin-updater']
+    && !packageManifest?.devDependencies?.['@tauri-apps/plugin-updater'],
+  'Desktop updater dependency must remain absent until a separately signed updater release.',
+);
 
 for (const exactDependency of [
   'tauri = { version = "=2.11.5", features = ["tray-icon"] }',
@@ -90,13 +97,26 @@ for (const permission of allowedPermissions) {
   check(permissions.includes(permission), `Required narrow native permission is missing: ${permission}`);
 }
 
-for (const forbidden of ['tauri-plugin-shell', 'tauri-plugin-fs', 'tauri-plugin-process', 'tauri-plugin-http']) {
+for (const forbidden of [
+  'tauri-plugin-shell',
+  'tauri-plugin-fs',
+  'tauri-plugin-process',
+  'tauri-plugin-http',
+  'tauri-plugin-updater',
+]) {
   check(!cargo.includes(forbidden), `Forbidden native dependency present: ${forbidden}`);
 }
 check(!rust.includes('#[tauri::command]'), 'R1 must not add custom frontend-invokable Rust commands.');
+check(!rust.includes('tauri_plugin_updater'), 'Desktop updater initialization must remain absent.');
 check(rust.includes('tauri_plugin_single_instance::init'), 'Single-instance focus handling is missing.');
 check(rust.includes('tauri_plugin_notification::init'), 'Native notification plugin is missing.');
 check(rust.includes('tauri_plugin_autostart::init'), 'Autostart plugin is missing.');
+
+for (const finding of findAnonymousRepositoryRuntimeReferences(readDesktopRuntimeEntries())) {
+  findings.push(
+    `${finding.path}:${finding.line} depends on an anonymous repository surface (${finding.label}).`,
+  );
+}
 
 if (findings.length) {
   console.error('Desktop security check failed:');
@@ -144,4 +164,49 @@ function readText(path) {
     return '';
   }
   return readFileSync(absolute, 'utf8');
+}
+
+function readDesktopRuntimeEntries() {
+  const entries = [];
+  const trees = [
+    ['src', new Set(['.css', '.html', '.js', '.jsx', '.json', '.ts', '.tsx'])],
+    ['public', new Set(['.css', '.html', '.js', '.json', '.svg', '.txt', '.xml'])],
+    ['scripts', new Set(['.js', '.mjs'])],
+    ['src-tauri/src', new Set(['.rs'])],
+    ['src-tauri/capabilities', new Set(['.json'])],
+  ];
+  for (const [directory, extensions] of trees) {
+    const absoluteDirectory = resolve(root, directory);
+    if (!existsSync(absoluteDirectory)) continue;
+    for (const absolute of listRuntimeFiles(absoluteDirectory, extensions)) {
+      const path = relative(root, absolute).replaceAll('\\', '/');
+      if (/(?:^|\.)test\.[^.]+$/u.test(path) || /(?:^|\.)spec\.[^.]+$/u.test(path)) {
+        continue;
+      }
+      entries.push({ path, text: readFileSync(absolute, 'utf8') });
+    }
+  }
+  for (const path of [
+    'next.config.js',
+    'package.json',
+    'src-tauri/Cargo.toml',
+    'src-tauri/tauri.conf.json',
+    'src-tauri/tauri.production.conf.json',
+  ]) {
+    entries.push({ path, text: readText(path) });
+  }
+  return entries;
+}
+
+function listRuntimeFiles(directory, extensions) {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listRuntimeFiles(path, extensions));
+    } else if (entry.isFile() && extensions.has(extname(entry.name))) {
+      files.push(path);
+    }
+  }
+  return files;
 }

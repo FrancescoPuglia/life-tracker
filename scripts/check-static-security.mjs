@@ -74,14 +74,14 @@ if (existsSync(nextApiRoot)) {
   }
 }
 
-const workflowPath = join(root, '.github', 'workflows', 'deploy.yml');
-if (existsSync(workflowPath)) {
-  scanFile(workflowPath, [
+const workflowRoot = join(root, '.github', 'workflows');
+if (existsSync(workflowRoot)) {
+  scanTree(workflowRoot, [
     {
-      label: 'server provider secret injected into static build workflow',
+      label: 'server provider secret injected into a repository workflow',
       pattern: /\bOPENAI_API_KEY\b/,
     },
-  ]);
+  ], { extensions: new Set(['.yaml', '.yml']) });
 }
 
 const legacyRoutePath = join(root, 'src', 'app', 'api', 'ai');
