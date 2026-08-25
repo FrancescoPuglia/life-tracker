@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `43a019c19c77e1a27fd664557cb72447dda0395e`
+- Current implementation checkpoint SHA: `34f6810d86c5c9d1e0f6158fdb24ba1b4cd8e2f3`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -865,6 +865,50 @@ slice changes one of those trust boundaries.
   parameter, budget, billing, auto-reload, staging, or production change
   occurred. No model is yet claimed cheapest adequate.
 
+### R4 bounded post-archive Weekly strategic interpretation
+
+- Green implementation commit: `34f6810d86c5c9d1e0f6158fdb24ba1b4cd8e2f3`.
+- Added a versioned optional Weekly addendum that can run only after the exact
+  deterministic report archive has committed. It binds owner hash, report and
+  metric artifact hashes, metric-context hash, prompt/output schema, evaluated
+  route/config/receipt, provider model/response, bounded token usage, and its
+  own artifact hash. The immutable archive, metric bundle, and chart data are
+  never rewritten.
+- Provider input is reconstructed independently at the adapter from bounded
+  deterministic scalar/bucket/daily/four-week metrics and data-quality facts.
+  It contains no Goal/Project/Task titles, Notes, descriptions, entity IDs,
+  mailbox, raw Firestore path, provider credential, or model-controlled tool
+  output. The request is one turn, zero tools, 64,000 context bytes maximum,
+  900 output tokens maximum, and a 64-character one-way safety identifier.
+- Output uses strict JSON and explicitly labels the summary/claims as
+  `INFERENCE` or `RECOMMENDATION`. Exact metric-ID references and uncertainty
+  are required. Digits, Unicode numbers, written exact metric quantities,
+  URLs/HTML/control characters, causal language, and diagnosis/medical claims
+  fail closed. Unexpected tool/call output, model drift, usage drift, malformed
+  JSON, or artifact tampering cannot enter email or storage.
+- Added owner-derived server-only
+  `users/{uid}/reportInterpretations/{reportId}` controls. Transactions provide
+  one stable default-off decision or one provider claim. Concurrent full
+  service resolutions invoke the fake provider once; an abandoned claim becomes
+  terminal `uncertain` and is never reissued. Provider/config/quota/schema
+  failure settles deterministic-only with no expensive fallback.
+- Weekly email waits for the interpretation decision before current
+  schedule/recipient authorization. A valid addendum is included in both HTML
+  and text and therefore in the email content/send-authority hash; Daily email
+  is unchanged. Routing-off preserves the existing deterministic email form
+  and never reads the route manifest, endpoint, or OpenAI secret value.
+- Shared the existing backend OpenAI parameters between Secure AI and reports.
+  Only the delivery-capable scheduled Function binds `OPENAI_API_KEY`; the
+  preference trigger remains secret-free, and no Twilio secret is added. The
+  Weekly client is constructed only after a durable claim and has zero SDK
+  retries. Goal 1 chat retains its established default of one retry.
+- Firestore Rules explicitly deny browser access to nested and root
+  interpretation controls. `docs/REPORT_RUNTIME_PREDEPLOY.md` now records the
+  exact secret binding, cost cap, activation separation, and recovery path.
+  No OpenAI/Resend call, credential access, deployment, runtime parameter,
+  Firebase/cloud resource, billing/budget, user document, or external message
+  changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1015,13 +1059,21 @@ slice changes one of those trust boundaries.
 | Functions regression after AI routing | PASS; 40 files / 410 unit tests; 9 emulator files / 88 tests correctly skipped outside their explicit gates |
 | AI routing type/build/security | PASS; strict Functions typecheck, 816.8 kB bundle, evaluation corpus absent from bundle, production dependency audit 0 vulnerabilities, static/Desktop security, staged high-confidence credential scan, and diff hygiene |
 | Live economical model evaluation | NOT RUN; routing remains exact `false`, Goal 1 revision/model unchanged, no provider credit or secret used, and no cheapest-adequate model asserted |
+| Weekly interpretation focused gate | PASS; final 4 files / 42 tests across metric-only context, strict provider response, hostile/tampered output, routing-off secret laziness, report-run ordering, deterministic/addendum email forms, and provider failures |
+| Weekly interpretation Firestore emulator | PASS; final 6/6 stable default-off, concurrent claim and concurrent full-service single-provider authority, immutable completion/replay, terminal failure/uncertainty, invalid failure code, archive conflict, and owner isolation |
+| Coupled report persistence emulator before final hardening | PASS; 5 files / 30 tests across archive, email delivery, report run, schedule manifest, and interpretation transactions; later interpretation-only changes re-passed the final 6/6 gate |
+| Firestore Rules after interpretation controls | PASS; 67/67, including denial of nested and root `reportInterpretations` reads/writes |
+| Functions broad regression after interpretation | PASS; 41 files / 424 unit tests; 10 emulator files / 93 tests skipped in that non-emulator command, followed by the new sixth explicit interpretation-emulator assertion passing in the real emulator |
+| Weekly interpretation type/build gate | PASS; strict Functions typecheck and Node 22 production build, 866.8 kB entry bundle, exact default-off runtime, and evaluation corpus absent from the bundle |
+| Weekly interpretation security/hygiene | PASS; production dependency audit 0 vulnerabilities, static/Desktop security checks, changed/staged and generated-bundle credential scans, `git diff --check`, and staged diff check |
+| Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, and default-off economical workload routing/evaluation are green; post-archive strategic interpretation, secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -1044,8 +1096,9 @@ deployment. No staging or production resource changed in this slice.
 
 Scientific report deployment is another separately reviewed staging gate.
 `docs/REPORT_RUNTIME_PREDEPLOY.md` records the exact two Functions, one index,
-Rules denial, API/service inventory, cost envelope, default-off verification,
-and rollback sequence. A future Resend credential/sender/domain action must be
+Rules denial, the scheduled endpoint's Resend/existing-OpenAI secret bindings,
+API/service inventory, cost envelope, separate default-off switches, and
+rollback sequence. A future Resend credential/sender/domain action must be
 performed by Francesco through a trusted provider/Secret Manager surface and
 must never be pasted into chat. No such action is yet requested because model
 routing activation/evaluation, MCP, privacy preparation, and other independent
@@ -1066,27 +1119,25 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work by adding the optional Weekly Strategic
-Interpretation as a versioned, server-owned addendum to an already archived
-deterministic Weekly report. Read only the report archive/run/email contracts
-and the new routing boundary. The addendum must bind owner, report ID, immutable
-metric-bundle hash/schema, prompt/schema version, route/evaluation receipt, and
-sanitized structured OBSERVED/INFERENCE/RECOMMENDATION output. It must never
-calculate or replace metrics, alter chart data, mutate the immutable archive,
-accept arbitrary facts/tool calls, or run before archive creation.
+Continue independent local R6 work by inventorying the existing MCP adapter and
+tests before changing them; do not assume the small current adapter is a remote
+ChatGPT-ready server. Reuse the verified Firebase-authenticated owner context,
+bounded domain read services, deterministic report metrics, and report archive
+queries. Define an explicit read-only tool allowlist with bounded date ranges,
+pagination/output size, exact schemas, hostile-Note containment, and zero raw
+Firestore paths.
 
-Keep the path exact opt-in/default-off. Provider timeout, quota exhaustion,
-malformed output, missing evaluated weekly route, or addendum persistence error
-must leave the deterministic archive/email useful and must not trigger a more
-expensive fallback. Reuse the existing claim/idempotency and at-most-once email
-boundaries so a scheduler retry cannot duplicate provider interpretation or
-email delivery. Use local fakes only; do not spend provider credit, read/change
-OpenAI secrets, deploy, enable routing, or mutate staging/production.
+Implement the remote authenticated MCP/App SDK-compatible HTTP boundary only
+after proving the local authority contract. Missing/invalid auth, cross-user
+identity, malformed/excessive ranges, tool-name injection, and every attempted
+write must fail closed. Current Pro-exposed write tool count must be exactly
+zero: no apply, rollback, delete, schedule replacement, arbitrary query, or
+capability issuance. Use deterministic analytics/report services rather than
+duplicating formulas. Do not deploy, change Developer Mode/account settings, or
+connect Francesco's ChatGPT account without a later exact human action.
 
-After that green local checkpoint, implement the bounded authenticated
-read-only ChatGPT/MCP surface over the existing secure domain/report services;
-its current Pro-exposed write-tool count must remain zero. Continue privacy and
-release preparation before requesting any provider or cloud action.
+After that local checkpoint, continue the Pages/private-repository dependency
+and recovery preparation while retaining the explicit cloud/provider gates.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
