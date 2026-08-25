@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Session, TimeBlock } from '@/types';
+import { sessionElapsedSeconds } from '@/lib/sessionTiming';
 
 interface NowBarProps {
   currentSession?: Session | null;
@@ -28,23 +29,25 @@ export default function NowBar({
   const [isOverrun, setIsOverrun] = useState(false);
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    const refresh = () => {
       const now = new Date();
       setCurrentTime(now);
 
-      // Update session duration
-      if (currentSession && currentSession.status === 'active') {
-        const duration = Math.floor((now.getTime() - currentSession.startTime.getTime()) / 1000);
-        setSessionDuration(duration);
-      }
+      const duration = currentSession ? sessionElapsedSeconds(currentSession, now) : 0;
+      setSessionDuration(duration ?? 0);
 
       // Update time block countdown
       if (currentTimeBlock) {
         const remaining = Math.floor((currentTimeBlock.endTime.getTime() - now.getTime()) / 1000);
         setTimeBlockRemaining(remaining);
         setIsOverrun(remaining < 0);
+      } else {
+        setTimeBlockRemaining(0);
+        setIsOverrun(false);
       }
-    }, 1000);
+    };
+    refresh();
+    const timer = setInterval(refresh, 1000);
 
     return () => clearInterval(timer);
   }, [currentSession, currentTimeBlock]);

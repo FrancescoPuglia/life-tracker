@@ -40,6 +40,7 @@ import {
   completedSessionNetMinutes,
   type TodaySessionCoverage,
 } from '@/lib/todayExecution';
+import { selectRestorableSession } from '@/lib/sessionTiming';
 
 // Lazy-loaded heavy components (loaded on demand by tab)
 // This reduces initial bundle size by ~400KB
@@ -149,15 +150,10 @@ export default function MainApp({ buildId }: MainAppProps) {
     try {
       const raw = await db.getByIndex<Session>('sessions', 'userId', data.userId);
       const ownerSessions = raw.filter((session) => session.userId === data.userId && !session.deleted);
-      const resumable = ownerSessions
-        .filter((session) => (
-          (session.status === 'active' || session.status === 'paused')
-          && session.startTime instanceof Date
-          && Number.isFinite(session.startTime.getTime())
-        ))
-        .slice()
-        .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
-      const restored = sessionManager.restoreCurrentSession(resumable[0] ?? null, data.userId);
+      const restored = sessionManager.restoreCurrentSession(
+        selectRestorableSession(data.userId, ownerSessions),
+        data.userId,
+      );
       setSessions(ownerSessions);
       setCurrentSession(restored);
       setSessionCoverage('ready');

@@ -216,6 +216,9 @@ export interface Session extends BaseEntity {
   duration?: number;
   status: SessionStatus;
 
+  /** Start of the currently active segment; null while paused/completed. */
+  activeSegmentStartedAt?: Date | null;
+
   tags: string[];
   notes?: string;
 

@@ -1,5 +1,11 @@
 import { Session, TimeBlock } from '@/types';
 import { db, hasSessionTag } from '@/lib/database';
+import {
+  completeSessionAt,
+  pauseSessionAt,
+  resumeSessionAt,
+  timeBlockStatusAfterSession,
+} from '@/lib/sessionTiming';
 
 export class SessionManager {
   private static instance: SessionManager;
@@ -59,14 +65,10 @@ export class SessionManager {
           await this.stopSession();
           break;
         case 'continue':
-          // Do nothing, continue the session
+          this.lastActivity = new Date();
           break;
         case 'subtract':
-          // Subtract idle time from session
-          if (this.currentSession) {
-            this.currentSession.endTime = idleStartTime;
-            await this.updateSession(this.currentSession);
-          }
+          await this.subtractIdleTime(idleStartTime);
           break;
       }
     }
@@ -149,41 +151,59 @@ export class SessionManager {
       throw new Error('A session is already in progress. Resume or stop it before starting another.');
     }
 
-    // 🎯 INTELLIGENCE: Auto-detect domain from timeblock
+    const now = new Date();
+    let linkedTimeBlock: TimeBlock | null = null;
+
+    // Derive linkage only from the authenticated owner's persisted TimeBlock.
     if (timeBlockId) {
       const timeBlocks = await db.getAll<TimeBlock>('timeBlocks');
-      const timeBlock = timeBlocks.find(tb => tb.id === timeBlockId);
-      if (timeBlock) {
-        domainId = timeBlock.domainId;
-        
-        // 🚀 UPDATE: Mark timeblock as in progress
-        await db.update('timeBlocks', {
-          ...timeBlock,
-          status: 'in_progress',
-          actualStartTime: new Date(),
-          updatedAt: new Date()
-        });
+      linkedTimeBlock = timeBlocks.find((timeBlock) => (
+        timeBlock.id === timeBlockId
+        && timeBlock.userId === userId
+        && !timeBlock.deleted
+      )) ?? null;
+      if (!linkedTimeBlock) {
+        throw new Error('The linked TimeBlock is unavailable for this owner.');
       }
+      if (linkedTimeBlock.status === 'completed' || linkedTimeBlock.status === 'cancelled') {
+        throw new Error('The linked TimeBlock cannot start a Session.');
+      }
+      domainId = linkedTimeBlock.domainId;
     }
 
     const session: Session = {
       id: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      timeBlockId, // 🚀 NEW: Link to timeblock
-      taskId,
-      projectId: undefined, // Will be set from timeblock if available
+      timeBlockId,
+      taskId: linkedTimeBlock?.taskId ?? taskId,
+      projectId: linkedTimeBlock?.projectId,
       domainId,
       userId,
-      startTime: new Date(),
+      startTime: now,
       status: 'active',
+      activeSegmentStartedAt: now,
       tags: timeBlockId ? ['timeblock-session'] : [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     };
 
-    this.currentSession = session;
     await db.create('sessions', session);
-    
-    console.log(`🚀 SESSION: Started${timeBlockId ? ` for TimeBlock ${timeBlockId}` : ''}`);
+    this.currentSession = session;
+
+    // Session creation is the execution authority. A secondary TimeBlock
+    // status failure must not erase or hide an already persisted Session.
+    if (linkedTimeBlock) {
+      try {
+        await db.update('timeBlocks', {
+          ...linkedTimeBlock,
+          status: 'in_progress',
+          actualStartTime: linkedTimeBlock.actualStartTime ?? now,
+          updatedAt: now,
+        });
+      } catch {
+        console.warn('The linked TimeBlock status could not be synchronized after Session start.');
+      }
+    }
+
     this.lastActivity = new Date();
     return session;
   }
@@ -193,16 +213,10 @@ export class SessionManager {
       throw new Error('No active session to pause.');
     }
 
-    const now = new Date();
-    const duration = Math.floor((now.getTime() - this.currentSession.startTime.getTime()) / 1000);
-
-    this.currentSession.status = 'paused';
-    this.currentSession.endTime = now;
-    this.currentSession.duration = duration;
-    this.currentSession.updatedAt = now;
-
-    await this.updateSession(this.currentSession);
-    return this.currentSession;
+    const paused = pauseSessionAt(this.currentSession, new Date());
+    await this.updateSession(paused);
+    this.currentSession = paused;
+    return paused;
   }
 
   async resumeSession(): Promise<Session | null> {
@@ -210,21 +224,9 @@ export class SessionManager {
       throw new Error('No paused session to resume.');
     }
 
-    // Create a new session entry for the resumed portion
-    const resumedSession: Session = {
-      ...this.currentSession,
-      id: `session-${Date.now()}`,
-      startTime: new Date(),
-      endTime: undefined,
-      duration: undefined,
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
+    const resumedSession = resumeSessionAt(this.currentSession, new Date());
+    await this.updateSession(resumedSession);
     this.currentSession = resumedSession;
-    await db.create('sessions', resumedSession);
-    
     this.lastActivity = new Date();
     return resumedSession;
   }
@@ -236,44 +238,36 @@ export class SessionManager {
     }
 
     const now = new Date();
-    const duration = this.currentSession.duration || 
-      Math.floor((now.getTime() - this.currentSession.startTime.getTime()) / 1000);
+    const completedSession = completeSessionAt(this.currentSession, now, notes);
+    await this.updateSession(completedSession);
+    this.currentSession = null;
 
-    this.currentSession.status = 'completed';
-    this.currentSession.endTime = now;
-    this.currentSession.duration = duration;
-    this.currentSession.notes = notes;
-    this.currentSession.updatedAt = now;
-
-    await this.updateSession(this.currentSession);
-    
-    // 🎯 INTELLIGENCE: Complete linked TimeBlock
-    if (this.currentSession.timeBlockId) {
-      const timeBlocks = await db.getAll<TimeBlock>('timeBlocks');
-      const timeBlock = timeBlocks.find(tb => tb.id === this.currentSession!.timeBlockId);
-      
-      if (timeBlock) {
-        const actualDurationMin = duration / 60; // Convert to minutes
-        const plannedDurationMin = (timeBlock.endTime.getTime() - timeBlock.startTime.getTime()) / (1000 * 60);
-        
-        const status = actualDurationMin >= plannedDurationMin * 0.8 ? 'completed' : 'overrun';
-        
-        await db.update('timeBlocks', {
-          ...timeBlock,
-          status,
-          actualEndTime: now,
-          actualStartTime: timeBlock.actualStartTime || this.currentSession!.startTime,
-          updatedAt: now
-        });
-        
-        console.log(`🎯 TIMEBLOCK: ${status} - ${actualDurationMin.toFixed(1)}min (planned: ${plannedDurationMin.toFixed(1)}min)`);
+    if (completedSession.timeBlockId) {
+      try {
+        const timeBlocks = await db.getAll<TimeBlock>('timeBlocks');
+        const timeBlock = timeBlocks.find((candidate) => (
+          candidate.id === completedSession.timeBlockId
+          && candidate.userId === completedSession.userId
+          && !candidate.deleted
+        ));
+        if (
+          timeBlock
+          && timeBlock.status !== 'completed'
+          && timeBlock.status !== 'cancelled'
+        ) {
+          await db.update('timeBlocks', {
+            ...timeBlock,
+            status: timeBlockStatusAfterSession(timeBlock, completedSession.duration ?? 0),
+            actualEndTime: now,
+            actualStartTime: timeBlock.actualStartTime ?? completedSession.startTime,
+            updatedAt: now,
+          });
+        }
+      } catch {
+        console.warn('The linked TimeBlock status could not be synchronized after Session completion.');
       }
     }
-    
-    const completedSession = this.currentSession;
-    this.currentSession = null;
-    
-    console.log(`🚀 SESSION: Completed - ${(duration/60).toFixed(1)} minutes`);
+
     return completedSession;
   }
 
@@ -336,6 +330,20 @@ export class SessionManager {
 
   private async updateSession(session: Session): Promise<void> {
     await db.update('sessions', session);
+  }
+
+  private async subtractIdleTime(idleStartTime: Date): Promise<void> {
+    if (!this.currentSession || this.currentSession.status !== 'active') {
+      throw new Error('No active Session can subtract idle time.');
+    }
+    const paused = pauseSessionAt(this.currentSession, idleStartTime);
+    await this.updateSession(paused);
+    this.currentSession = paused;
+
+    const resumed = resumeSessionAt(paused, new Date());
+    await this.updateSession(resumed);
+    this.currentSession = resumed;
+    this.lastActivity = new Date();
   }
 
   async getSessionHistory(userId: string, days: number = 7): Promise<Session[]> {
