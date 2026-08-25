@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `099c5794a962d7a859a5ebc5f3231cf8cf1b34cd`
+- Current implementation checkpoint SHA: `5562259f37c55c4fcb27230682331a8189be00af`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -1161,6 +1161,59 @@ slice changes one of those trust boundaries.
   ChatGPT, provider, account, billing, secret, IAM, Rules, index, TTL, or user
   data changed.
 
+### R1 Daily Command Center execution truth and usability
+
+- Green implementation commit:
+  `5562259f37c55c4fcb27230682331a8189be00af`.
+- Replaced the Today screen's completed-TimeBlock/planned-window proxy with a
+  pure owner-filtered metric engine. Planned minutes come only from productive
+  TimeBlocks. Actual minutes come first from valid completed Sessions and then
+  from an explicit actual TimeBlock interval only when no valid linked Session
+  exists. Missing, invalid, open, loading, and unavailable evidence is surfaced;
+  it is never silently converted to planned duration or zero productivity.
+- Today boundaries use the persisted notification timezone and exact IANA
+  local-day bounds. Tests prove both the 23-hour and 25-hour Europe/Rome DST
+  transitions. The product fallback remains `Europe/Rome` only when the
+  owner-scoped preference document is absent; a read failure is labelled as a
+  fallback/error state rather than authoritative preference data.
+- MainApp now reloads exact-owner Sessions, restores a valid active/paused
+  Session after restart, resumes rather than replaces a paused Session, blocks
+  a second start, refreshes authoritative TimeBlocks after Session mutations,
+  and preserves an in-memory owned Session across a transient read failure.
+  When no persisted Session authority can be loaded, both Today and NowBar
+  disable new starts to fail closed against duplicate execution records.
+- NowBar links Start to the exact current TimeBlock/task and displays the next
+  real block instead of a hard-coded null placeholder. The Command Center adds
+  next-three commitments, Session-backed adherence/data-quality messaging,
+  persisted reminder policy and native permission state, direct Ask AI,
+  Settings/report links, and bounded Quick Capture.
+- Quick Capture persists only a global TipTap Note with a 1,000-character
+  bound. Hostile-looking text remains literal note data, not authorization or
+  instructions. Firebase create diagnostics no longer log the submitted
+  entity payload, preventing captured note contents from entering browser
+  logs.
+- Badge execution totals now use valid completed Sessions instead of completed
+  TimeBlocks with a planned-window fallback. Frontend TypeScript now excludes
+  the three isolated backend deploy packages, while their own strict
+  typechecks remain explicit and green; the prior root glob had accidentally
+  pulled backend source into the browser gate through their isolated entry
+  imports.
+- Focused coverage passed 4 files / 20 tests. The full frontend regression
+  passed 66 files / 708 tests. Frontend typecheck, all three isolated-package
+  typechecks, the Next.js 15.5.23 static build, eight Desktop config test files,
+  output-inclusive static security, Desktop attack-surface security,
+  high-confidence changed-material credential scan, and diff hygiene passed.
+  No Goal 1 trust boundary, Firebase resource, provider, account, billing,
+  secret value, production data, or Desktop installation changed.
+- During the already-approved R1 predeploy metadata check, a Firebase CLI
+  `login:list --json` invocation unexpectedly emitted its credential envelope
+  into tool output. Work stopped before deployment. The affected CLI login was
+  immediately revoked with `firebase logout` (exit 0), and a later safe
+  non-JSON check confirmed there are no authorized accounts. No credential is
+  reproduced here, no credential entered Git, and no cloud mutation occurred.
+  Treat the old CLI authorization as compromised/revoked; fresh interactive
+  Firebase login is now the sole immediate human gate.
+
 ## Evidence
 
 | Check | Result |
@@ -1348,7 +1401,7 @@ slice changes one of those trust boundaries.
 | Current artifact security | PASS for provider credential names/key shapes and Life Tracker GitHub/Pages runtime URLs; one broad Resend-shape false positive traced by hash/compiled lineage to `tauri_runtime_wry`, absent from source/export/installer |
 | Minimal R1 Function proof | PASS at exact `3100c42`; 3 files / 32 affected tests, strict typecheck/build, one deployable endpoint, production dependency audit 0 vulnerabilities, source/bundle credential scans, and diff hygiene |
 | Minimal R1 expected fingerprints | Backend `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`; exact three-origin Sol/medium runtime `sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f` |
-| R1 staging deploy/install | NOT RUN; exact Function-only approval and post-deploy CORS/attestation checks are required before installer use |
+| R1 staging deploy/install | APPROVED BUT NOT RUN; exact Function-only approval was received, then the CLI credential incident was contained before any deployment; fresh interactive Firebase login and post-deploy CORS/attestation checks remain required before installer use |
 | R1 automated baseline verifier | PASS; 16/16 public GET/POST-preflight probes, two exact allows, six exact denies, and full Goal 1 fingerprints |
 | R1 post-deploy verifier | Expected pre-deploy exit 1; live release/runtime remain baseline, so Desktop acceptance correctly cannot pass yet |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
@@ -1366,10 +1419,16 @@ slice changes one of those trust boundaries.
 | Native staging resource preflight | PASS read-only; one unchanged AI Function, zero Eventarc triggers, zero Pub/Sub topics, Goal 1 Rules/index baseline intact |
 | Reminder TTL safety preflight | PASS count-only; all nine reminder runtime namespaces contain zero documents |
 | Native reminder staging deployment | NOT RUN; exact four-Function plus reviewed Rules/reminder-only-index approval remains separate from R1 |
+| Today deterministic metric coverage | PASS; 10/10 owner isolation, Session precedence, explicit fallback, missing/unavailable evidence, off-plan execution, invalid denominator, active/next ordering, both Rome DST transitions, and hostile Quick Capture cases |
+| Today/NowBar/Session focused UI coverage | PASS; combined final focused gate 4 files / 20 tests, including exact TimeBlock linkage, persisted pause/restore, duplicate-start denial, reminders, Ask AI, upcoming blocks, bounded capture, normalized failure, and unavailable-Session fail-closed controls |
+| Frontend regression after Command Center | PASS; 66 files / 708 tests |
+| Command Center type/build gate | PASS; frontend typecheck, Next.js 15.5.23 static build with 4 pages and 237 kB / 340 kB root route, plus strict `functions-mcp`, `functions-reminders`, and `functions-reports` typechecks; only established unrelated lint warnings |
+| Command Center Desktop/security hygiene | PASS; 8/8 Desktop config scripts, output-inclusive static security, Desktop attack-surface security, changed-material credential-shape scan, `git diff --check`, and removal of entity payloads from Firebase create diagnostics |
+| Firebase CLI credential containment | PASS for containment, deployment NOT RUN; credential-bearing JSON output was not reused or reproduced, CLI logout/revocation exited 0, safe non-JSON follow-up confirmed no authorized accounts, and fresh interactive login remains required |
 
 ## Release status
 
-- R1 Desktop Beta using verified staging: IN PROGRESS — current-source x64 NSIS artifact and exact minimal Function-only deployment/rollback receipt are green; staging CORS deployment, install, and visible acceptance remain pending
+- R1 Desktop Beta using verified staging: IN PROGRESS — exact Function-only deployment approval is recorded and the session-authoritative Daily Command Center is green; a fresh Firebase CLI login, bounded staging CORS deployment/acceptance, a new exact-source x64 NSIS build, install, and visible acceptance remain pending
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, authenticated native coordinator/policy, server-side cloud-channel gate, and an exact isolated four-endpoint native staging codebase are green; staging deployment and installed/live delivery remain pending
 - R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, isolated exact two-endpoint deploy codebase, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, Scheduler staging gate, deployment, and live Daily/Weekly delivery remain pending
@@ -1379,23 +1438,28 @@ slice changes one of those trust boundaries.
 
 ## External blockers
 
-The original R1 installer is installed, and a superseding installer from
-`318d7a6` is built but not installed. WSL/Windows interop timed out after the
-successful build; installed authentication/domain/native-notification
-acceptance therefore still needs direct interaction on Francesco's Windows
-desktop.
+The original R1 installer is installed, and older superseding installers are
+built but not installed. They predate the session-authoritative Command Center
+at `5562259` and must not be treated as the final R1 artifact. A fresh exact-
+source staging build still requires the reviewed public Firebase manifest via
+an authenticated CLI, and installed authentication/domain/native-notification
+acceptance still needs direct interaction on Francesco's Windows desktop.
 
-The existing explicit staging gate remains approval to deploy only
-`lifeTrackerAiApi` to the positively identified `life-tracker-staging` project
-with the reviewed Desktop-origin allowlist, using detached one-endpoint source
-`3100c42`. The separate native-reminder staging boundary is now fully recorded
+The exact approval to deploy only `lifeTrackerAiApi` to positively identified
+project `life-tracker-staging`, from detached one-endpoint source `3100c42`
+with the reviewed three-origin policy, has been received. Deployment did not
+start: the prior Firebase CLI authorization was revoked after credential-
+bearing JSON appeared in tool output, and safe follow-up confirms zero
+authorized accounts. Francesco must now complete a fresh interactive login in
+his own terminal and keep every authorization code there. The separate native-
+reminder staging boundary remains fully recorded
 in `docs/REMINDER_RUNTIME_PREDEPLOY.md`: current owner-scoped Rules, the
 reminder-only index manifest, exactly four secret-free Functions in isolated
 codebase `reminders`, and the exact three absent first-Eventarc managed IAM
 grants. Cloud Tasks, Scheduler, worker, callback, refill, Twilio, reports, MCP,
 runtime parameters, and provider configuration remain structurally excluded.
-Request that separate approval only after the immediate R1 gate. No staging or
-production resource changed in this slice.
+Request its separate approval only after R1. No staging or production resource
+changed in this slice.
 
 Scientific report deployment is another separately reviewed staging gate.
 `docs/REPORT_RUNTIME_PREDEPLOY.md` now records codebase `reports`, the exact two
@@ -1436,7 +1500,8 @@ visibility changes. The local GitHub CLI admin session is expired; future
 reauthentication must use GitHub's trusted interactive surface without exposing
 a token. No such action is requested yet.
 
-The immediate R1 gate is now one exact staging mutation documented in
+After fresh CLI authentication, the immediate R1 gate is the already-approved
+exact staging mutation documented in
 `docs/R1_STAGING_DEPLOY_PRECHECK.md`: deploy only `lifeTrackerAiApi` from
 minimal source `3100c42` to explicit project `life-tracker-staging`, retaining
 Sol/medium, both Goal 1 origins, both existing secret versions, and adding only
@@ -1453,25 +1518,35 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Commit and push this progress checkpoint, then request the single exact R1
-staging approval quoted in `docs/R1_STAGING_DEPLOY_PRECHECK.md`. Do not broaden
-that approval to any other Function, Rule, index, parameter, secret, API,
-billing setting, provider call, production target, or Desktop installation.
+Commit and push this progress checkpoint. The sole immediate human action is a
+fresh Firebase CLI login in Francesco's own terminal from the repository:
 
-If approved, recreate a clean detached `3100c42` worktree, install its exact
-lockfile, create only the reviewed four-line non-secret staging parameter file,
-repeat project/source/endpoint/secret-metadata checks, and deploy with exact
-scope `--project life-tracker-staging --only functions:lifeTrackerAiApi`.
+`node node_modules/firebase-tools/lib/bin/firebase.js login --reauth`
+
+Complete the browser/code flow only in that terminal, never paste a credential
+or authorization code into chat, and then report only `Firebase CLI login
+complete`. The exact Function-only deployment approval is already recorded and
+does not authorize any other resource or account mutation.
+
+After login, use only safe non-JSON identity output with the update check
+disabled, reconfirm project `life-tracker-staging` / number `675076431391`, and
+repeat the Function source/fingerprint/resource/secret-version metadata checks.
+Never use `login:list --json`. Recreate a clean detached `3100c42` worktree,
+install its exact lockfile, create only the reviewed four-line non-secret
+staging parameter file, rerun its focused proof/discovery/credential scan, and
+deploy with exact scope
+`--project life-tracker-staging --only functions:lifeTrackerAiApi`.
+
 Immediately prove the new full backend/runtime fingerprints, original-origin
 continuity, exact Desktop-origin allow, near-match/Pages denies, unchanged
 resource bounds/secret versions, one endpoint, and production isolation. The
 first public gate is `npm run verify:r1-staging:desktop`; any nonzero exit aborts
-installation and provider use.
-
-Only after those checks pass, install the freshly hashed Beta and complete the
-visible authentication, Goal/Project/Task/TimeBlock/Session/Habit/Analytics,
-Ask AI preview/apply/undo, native notification/autostart, offline, expired-auth,
-backend-unavailable, tray, single-instance, and restart acceptance matrix.
+installation and provider use. After it passes, build a new clean Windows x64
+NSIS Beta from the latest committed Master source, record hashes and binary
+security evidence, then install it and complete visible authentication,
+Goal/Project/Task/TimeBlock/Session/Habit/Analytics, Ask AI preview/apply/undo,
+native notification/autostart, offline, expired-auth, backend-unavailable,
+tray, single-instance, and restart acceptance.
 
 After R1 is green, the next distinct staging mutation is the native-only R3
 sequence in `docs/REMINDER_RUNTIME_PREDEPLOY.md`. Reconfirm its zero-count/API
