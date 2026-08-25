@@ -980,6 +980,40 @@ slice changes one of those trust boundaries.
   future admin action requires trusted interactive reauthentication and exact
   approval, never a credential in chat.
 
+### R1 current-source Beta and minimal staging deploy preflight
+
+- Green receipt commit: `8e1d7f409decc8a70dee115b1bd3daa8ddc512e3`.
+- Built a clean reviewed-staging static export and Windows x64 Tauri/NSIS Beta
+  from exact source `ced322e7a63cf6dbe7de6f54a047abfe62df6a45`.
+  Output security and exact Git/environment/runtime/backend attestations passed.
+  The executable is 6,478,848 bytes with SHA-256 `cd24d9df...f627f519`;
+  the 2,386,292-byte installer is `032403ca...d77d23d`.
+- Binary scans found no OpenAI/Twilio/webhook/private-key shape,
+  provider-secret variable name, or Life Tracker GitHub/Pages runtime URL. One
+  permissive 29-character `re_` candidate was classified without disclosure as
+  a pinned `tauri_runtime_wry` library token; it is absent from tracked runtime
+  source, exported frontend, and installer. Both Windows artifacts report Life
+  Tracker Beta 1.0.0 and are honestly `NotSigned`.
+- Refreshed the explicit staging inventory. It still has exactly one active
+  Node 22 Function with source hash `50d67b...`, backend fingerprint
+  `5bfec76c...`, runtime fingerprint `16636fe0...`, Sol/medium, the original two
+  exact origins, and the same two secret versions by metadata only. Exact
+  Desktop and near-match origins remain HTTP 403 before deployment.
+- Proved the smallest deployable source in an isolated detached worktree:
+  `3100c42bfda50bb4627b7345270985a517439167` is exactly Goal 1 source plus the
+  Desktop CORS delta/tests. Its 32/32 affected tests, strict typecheck/build,
+  zero-vulnerability install, one-endpoint discovery, source/bundle credential
+  scan, and diff hygiene passed. Expected backend/runtime fingerprints are
+  `8bec8a4c...` and `6ef03a91...`.
+- `docs/R1_STAGING_DEPLOY_PRECHECK.md` fixes the target, exact non-secret
+  parameters, resource exclusions, cost boundary, approval procedure,
+  post-deploy allow/deny matrix, and targeted `bef7b11` rollback. The temporary
+  proof worktree and generated dependencies were removed afterward; Git history
+  retains the commit.
+- The Function was not deployed, the artifact was not installed, and no
+  provider, secret value, Firebase data/resource, production target, billing
+  setting, GitHub state, or user application changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1149,11 +1183,19 @@ slice changes one of those trust boundaries.
 | Desktop repository-independence enforcement | PASS; runtime/config/source scan, updater dependency/init denial, Desktop security, expanded all-workflow static security, syntax/JSON parsing, changed/staged credential scans, and diff hygiene |
 | Pages workflow and GitHub mutations during preflight | PASS unchanged; `.github/workflows/deploy.yml` is outside the diff and no Pages, visibility, DNS, Actions setting, tag, release, branch, or billing mutation occurred |
 | R7 live privacy conversion | NOT RUN; production prerequisites, authenticated admin/custom-domain verification, workflow replacement, exact human approval, unpublish evidence, and private-access checks remain required |
+| Current-source staging Desktop export | PASS at exact `ced322e7`; reviewed public Firebase manifest, 4 static pages, exact source/environment/runtime/backend attestations, and output-inclusive security scan |
+| Current-source Windows Tauri build | PASS; optimized x64 `Life Tracker Beta` 1.0.0 executable plus one NSIS bundle; no install performed |
+| Current executable/installer | 6,478,848-byte executable SHA-256 `cd24d9dfdde54e7f66691dec67e09eebbbf12f3281719c3771356f59f627f519`; 2,386,292-byte installer SHA-256 `032403ca52c6a367f814adee37e9a95d03e55309988c215ffedadabdcd77d23d` |
+| Current artifact signing | `NotSigned` for executable and installer; recorded as a Beta distribution limitation, not represented as Authenticode PASS |
+| Current artifact security | PASS for provider credential names/key shapes and Life Tracker GitHub/Pages runtime URLs; one broad Resend-shape false positive traced by hash/compiled lineage to `tauri_runtime_wry`, absent from source/export/installer |
+| Minimal R1 Function proof | PASS at exact `3100c42`; 3 files / 32 affected tests, strict typecheck/build, one deployable endpoint, production dependency audit 0 vulnerabilities, source/bundle credential scans, and diff hygiene |
+| Minimal R1 expected fingerprints | Backend `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`; exact three-origin Sol/medium runtime `sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f` |
+| R1 staging deploy/install | NOT RUN; exact Function-only approval and post-deploy CORS/attestation checks are required before installer use |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
 
 ## Release status
 
-- R1 Desktop Beta using verified staging: IN PROGRESS
+- R1 Desktop Beta using verified staging: IN PROGRESS — current-source x64 NSIS artifact and exact minimal Function-only deployment/rollback receipt are green; staging CORS deployment, install, and visible acceptance remain pending
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
 - R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
@@ -1213,6 +1255,15 @@ visibility changes. The local GitHub CLI admin session is expired; future
 reauthentication must use GitHub's trusted interactive surface without exposing
 a token. No such action is requested yet.
 
+The immediate R1 gate is now one exact staging mutation documented in
+`docs/R1_STAGING_DEPLOY_PRECHECK.md`: deploy only `lifeTrackerAiApi` from
+minimal source `3100c42` to explicit project `life-tracker-staging`, retaining
+Sol/medium, both Goal 1 origins, both existing secret versions, and adding only
+`https://tauri.localhost`. It creates one new build/revision and can incur the
+staging project's existing cloud costs, but enables no API/billing/provider
+loop. The current artifact must not be installed or used for Ask AI until the
+post-deploy fingerprint and exact CORS matrix pass.
+
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
 billing, APIs, or paid services without explicit human approval. This does not
@@ -1220,25 +1271,20 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Return to the early-use R1 path. From the next clean committed checkpoint, build
-a fresh reviewed-staging static export and Windows x64 NSIS Beta so the artifact
-attests all current client changes rather than the superseded `318d7a6` source.
-Run the Desktop/static security checks, exact environment/backend attestations,
-binary and installer credential-signature scans, and record sizes/SHA-256. Do
-not deploy a Function, enable a service, install/overwrite an application, or
-contact a provider merely to produce the artifact.
+Commit and push this progress checkpoint, then request the single exact R1
+staging approval quoted in `docs/R1_STAGING_DEPLOY_PRECHECK.md`. Do not broaden
+that approval to any other Function, Rule, index, parameter, secret, API,
+billing setting, provider call, production target, or Desktop installation.
 
-In parallel with that local build, consolidate one bounded
-`lifeTrackerAiApi`-only staging pre-deploy receipt: exact project
-`life-tracker-staging`, current Goal 1 revision/source, proposed source SHA,
-Desktop-origin CORS delta, endpoint/resource diff, affected tests, rollback
-command, and proof that no reminder/report/MCP endpoint, Rule, index, secret,
-parameter, API, billing setting, or provider is in scope. Checkpoint and push
-the artifact receipt before requesting the one exact staging deployment action.
+If approved, recreate a clean detached `3100c42` worktree, install its exact
+lockfile, create only the reviewed four-line non-secret staging parameter file,
+repeat project/source/endpoint/secret-metadata checks, and deploy with exact
+scope `--project life-tracker-staging --only functions:lifeTrackerAiApi`.
+Immediately prove the new full backend/runtime fingerprints, original-origin
+continuity, exact Desktop-origin allow, near-match/Pages denies, unchanged
+resource bounds/secret versions, one endpoint, and production isolation.
 
-After exact human approval, separately deploy only `lifeTrackerAiApi` to the
-explicit `life-tracker-staging` project, verify runtime attestation and exact
-CORS allow/deny behavior, and then prepare a separately reviewed staging
-reminder deployment diff. Install the freshly hashed Beta and complete the
-visible auth/domain/AI/native-reminder/offline/restart acceptance matrix only
-after its required backend surface is available.
+Only after those checks pass, install the freshly hashed Beta and complete the
+visible authentication, Goal/Project/Task/TimeBlock/Session/Habit/Analytics,
+Ask AI preview/apply/undo, native notification/autostart, offline, expired-auth,
+backend-unavailable, tray, single-instance, and restart acceptance matrix.
