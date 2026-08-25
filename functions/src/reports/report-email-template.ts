@@ -39,6 +39,11 @@ import {
   REPORT_METRIC_SCHEMA_VERSION,
   REPORT_SCHEMA_VERSION,
 } from './types';
+import {
+  validateWeeklyStrategicInterpretation,
+  type WeeklyStrategicInterpretation,
+  type WeeklyInterpretationStatement,
+} from './weekly-interpretation';
 
 export const REPORT_EMAIL_RENDERER_SCHEMA_VERSION = 'report-email-renderer-v1' as const;
 
@@ -62,6 +67,7 @@ export interface ComposeScientificReportEmailInput {
   /** Verified Firebase UID. It is used only to revalidate archive ownership. */
   readonly uid: string;
   readonly archive: StoredScientificReportArchive;
+  readonly interpretation?: WeeklyStrategicInterpretation | null;
 }
 
 export class ReportEmailCompositionError extends Error {
@@ -374,6 +380,35 @@ function scientificStatements(report: ScientificExecutionReport): ReactNode {
   )));
 }
 
+function interpretationStatement(
+  label: string,
+  statement: WeeklyInterpretationStatement,
+): ReactNode {
+  return createElement('div', {
+    style: { marginBottom: '14px', paddingLeft: '12px', borderLeft: '3px solid #7c3aed' },
+  },
+  createElement('p', { style: { ...TEXT_STYLE, marginBottom: '3px' } },
+    createElement('strong', null, `${label} — ${statement.kind}: `), statement.text),
+  createElement('p', { style: MUTED_STYLE },
+    `Confidence ${statement.confidence} · metric references ${statement.metricIds.join(', ')}`),
+  createElement('p', { style: MUTED_STYLE }, `Uncertainty: ${statement.uncertainty}`));
+}
+
+function strategicInterpretation(interpretation: WeeklyStrategicInterpretation): ReactNode {
+  return createElement('div', null,
+    createElement('p', { style: TEXT_STYLE },
+      createElement('strong', null, `${interpretation.summaryKind} SUMMARY: `),
+      interpretation.summary),
+    interpretationStatement('Strongest pattern', interpretation.strongestPattern),
+    interpretationStatement('Largest uncertainty', interpretation.largestUncertainty),
+    interpretationStatement('Reversible experiment', interpretation.nextWeekExperiment),
+    createElement('p', { style: MUTED_STYLE },
+      `Optional model ${interpretation.model} · prompt ${interpretation.promptVersion} · artifact ${interpretation.artifactHash.slice(0, 16)}.`),
+    createElement('p', { style: MUTED_STYLE },
+      'This addendum has no numerical authority and cannot modify metrics, charts, or execution state.'),
+  );
+}
+
 function dailySections(
   report: Extract<ScientificExecutionReport, { type: 'daily' }>,
   attachments: readonly ReportEmailAttachment[],
@@ -415,6 +450,7 @@ function dailySections(
 function weeklySections(
   report: WeeklyExecutionReport,
   attachments: readonly ReportEmailAttachment[],
+  interpretation: WeeklyStrategicInterpretation | null,
 ): readonly ReactNode[] {
   return [
     section('1-summary', '1. Executive Summary', paragraphs(report.executiveSummary)),
@@ -469,6 +505,11 @@ function weeklySections(
     section('15-experiments', '15. Next-week Experiments and Recommendations', paragraphs(
       report.nextWeekExperiments,
     )),
+    ...(interpretation ? [section(
+      'strategic-interpretation',
+      'Optional Strategic Interpretation Addendum',
+      strategicInterpretation(interpretation),
+    )] : []),
     section('statements', 'Scientific Statements', scientificStatements(report)),
     section('16-methodology', '16. Methodology and Data Quality', createElement('div', null,
       createElement('p', { style: TEXT_STYLE },
@@ -484,13 +525,14 @@ function emailTree(
   report: ScientificExecutionReport,
   attachments: readonly ReportEmailAttachment[],
   subject: string,
+  interpretation: WeeklyStrategicInterpretation | null,
 ): ReactNode {
   const preview = report.type === 'daily'
     ? `Daily execution evidence for ${report.period.localStartDate}`
     : `Weekly scientific execution evidence from ${report.period.localStartDate}`;
   const sections = report.type === 'daily'
     ? dailySections(report, attachments)
-    : weeklySections(report, attachments);
+    : weeklySections(report, attachments, interpretation);
   const language = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(report.locale)
     ? report.locale.slice(0, 2).toLowerCase()
     : 'en';
@@ -550,7 +592,7 @@ function emailTree(
             style: { padding: '20px 32px', backgroundColor: '#f8fafc' },
           },
           createElement('p', { style: MUTED_STYLE },
-            `Generated ${report.generatedAt} · metric ${report.metrics.metricHash.slice(0, 16)} · deterministic fallback active.`),
+            `Generated ${report.generatedAt} · metric ${report.metrics.metricHash.slice(0, 16)} · ${interpretation ? 'optional metric-bound AI addendum included' : 'deterministic fallback active'}.`),
           createElement('p', { style: { ...MUTED_STYLE, margin: 0 } },
             'Numerical truth is deterministic. Any future AI interpretation cannot modify these values.'),
           )),
@@ -630,7 +672,10 @@ function dailyText(report: Extract<ScientificExecutionReport, { type: 'daily' }>
   ];
 }
 
-function weeklyText(report: WeeklyExecutionReport): string[] {
+function weeklyText(
+  report: WeeklyExecutionReport,
+  interpretation: WeeklyStrategicInterpretation | null,
+): string[] {
   return [
     '1. EXECUTIVE SUMMARY',
     ...report.executiveSummary.map((line) => `- ${line}`),
@@ -682,6 +727,22 @@ function weeklyText(report: WeeklyExecutionReport): string[] {
     '15. NEXT-WEEK EXPERIMENTS AND RECOMMENDATIONS',
     ...report.nextWeekExperiments.map((line) => `- ${line}`),
     '',
+    ...(interpretation ? [
+      'OPTIONAL STRATEGIC INTERPRETATION ADDENDUM',
+      `${interpretation.summaryKind} SUMMARY: ${interpretation.summary}`,
+      `${interpretation.strongestPattern.kind}: ${interpretation.strongestPattern.text}`,
+      `Metric references: ${interpretation.strongestPattern.metricIds.join(', ')}; confidence: ${interpretation.strongestPattern.confidence}.`,
+      `Uncertainty: ${interpretation.strongestPattern.uncertainty}`,
+      `${interpretation.largestUncertainty.kind}: ${interpretation.largestUncertainty.text}`,
+      `Metric references: ${interpretation.largestUncertainty.metricIds.join(', ')}; confidence: ${interpretation.largestUncertainty.confidence}.`,
+      `Uncertainty: ${interpretation.largestUncertainty.uncertainty}`,
+      `${interpretation.nextWeekExperiment.kind}: ${interpretation.nextWeekExperiment.text}`,
+      `Metric references: ${interpretation.nextWeekExperiment.metricIds.join(', ')}; confidence: ${interpretation.nextWeekExperiment.confidence}.`,
+      `Uncertainty: ${interpretation.nextWeekExperiment.uncertainty}`,
+      `Model: ${interpretation.model}; prompt: ${interpretation.promptVersion}; artifact: ${interpretation.artifactHash}.`,
+      'This addendum has no numerical authority and cannot modify metrics, charts, or execution state.',
+      '',
+    ] : []),
     'SCIENTIFIC STATEMENTS',
     ...statementsText(report),
     '',
@@ -692,11 +753,14 @@ function weeklyText(report: WeeklyExecutionReport): string[] {
   ];
 }
 
-function textFallback(report: ScientificExecutionReport): string {
+function textFallback(
+  report: ScientificExecutionReport,
+  interpretation: WeeklyStrategicInterpretation | null,
+): string {
   const flags = report.metrics.dataQuality.flags;
   return [
     ...commonTextHeader(report),
-    ...(report.type === 'daily' ? dailyText(report) : weeklyText(report)),
+    ...(report.type === 'daily' ? dailyText(report) : weeklyText(report, interpretation)),
     '',
     `DATASET STATUS: ${report.metrics.dataQuality.complete ? 'complete' : 'incomplete or partial'}`,
     ...(flags.length > 0 ? flags.map((flag) => `- ${flag}`) : ['- No data-quality flags recorded.']),
@@ -723,11 +787,17 @@ export async function composeScientificReportEmail(
 ): Promise<ComposedScientificReportEmail> {
   try {
     const report = validateArchiveAuthority(input.uid, input.archive);
+    const interpretation = input.interpretation
+      ? validateWeeklyStrategicInterpretation(input.uid, input.archive, input.interpretation)
+      : null;
+    if (report.type === 'daily' && interpretation) fail();
     const renderedCharts = await chartRenderer(report.charts);
     const attachments = validateAndCopyCharts(report, renderedCharts);
     const subject = subjectFor(report);
-    const html = normalizeReactEmailHtml(await render(emailTree(report, attachments, subject)));
-    const text = textFallback(report);
+    const html = normalizeReactEmailHtml(await render(
+      emailTree(report, attachments, subject, interpretation),
+    ));
+    const text = textFallback(report, interpretation);
     const content = Object.freeze({
       schemaVersion: REPORT_EMAIL_SCHEMA_VERSION,
       templateVersion: REPORT_EMAIL_TEMPLATE_VERSION,

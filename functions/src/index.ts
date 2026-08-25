@@ -18,6 +18,14 @@ import {
   type LifeTrackerAiRoutingPolicy,
 } from './ai/model-routing';
 import { WorkloadRoutedResponsesAdapter } from './ai/routed-responses-adapter';
+import {
+  AI_MODEL_ROUTING_CONFIG,
+  AI_MODEL_ROUTING_ENABLED,
+  OPENAI_API_KEY,
+  OPENAI_BASE_URL,
+  OPENAI_MODEL,
+  OPENAI_REASONING_EFFORT,
+} from './ai/runtime-parameters';
 import { CapabilityIssuer } from './domain/capabilities';
 import { DomainError } from './domain/errors';
 import { createLifeTrackerDomain } from './domain/factory';
@@ -34,31 +42,8 @@ import {
 } from './runtime-config';
 import { BACKEND_SOURCE_FINGERPRINT } from '../.generated/release-id';
 
-const OPENAI_API_KEY = defineSecret('OPENAI_API_KEY', {
-  description: 'Backend-only OpenAI API key used by the Responses API.',
-});
 const CAPABILITY_SIGNING_SECRET = defineSecret('AI_CAPABILITY_SIGNING_SECRET', {
   description: 'At least 32 random bytes used to derive one-time approval and rollback capabilities.',
-});
-const OPENAI_MODEL = defineString('OPENAI_MODEL', {
-  default: 'gpt-5.6-terra',
-  description: 'Backend-configurable Responses API model. GPT-5.6 Terra balances intelligence and cost.',
-});
-const OPENAI_REASONING_EFFORT = defineString('OPENAI_REASONING_EFFORT', {
-  default: 'low',
-  description: 'Responses reasoning effort: none, low, medium, high, xhigh, or max.',
-});
-const AI_MODEL_ROUTING_ENABLED = defineString('AI_MODEL_ROUTING_ENABLED', {
-  default: 'false',
-  description: 'Exact opt-in switch for evaluated per-workload model routing.',
-});
-const AI_MODEL_ROUTING_CONFIG = defineString('AI_MODEL_ROUTING_CONFIG', {
-  default: 'not-configured',
-  description: 'Versioned non-secret evaluated model-route manifest. Ignored while routing is false.',
-});
-const OPENAI_BASE_URL = defineString('OPENAI_BASE_URL', {
-  default: 'https://api.openai.com/v1',
-  description: 'Backend-only official OpenAI base URL. Loopback is accepted only by the Functions emulator.',
 });
 const AI_ALLOWED_ORIGINS = defineString('AI_ALLOWED_ORIGINS', {
   default: `https://francescopuglia.github.io,${LIFE_TRACKER_DESKTOP_ORIGIN},http://localhost:3000,http://127.0.0.1:3000`,

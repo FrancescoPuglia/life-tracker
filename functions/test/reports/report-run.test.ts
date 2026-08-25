@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
+import {
+  AI_MODEL_PRICE_CATALOG_VERSION,
+  AI_MODEL_ROUTING_SCHEMA_VERSION,
+  parseLifeTrackerAiRoutingPolicy,
+  routedExecutionProfile,
+} from '../../src/ai/model-routing';
 import type { UserPlanningPreferences } from '../../src/domain/types';
 import { normalizeNotificationPreferences } from '../../src/notifications/domain';
 import {
   ScientificReportRunService,
   buildScientificExecutionReport,
+  buildWeeklyInterpretationMetricContext,
+  createWeeklyStrategicInterpretation,
   createStoredScientificReportArchive,
   deriveScientificReportSchedulePolicy,
   planDueScientificReportRuns,
@@ -17,6 +25,7 @@ import {
   type ScientificReportRunRepository,
   type ScientificReportScheduleCandidate,
   type StoredScientificReportArchive,
+  type WeeklyInterpretationProviderResult,
 } from '../../src/reports';
 
 const UID = 'report-run-owner';
@@ -226,6 +235,83 @@ describe('scientific report run orchestration', () => {
     });
     expect(failedDelivery.events.at(-1)).toBe('delivery_failure');
   });
+
+  it('resolves a metric-bound weekly addendum after archive commit and before delivery authority', async () => {
+    const candidate = weeklyDueCandidate();
+    const repository = new FakeRunRepository(candidate);
+    const source = {
+      load: vi.fn(async () => {
+        repository.events.push('source');
+        return input(candidate);
+      }),
+    };
+    const interpretation = {
+      resolve: vi.fn(async (uid: string, archive: StoredScientificReportArchive) => {
+        repository.events.push('interpret');
+        const context = buildWeeklyInterpretationMetricContext(uid, archive);
+        return {
+          outcome: 'ready' as const,
+          state: 'complete' as const,
+          interpretation: createWeeklyStrategicInterpretation(
+            uid,
+            archive,
+            weeklyProfile(),
+            context,
+            weeklyProviderResult(context.scalarMetrics.slice(0, 2).map((metric) => metric.id)),
+            NOW,
+          ),
+        };
+      }),
+    };
+    const delivery = {
+      deliver: vi.fn(async (request): Promise<ScientificReportEmailDeliveryServiceResult> => {
+        repository.events.push('deliver');
+        expect(request.interpretation?.reportArtifactHash).toBe(repository.archive?.artifactHash);
+        return { outcome: 'accepted' };
+      }),
+    };
+
+    await expect(new ScientificReportRunService(
+      repository,
+      source,
+      delivery,
+      buildScientificExecutionReport,
+      interpretation,
+    ).execute(candidate, NOW)).resolves.toMatchObject({
+      outcome: 'completed', delivery: 'accepted', archiveReused: false,
+    });
+    expect(repository.events).toEqual([
+      'claim', 'archive_lookup', 'source', 'commit', 'interpret', 'authorize', 'deliver', 'finalize',
+    ]);
+    expect(interpretation.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not authorize weekly email while an existing interpretation claim is unresolved', async () => {
+    const candidate = weeklyDueCandidate();
+    const repository = new FakeRunRepository(candidate);
+    const source = { load: vi.fn(async () => input(candidate)) };
+    const delivery = { deliver: vi.fn() };
+    const interpretation = {
+      resolve: vi.fn(async () => {
+        repository.events.push('interpret');
+        return { outcome: 'retry_later' as const, notBefore: '2026-08-25T21:10:00.000Z' };
+      }),
+    };
+
+    await expect(new ScientificReportRunService(
+      repository,
+      source,
+      delivery,
+      buildScientificExecutionReport,
+      interpretation,
+    ).execute(candidate, NOW)).resolves.toEqual({
+      outcome: 'retry_later',
+      stage: 'delivery',
+      notBefore: '2026-08-25T21:10:00.000Z',
+    });
+    expect(repository.events).toEqual(['claim', 'archive_lookup', 'commit', 'interpret']);
+    expect(delivery.deliver).not.toHaveBeenCalled();
+  });
 });
 
 function dueCandidate(): ScientificReportScheduleCandidate {
@@ -239,6 +325,22 @@ function dueCandidate(): ScientificReportScheduleCandidate {
     deriveScientificReportSchedulePolicy(preferences),
     NOW,
   )[0]!;
+}
+
+function weeklyDueCandidate(): ScientificReportScheduleCandidate {
+  const preferences = normalizeNotificationPreferences(UID, {
+    userId: UID,
+    emailEnabled: true,
+    reportRecipient: RECIPIENT.email,
+    dailyReport: { enabled: false, localTime: '22:30' },
+    weeklyReport: { enabled: true, isoWeekday: 2, localTime: '22:30' },
+  }, 'Europe/Rome');
+  const candidate = planDueScientificReportRuns(
+    deriveScientificReportSchedulePolicy(preferences),
+    NOW,
+  ).find((item) => item.reportType === 'weekly');
+  if (!candidate) throw new Error('Missing weekly schedule candidate.');
+  return candidate;
 }
 
 function input(candidate: ScientificReportScheduleCandidate): ScientificReportInput {
@@ -262,4 +364,57 @@ function input(candidate: ScientificReportScheduleCandidate): ScientificReportIn
 
 function report(candidate: ScientificReportScheduleCandidate) {
   return buildScientificExecutionReport({ ...input(candidate), generatedAt: GENERATED_AT });
+}
+
+function weeklyProfile() {
+  return routedExecutionProfile(parseLifeTrackerAiRoutingPolicy(JSON.stringify({
+    schemaVersion: AI_MODEL_ROUTING_SCHEMA_VERSION,
+    evaluationReceiptId: `model_eval_${'b'.repeat(64)}`,
+    evaluatedAt: NOW,
+    priceCatalogVersion: AI_MODEL_PRICE_CATALOG_VERSION,
+    routes: {
+      ask: { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+      coach: { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+      analyze: { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+      plan: { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+      weekly_strategic_review: { model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+    },
+  })), 'weekly_strategic_review');
+}
+
+function weeklyProviderResult(metricIds: readonly string[]): WeeklyInterpretationProviderResult {
+  return {
+    providerResponseId: 'response_report_run_weekly',
+    providerModel: 'gpt-5.6-luna',
+    inputTokens: 1_000,
+    cachedInputTokens: 100,
+    outputTokens: 120,
+    reasoningTokens: 20,
+    totalTokens: 1_120,
+    latencyMs: 900,
+    draft: {
+      summary: 'The available evidence supports one cautious scheduling experiment while preserving uncertainty.',
+      strongestPattern: {
+        kind: 'INFERENCE',
+        text: 'Execution appears more stable where planned work has clearer completion evidence.',
+        metricIds,
+        confidence: 'moderate',
+        uncertainty: 'The available sample is limited and execution evidence may be incomplete.',
+      },
+      largestUncertainty: {
+        kind: 'INFERENCE',
+        text: 'Incomplete execution capture limits how confidently the weekly pattern can be interpreted.',
+        metricIds,
+        confidence: 'low',
+        uncertainty: 'Missing or partial Session evidence may change the apparent pattern.',
+      },
+      nextWeekExperiment: {
+        kind: 'RECOMMENDATION',
+        text: 'Keep one scheduling variable stable and capture every completed Session before comparing again.',
+        metricIds,
+        confidence: 'moderate',
+        uncertainty: 'The experiment may be inconclusive if execution capture remains incomplete.',
+      },
+    },
+  };
 }

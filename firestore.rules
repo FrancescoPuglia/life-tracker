@@ -441,6 +441,9 @@ service cloud.firestore {
       match /reportScheduleManifests/{document=**} {
         allow read, write: if false;
       }
+      match /reportInterpretations/{document=**} {
+        allow read, write: if false;
+      }
     }
 
     match /aiChangePlans/{document=**} {
@@ -486,6 +489,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /reportScheduleManifests/{document=**} {
+      allow read, write: if false;
+    }
+    match /reportInterpretations/{document=**} {
       allow read, write: if false;
     }
 

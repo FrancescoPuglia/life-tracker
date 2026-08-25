@@ -15,6 +15,10 @@ import type {
   ScientificExecutionReport,
   ScientificReportInput,
 } from './types';
+import type {
+  WeeklyInterpretationServiceResult,
+  WeeklyStrategicInterpretation,
+} from './weekly-interpretation';
 
 export const REPORT_RUN_STORAGE_SCHEMA_VERSION = 'scientific-report-run-v1' as const;
 export const REPORT_RUN_GENERATION_CLAIM_LEASE_MS = 10 * 60_000;
@@ -190,7 +194,16 @@ export interface ScientificReportRunEmailDeliveryService {
     reportId: string;
     to: EmailMailbox;
     now: string;
+    interpretation?: WeeklyStrategicInterpretation | null;
   }>): Promise<ScientificReportEmailDeliveryServiceResult>;
+}
+
+export interface ScientificReportRunInterpretationService {
+  resolve(
+    uid: string,
+    archive: StoredScientificReportArchive,
+    now: string,
+  ): Promise<WeeklyInterpretationServiceResult>;
 }
 
 export type ScientificReportRunServiceResult =
@@ -232,6 +245,7 @@ export class ScientificReportRunService {
     private readonly source: ScientificReportRunSource,
     private readonly delivery: ScientificReportRunEmailDeliveryService,
     private readonly builder: ScientificReportRunBuilder = buildScientificExecutionReport,
+    private readonly interpretation?: ScientificReportRunInterpretationService,
   ) {}
 
   async execute(
@@ -302,6 +316,28 @@ export class ScientificReportRunService {
       archiveReused ||= committed.idempotentReplay;
     }
 
+    let strategicInterpretation: WeeklyStrategicInterpretation | null = null;
+    if (archive.type === 'weekly' && this.interpretation) {
+      let resolved: WeeklyInterpretationServiceResult;
+      try {
+        resolved = await this.interpretation.resolve(candidate.uid, archive, now);
+      } catch {
+        return Object.freeze({
+          outcome: 'retry_later',
+          stage: 'delivery',
+          notBefore: new Date(Date.parse(now) + 5 * 60_000).toISOString(),
+        });
+      }
+      if (resolved.outcome === 'retry_later') {
+        return Object.freeze({
+          outcome: 'retry_later',
+          stage: 'delivery',
+          notBefore: resolved.notBefore,
+        });
+      }
+      strategicInterpretation = resolved.interpretation;
+    }
+
     const authorization = await this.repository.authorizeDelivery({
       candidate,
       reportId,
@@ -330,6 +366,7 @@ export class ScientificReportRunService {
         reportId,
         to: authorization.recipient,
         now,
+        ...(strategicInterpretation ? { interpretation: strategicInterpretation } : {}),
       });
     } catch {
       const failure = await this.repository.recordDeliveryInvocationFailure({

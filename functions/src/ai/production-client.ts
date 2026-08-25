@@ -6,14 +6,18 @@ type ResponseResult = Awaited<ReturnType<ResponsesClientLike['responses']['creat
 /** OpenAI SDK ownership stays inside the deployable backend package. */
 export function createProductionResponsesClient(
   apiKey: string,
-  options: Readonly<{ baseURL?: string; allowLoopback?: boolean }> = {},
+  options: Readonly<{
+    baseURL?: string;
+    allowLoopback?: boolean;
+    maxRetries?: 0 | 1;
+  }> = {},
 ): ResponsesClientLike {
   const client = new OpenAI({
     apiKey,
     ...(options.baseURL
       ? { baseURL: validateProviderBaseUrl(options.baseURL, options.allowLoopback === true) }
       : {}),
-    maxRetries: 1,
+    maxRetries: options.maxRetries ?? 1,
     timeout: 30_000,
   });
   return {
@@ -21,7 +25,12 @@ export function createProductionResponsesClient(
       async create(request, options): Promise<ResponseResult> {
         const response = await client.responses.create(
           request as OpenAI.Responses.ResponseCreateParamsNonStreaming,
-          options?.signal ? { signal: options.signal } : undefined,
+          options?.signal || options?.idempotencyKey
+            ? {
+              ...(options.signal ? { signal: options.signal } : {}),
+              ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+            }
+            : undefined,
         );
         return response as unknown as ResponseResult;
       },

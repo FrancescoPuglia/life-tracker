@@ -11,6 +11,12 @@ export {
   decodeStoredScientificReportScheduleManifest,
   encodeStoredScientificReportScheduleManifest,
 } from './firestore-schedule-manifest-repository';
+export {
+  FirestoreWeeklyInterpretationRepository,
+  decodeStoredWeeklyInterpretationControl,
+  encodeStoredWeeklyInterpretationControl,
+} from './firestore-weekly-interpretation-repository';
+export * from './openai-weekly-interpretation';
 export * from './png-chart-renderer';
 export * from './report-email-template';
 export * from './report-run';
@@ -37,3 +43,4 @@ export type { ScientificReportSourceRequest } from './source-loader';
 export { buildScientificStatements } from './statements';
 export * from './svg-chart-renderer';
 export * from './types';
+export * from './weekly-interpretation';

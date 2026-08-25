@@ -13,6 +13,7 @@ import {
   composeScientificReportEmail,
   type ComposeScientificReportEmailInput,
 } from './report-email-template';
+import type { WeeklyStrategicInterpretation } from './weekly-interpretation';
 
 export const REPORT_EMAIL_DELIVERY_CONTROL_SCHEMA_VERSION =
   'report-email-delivery-control-v1' as const;
@@ -170,10 +171,15 @@ export class ScientificReportEmailDeliveryService {
     reportId: string;
     to: EmailMailbox;
     now: string;
+    interpretation?: WeeklyStrategicInterpretation | null;
   }>): Promise<ScientificReportEmailDeliveryServiceResult> {
     const archive = await this.repository.getArchive(input.uid, input.reportId);
     if (!archive) return Object.freeze({ outcome: 'no_op', reason: 'report_missing' });
-    const email = await this.composer({ uid: input.uid, archive });
+    const email = await this.composer({
+      uid: input.uid,
+      archive,
+      ...(input.interpretation ? { interpretation: input.interpretation } : {}),
+    });
     const request = Object.freeze({ from: this.from, to: input.to, email });
     validateReportEmailSendRequest(request);
     const sendAuthorityHash = reportEmailSendAuthorityHash(request);

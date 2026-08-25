@@ -37,7 +37,7 @@ export interface ResponsesClientLike {
   readonly responses: {
     create(
       request: Readonly<Record<string, unknown>>,
-      options?: Readonly<{ signal?: AbortSignal }>,
+      options?: Readonly<{ signal?: AbortSignal; idempotencyKey?: string }>,
     ): Promise<ResponseLike>;
   };
 }

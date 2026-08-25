@@ -3,6 +3,19 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import * as functionsLogger from 'firebase-functions/logger';
 import { Resend } from 'resend';
+import { createProductionResponsesClient } from '../ai/production-client';
+import {
+  resolveAiRoutingRuntimePolicy,
+  routedExecutionProfile,
+  type LifeTrackerAiExecutionProfile,
+} from '../ai/model-routing';
+import {
+  AI_MODEL_ROUTING_CONFIG,
+  AI_MODEL_ROUTING_ENABLED,
+  OPENAI_API_KEY,
+  OPENAI_BASE_URL,
+} from '../ai/runtime-parameters';
+import type { ResponsesClientLike } from '../ai/responses-adapter';
 import { FirestoreRepository } from '../domain/firestore-repository';
 import {
   ScientificReportEmailDeliveryService,
@@ -12,6 +25,8 @@ import { validateEmailMailbox, type EmailMailbox } from './email-provider';
 import { FirestoreScientificReportEmailDeliveryRepository } from './firestore-email-delivery-repository';
 import { FirestoreScientificReportRunRepository } from './firestore-report-run-repository';
 import { FirestoreScientificReportScheduleManifestRepository } from './firestore-schedule-manifest-repository';
+import { FirestoreWeeklyInterpretationRepository } from './firestore-weekly-interpretation-repository';
+import { OpenAiWeeklyInterpretationGenerator } from './openai-weekly-interpretation';
 import {
   ScientificReportRunService,
   type ScientificReportRunEmailDeliveryService,
@@ -24,6 +39,11 @@ import {
   type ScientificReportRuntimeGate,
 } from './schedule-trigger';
 import { ScientificReportSourceLoader } from './source-loader';
+import {
+  WeeklyStrategicInterpretationService,
+  type WeeklyInterpretationGenerator,
+  type WeeklyInterpretationRepository,
+} from './weekly-interpretation';
 
 export interface ScientificReportRuntimeStringValue {
   value(): string;
@@ -38,6 +58,16 @@ export interface ScientificReportRuntimeParameters {
 }
 
 export type ResendEmailClientFactory = (apiKey: string) => ResendEmailClient;
+export interface ScientificReportAiRuntimeParameters {
+  readonly routingEnabled: ScientificReportRuntimeStringValue;
+  readonly routingConfig: ScientificReportRuntimeStringValue;
+  readonly openAiApiKey: ScientificReportRuntimeStringValue;
+  readonly openAiBaseUrl: ScientificReportRuntimeStringValue;
+}
+export type ReportResponsesClientFactory = (
+  apiKey: string,
+  options: Readonly<{ baseURL: string; allowLoopback: boolean; maxRetries: 0 }>,
+) => ResponsesClientLike;
 
 const REPORT_EMAIL_RUNTIME_ENABLED = defineString('REPORT_EMAIL_RUNTIME_ENABLED', {
   default: 'false',
@@ -65,6 +95,12 @@ const runtimeParameters: ScientificReportRuntimeParameters = Object.freeze({
   fromEmail: REPORT_EMAIL_FROM_ADDRESS,
   fromName: REPORT_EMAIL_FROM_NAME,
   resendApiKey: RESEND_API_KEY,
+});
+const aiRuntimeParameters: ScientificReportAiRuntimeParameters = Object.freeze({
+  routingEnabled: AI_MODEL_ROUTING_ENABLED,
+  routingConfig: AI_MODEL_ROUTING_CONFIG,
+  openAiApiKey: OPENAI_API_KEY,
+  openAiBaseUrl: OPENAI_BASE_URL,
 });
 
 /** Default-off gate reads no owner identity until the exact true switch is present. */
@@ -108,6 +144,43 @@ export function createLazyResendScientificReportDeliveryService(
       return delivery.deliver(input);
     },
   });
+}
+
+/**
+ * Routing-off reads no manifest, OpenAI endpoint, or secret. A client is built
+ * only after a durable repository claim authorizes the single provider call.
+ */
+export function createLazyWeeklyStrategicInterpretationService(
+  repository: WeeklyInterpretationRepository,
+  parameters: ScientificReportAiRuntimeParameters,
+  createClient: ReportResponsesClientFactory = (apiKey, options) =>
+    createProductionResponsesClient(apiKey, options),
+) {
+  let generator: WeeklyInterpretationGenerator | undefined;
+  const resolveProfile = (): LifeTrackerAiExecutionProfile | null => {
+    const policy = resolveAiRoutingRuntimePolicy({
+      enabled: parameters.routingEnabled,
+      config: parameters.routingConfig,
+    });
+    return policy ? routedExecutionProfile(policy, 'weekly_strategic_review') : null;
+  };
+  return new WeeklyStrategicInterpretationService(
+    repository,
+    resolveProfile,
+    () => {
+      if (!generator) {
+        const apiKey = runtimeValue(parameters.openAiApiKey, 'OpenAI API key', 512);
+        if (apiKey.length < 20) throw new Error('OpenAI API key runtime parameter is invalid.');
+        const baseURL = runtimeValue(parameters.openAiBaseUrl, 'OpenAI base URL', 512);
+        generator = new OpenAiWeeklyInterpretationGenerator(createClient(apiKey, {
+          baseURL,
+          allowLoopback: process.env.FUNCTIONS_EMULATOR === 'true',
+          maxRetries: 0,
+        }));
+      }
+      return generator;
+    },
+  );
 }
 
 function runtimeOwner(
@@ -154,6 +227,11 @@ const app = getApps()[0] ?? initializeApp();
 const firestore = getFirestore(app);
 const manifestRepository = new FirestoreScientificReportScheduleManifestRepository(firestore);
 const runRepository = new FirestoreScientificReportRunRepository(firestore);
+const weeklyInterpretationRepository = new FirestoreWeeklyInterpretationRepository(firestore);
+const weeklyInterpretation = createLazyWeeklyStrategicInterpretationService(
+  weeklyInterpretationRepository,
+  aiRuntimeParameters,
+);
 const lazyEmailDelivery = createLazyResendScientificReportDeliveryService(
   new FirestoreScientificReportEmailDeliveryRepository(firestore),
   runtimeParameters,
@@ -162,6 +240,8 @@ const runService = new ScientificReportRunService(
   runRepository,
   new ScientificReportSourceLoader(new FirestoreRepository(firestore)),
   lazyEmailDelivery,
+  undefined,
+  weeklyInterpretation,
 );
 const scheduleService = new ScientificReportScheduleManifestService(
   manifestRepository,
@@ -179,5 +259,5 @@ export const deliverScheduledScientificReports = createScheduledScientificReport
   gate,
   service: scheduleService,
   logger: functionsLogger,
-  secrets: [RESEND_API_KEY],
+  secrets: [RESEND_API_KEY, OPENAI_API_KEY],
 });
