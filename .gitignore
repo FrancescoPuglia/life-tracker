@@ -50,6 +50,8 @@ functions/.env*
 !functions/.env.example
 functions-reminders/lib/
 functions-reminders/.env*
+functions-reports/lib/
+functions-reports/.env*
 
 # Environment variables (NEVER COMMIT THESE!)
 .env

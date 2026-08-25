@@ -1,0 +1,37 @@
+{
+  "name": "life-tracker-report-functions",
+  "version": "1.0.0",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=lib/index.js --sourcemap",
+    "test:discovery": "npm run build && node test/discovery.cjs",
+    "verify:deploy": "npm run test:discovery"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
+    "@react-email/render": "2.1.0",
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2",
+    "openai": "^6.15.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "resend": "6.22.1",
+    "sharp": "0.35.3",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

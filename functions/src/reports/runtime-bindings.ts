@@ -9,12 +9,6 @@ import {
   routedExecutionProfile,
   type LifeTrackerAiExecutionProfile,
 } from '../ai/model-routing';
-import {
-  AI_MODEL_ROUTING_CONFIG,
-  AI_MODEL_ROUTING_ENABLED,
-  OPENAI_API_KEY,
-  OPENAI_BASE_URL,
-} from '../ai/runtime-parameters';
 import type { ResponsesClientLike } from '../ai/responses-adapter';
 import { FirestoreRepository } from '../domain/firestore-repository';
 import {
@@ -88,6 +82,21 @@ const REPORT_EMAIL_FROM_NAME = defineString('REPORT_EMAIL_FROM_NAME', {
 const RESEND_API_KEY = defineSecret('RESEND_API_KEY', {
   description: 'Backend-only Resend credential for the scheduled report delivery endpoint.',
 });
+const REPORT_OPENAI_API_KEY = defineSecret('OPENAI_API_KEY', {
+  description: 'Backend-only OpenAI credential for optional Weekly report interpretation.',
+});
+const REPORT_AI_MODEL_ROUTING_ENABLED = defineString('AI_MODEL_ROUTING_ENABLED', {
+  default: 'false',
+  description: 'Exact opt-in switch for evaluated report interpretation routing.',
+});
+const REPORT_AI_MODEL_ROUTING_CONFIG = defineString('AI_MODEL_ROUTING_CONFIG', {
+  default: 'not-configured',
+  description: 'Versioned evaluated report-route manifest; ignored while routing is false.',
+});
+const REPORT_OPENAI_BASE_URL = defineString('OPENAI_BASE_URL', {
+  default: 'https://api.openai.com/v1',
+  description: 'Official OpenAI base URL; loopback is accepted only by the Functions emulator.',
+});
 
 const runtimeParameters: ScientificReportRuntimeParameters = Object.freeze({
   enabled: REPORT_EMAIL_RUNTIME_ENABLED,
@@ -97,10 +106,10 @@ const runtimeParameters: ScientificReportRuntimeParameters = Object.freeze({
   resendApiKey: RESEND_API_KEY,
 });
 const aiRuntimeParameters: ScientificReportAiRuntimeParameters = Object.freeze({
-  routingEnabled: AI_MODEL_ROUTING_ENABLED,
-  routingConfig: AI_MODEL_ROUTING_CONFIG,
-  openAiApiKey: OPENAI_API_KEY,
-  openAiBaseUrl: OPENAI_BASE_URL,
+  routingEnabled: REPORT_AI_MODEL_ROUTING_ENABLED,
+  routingConfig: REPORT_AI_MODEL_ROUTING_CONFIG,
+  openAiApiKey: REPORT_OPENAI_API_KEY,
+  openAiBaseUrl: REPORT_OPENAI_BASE_URL,
 });
 
 /** Default-off gate reads no owner identity until the exact true switch is present. */
@@ -259,5 +268,5 @@ export const deliverScheduledScientificReports = createScheduledScientificReport
   gate,
   service: scheduleService,
   logger: functionsLogger,
-  secrets: [RESEND_API_KEY, OPENAI_API_KEY],
+  secrets: [RESEND_API_KEY, REPORT_OPENAI_API_KEY],
 });

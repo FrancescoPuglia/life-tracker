@@ -304,5 +304,4 @@ export * from './notifications/runtime-channel-policy';
 export * from './notifications/task-worker';
 export * from './notifications/twilio-provider';
 export * from './notifications/twilio-status-callback';
-export * from './reports/runtime-bindings';
 export * from './runtime-config';

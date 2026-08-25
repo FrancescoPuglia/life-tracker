@@ -9,14 +9,14 @@ describe('default Firebase Functions deployment surface', () => {
       .sort();
 
     expect(endpointNames).toEqual([
-      'deliverScheduledScientificReports',
       'lifeTrackerAiApi',
       'lifeTrackerMcp',
-      'reconcileScientificReportSchedules',
     ]);
     expect(endpointNames).not.toEqual(expect.arrayContaining([
+      'deliverScheduledScientificReports',
       'desktopReminderApi',
       'reconcileNotificationPreferenceReminders',
+      'reconcileScientificReportSchedules',
       'reconcileTimeBlockReminders',
       'reconcileUserProfileReminders',
     ]));
