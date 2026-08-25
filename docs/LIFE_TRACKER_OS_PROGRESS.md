@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `3238e217d956229648175034861f27e88c7c1d04`
+- Current implementation checkpoint SHA: `2ca3b7408c578440349a011f435b923a19ddc86e`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -545,6 +545,47 @@ slice changes one of those trust boundaries.
   secret access, deployment, API/IAM/billing change, or production action. It
   does not export a new runtime endpoint.
 
+### R4 owner-scoped source and immutable report archive
+
+- Green implementation commit: `2ca3b7408c578440349a011f435b923a19ddc86e`.
+- Added a bounded scientific-report source loader that accepts only an
+  authenticated server context and the verified repository's allowlisted
+  collections. Every Firestore path is derived from the verified UID; callers
+  cannot pass a user ID or arbitrary database path. Goals, Projects, Tasks,
+  Habits, Sessions, HabitLogs, and TimeBlocks are independently capped, and any
+  cap/scan exhaustion is surfaced as `truncated` rather than treated as complete.
+- Source coverage includes the four-week comparison horizon and, for Daily
+  reports, tomorrow's workload. TimeBlocks are bounded before local interval
+  selection so an explicit actual interval inside the horizon is not lost when
+  its planned interval moved outside it. Persisted planning timezone remains
+  authoritative, with `Europe/Rome` only through the existing repository
+  fallback.
+- Added immutable `scientific-report-archive-v1` artifacts under the
+  owner-derived path `users/{uid}/reportArchives/{reportId}`. The report itself
+  contains only a one-way owner hash; the top-level `userId` exists solely for
+  Rules query constraints. Archives carry report/metric/formula versions,
+  deterministic metric and artifact hashes, data-quality flags, normalized
+  timestamps, and provider-neutral email delivery state. Raw source records are
+  not duplicated into archive metadata.
+- Report validation recomputes every metric hash and chart-data hash, rejects
+  non-finite/unsupported/cyclic data, enforces Firebase-safe owner identity, and
+  reserves headroom below Firestore's 1 MiB document limit. The large immutable
+  `report` map is exempt from automatic indexing; history indexes only
+  `userId + generatedAt`, reducing cost and index-entry pressure.
+- Archive creation and its server-only `reportIdempotency` marker are one
+  Firestore transaction. Same owner/type/local-period plus identical content is
+  an exact replay; changed content conflicts instead of overwriting the first
+  artifact. Concurrent creation produced exactly one create and one replay.
+  Orphaned marker/archive state fails closed without a partial write.
+- Browser Rules permit only owner get and owner-constrained newest-first list of
+  report archives. Client create/update/delete, unconstrained list,
+  cross-owner/forged-owner read, idempotency access, and future report-delivery
+  attempt access are denied. Report history UI is not yet wired.
+- This slice exports no Function, callable, trigger, or scheduler. The production
+  Functions bundle remains 511.3 kB and contains no archive symbols. It made no
+  Firebase/cloud/provider request, deployment, secret access, email send,
+  API/IAM/billing change, or production-data mutation.
+
 ## Evidence
 
 | Check | Result |
@@ -648,13 +689,18 @@ slice changes one of those trust boundaries.
 | Functions regression after report domain | PASS; 27 files / 319 unit tests; 5 emulator files / 63 tests intentionally skipped outside explicit emulator gates |
 | Scientific report type/build gate | PASS; strict Functions typecheck and production bundle; existing 511.3 kB runtime surface unchanged because no report endpoint is exported |
 | Scientific report security/hygiene | PASS; static security, high-confidence changed-material credential scan, `git diff --check`, cached diff check, and exact nine-file staged review |
+| Report source/archive focused tests | PASS; 23/23 source loading, truncation, auth-first, artifact identity, size, metric/chart tamper, deterministic metrics, and report-contract tests |
+| Report source/archive Firestore emulator | PASS; 6/6 real owner-derived source reads, atomic create/replay, content conflict, concurrent single-create, bounded owner history, and orphan-state fail-closed tests |
+| Firestore Rules after report archive | PASS; 63/63, including the exact owner-filtered/newest-first/limited history query and denial of archive mutation, forgery, cross-owner read, idempotency, and delivery-attempt state |
+| Functions regression after report archive | PASS; 29 files / 326 unit tests; 6 emulator files / 69 tests correctly skipped outside their explicit emulator gates |
+| Report archive type/build/security | PASS; final focused tests and strict typecheck after UID hardening; Functions build 511.3 kB with no archive runtime symbols; valid index JSON; static security; 12-file credential scan; worktree and cached diff checks |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, chart data/hashes, formula specification, and scientific statement discipline are green; owner-scoped source/archive persistence, rendering, scheduling, email provider, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, chart data/hashes, formula specification, scientific statement discipline, bounded owner-scoped source reads, and immutable/idempotent report archives are green; report-history UI, PNG rendering, scheduling, email provider, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -682,16 +728,17 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local/emulator R4 work with the owner-scoped report data
-and archive boundary. Add bounded complete source reads for the report,
-four-week, and tomorrow horizons; server-authored versioned report artifacts;
-atomic user/type/local-period idempotency; provider-independent delivery state;
-and Firestore Rules proving clients cannot forge archives/delivery metadata.
-Expose only the minimally necessary owner-readable report history contract.
-Keep rendering, scheduler registration, email/LLM providers, and all cloud
-deployment disabled in that slice. Do not read secret values, enable
-APIs/billing, create provider secrets, send messages, or mutate any Firebase
-project.
+Continue independent local R4 work with the deterministic chart-rendering
+proof. Render the existing hash-bound chart data to small accessible SVGs and
+server-side PNG buffers without sending metrics to a chart SaaS; validate exact
+labels/units/axes, deterministic output/hash binding, size bounds, empty/partial
+data, hostile labels, and renderer failure without modifying or destroying the
+archived report. Choose the smallest Functions-compatible renderer only after
+a local proof. Do not export a runtime endpoint or register a scheduler yet.
+Then implement the provider-neutral email/rendering boundary and report-history
+UI in separate green slices before any Resend credential or real email gate.
+Do not read secret values, enable APIs/billing, create provider secrets, send
+messages, or mutate any Firebase project.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
