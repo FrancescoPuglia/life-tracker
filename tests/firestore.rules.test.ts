@@ -543,6 +543,17 @@ describe('Firestore user isolation rules', () => {
       orderBy('generatedAt', 'desc'),
       limit(20),
     )));
+    await assertFails(getDocs(query(
+      collection(aliceDb, 'users/alice/reportArchives'),
+      where('userId', '==', 'alice'),
+      orderBy('generatedAt', 'desc'),
+    )));
+    await assertFails(getDocs(query(
+      collection(aliceDb, 'users/alice/reportArchives'),
+      where('userId', '==', 'alice'),
+      orderBy('generatedAt', 'desc'),
+      limit(21),
+    )));
     await assertFails(getDocs(collection(aliceDb, 'users/alice/reportArchives')));
     await assertFails(getDocs(query(
       collection(aliceDb, 'users/alice/reportArchives'),

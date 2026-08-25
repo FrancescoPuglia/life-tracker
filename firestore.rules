@@ -346,6 +346,8 @@ service cloud.firestore {
           && resource.data.id == documentId;
 
         allow list: if ownsPath(uid)
+          && request.query.limit != null
+          && request.query.limit <= 20
           && resource.data.userId == uid;
 
         allow create, update, delete: if false;

@@ -25,6 +25,13 @@ describe('SidebarNavigation', () => {
     expect(screen.getByTestId('sidebar-item-weekly_intel')).toBeInTheDocument();
   });
 
+  it('exposes the scientific report archive inside Intelligence', () => {
+    const onSelect = vi.fn();
+    render(<SidebarNavigation activeTab="today" onSelect={onSelect} />);
+    fireEvent.click(screen.getByTestId('sidebar-item-reports'));
+    expect(onSelect).toHaveBeenCalledWith('reports');
+  });
+
   it('reports the selected tab via aria-current', () => {
     render(<SidebarNavigation activeTab="goal_architect" onSelect={() => {}} />);
     const item = screen.getByTestId('sidebar-item-goal_architect');

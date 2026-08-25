@@ -25,6 +25,7 @@ export type SidebarNavId =
   | 'micro_coach'
   | 'performance'
   | 'analytics'
+  | 'reports'
   | 'goal_analytics'
   | 'notes'
   | 'habits'
@@ -75,6 +76,7 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
       { id: 'performance', label: 'Performance', icon: '⏱️', subtitle: 'Plan vs Actual OS' },
       { id: 'micro_coach', label: 'AI Coach', icon: '🧠', subtitle: 'Performance insights' },
       { id: 'analytics', label: 'Analytics', icon: '📊', subtitle: 'Trend dashboards' },
+      { id: 'reports', label: 'Reports', icon: '📑', subtitle: 'Daily & weekly archive' },
       { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', subtitle: 'Goal-centric metrics' },
       { id: 'notes', label: 'Second Brain', icon: '📝', subtitle: 'Smart notes' },
     ],

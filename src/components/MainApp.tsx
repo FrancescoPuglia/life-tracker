@@ -30,6 +30,7 @@ import { getVoiceService } from '@/lib/voice/voiceService';
 // This reduces initial bundle size by ~400KB
 const TimeBlockPlanner = lazy(() => import('@/components/TimeBlockPlanner'));
 const AnalyticsDashboard = lazy(() => import('@/components/AnalyticsDashboard'));
+const ReportHistory = lazy(() => import('@/components/reports/ReportHistory'));
 const PerformanceDashboard = lazy(() => import('@/components/performance/PerformanceDashboard'));
 const GoalAnalyticsDashboard = lazy(() => import('@/components/GoalAnalyticsDashboard'));
 const HabitsTracker = lazy(() => import('@/components/HabitsTracker'));
@@ -57,7 +58,7 @@ import TodayCommandCenter from '@/components/shell/TodayCommandCenter';
 // TYPES
 // ============================================================================
 
-type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'performance' | 'analytics' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice' | 'settings';
+type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'performance' | 'analytics' | 'reports' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice' | 'settings';
 
 interface MainAppProps {
   buildId: string;
@@ -457,6 +458,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   {activeTab === 'vision-board' && '✧ Vision Board'}
                   {activeTab === 'performance' && '⏱️ Performance Review'}
                   {activeTab === 'analytics' && '📊 Analytics Dashboard'}
+                  {activeTab === 'reports' && '📑 Scientific Reports'}
                   {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
                   {activeTab === 'weekly' && '📈 Weekly Execution'}
                   {activeTab === 'weekly_intel' && '🧭 Weekly Intelligence'}
@@ -620,6 +622,12 @@ export default function MainApp({ buildId }: MainAppProps) {
                     timeRange={timeRange}
                     onTimeRangeChange={setTimeRange}
                   />
+                )}
+
+                {activeTab === 'reports' && (
+                  <Suspense fallback={<div className="text-sm text-slate-500">Loading reports…</div>}>
+                    <ReportHistory userId={user!.uid} />
+                  </Suspense>
                 )}
 
                 {activeTab === 'goal_analytics' && (
