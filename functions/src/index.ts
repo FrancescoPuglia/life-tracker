@@ -300,7 +300,7 @@ export * from './notifications/in-memory-repository';
 export * from './notifications/reconciliation-service';
 export * from './notifications/reconciliation-trigger';
 export * from './notifications/repository';
-export * from './notifications/runtime-bindings';
+export * from './notifications/runtime-channel-policy';
 export * from './notifications/task-worker';
 export * from './notifications/twilio-provider';
 export * from './notifications/twilio-status-callback';

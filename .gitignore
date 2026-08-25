@@ -48,6 +48,8 @@ functions/.generated/
 functions/.secret.local
 functions/.env*
 !functions/.env.example
+functions-reminders/lib/
+functions-reminders/.env*
 
 # Environment variables (NEVER COMMIT THESE!)
 .env

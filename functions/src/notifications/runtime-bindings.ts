@@ -14,6 +14,7 @@ import type {
 import { ReminderDeliveryService } from './delivery-service';
 import { FirestoreReminderRepository } from './firestore-repository';
 import { ReminderReconciliationService } from './reconciliation-service';
+import { withWhatsAppPreferenceDisabled } from './runtime-channel-policy';
 import {
   createDeferredReminderRefillFunction,
   createNotificationPreferencesReminderReconciliationFunction,
@@ -289,22 +290,6 @@ function runtimeSwitchEnabled(parameter: RuntimeStringValue): boolean {
   } catch {
     return false;
   }
-}
-
-function withWhatsAppPreferenceDisabled(
-  input: Parameters<ReminderReconciliationExecutor['reconcile']>[0],
-): Parameters<ReminderReconciliationExecutor['reconcile']>[0] {
-  const value = input.notificationPreferencesValue;
-  const preferences = value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : Object.freeze({});
-  return Object.freeze({
-    ...input,
-    notificationPreferencesValue: Object.freeze({
-      ...preferences,
-      whatsappEnabled: false,
-    }),
-  });
 }
 
 const runtime = createNotificationRuntime();

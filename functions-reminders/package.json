@@ -1,0 +1,27 @@
+{
+  "name": "life-tracker-reminder-functions",
+  "version": "1.0.0",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=lib/index.js --sourcemap",
+    "test:discovery": "npm run build && node test/discovery.cjs",
+    "verify:deploy": "npm run test:discovery"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}
