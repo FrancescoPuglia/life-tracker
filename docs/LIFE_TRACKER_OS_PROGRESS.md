@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `2d51356601a19662deda63a01cb717c6c9272b63`
+- Current implementation checkpoint SHA: `f1c78ba8d016a9af738b3cfd7ff189ccf77e4f56`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -720,6 +720,38 @@ slice changes one of those trust boundaries.
   details. No Function, scheduler, provider client/secret, cloud action,
   API/billing change, Firebase mutation, or message send was added.
 
+### R4 deterministic Daily/Weekly schedule planning
+
+- Green implementation commit: `f1c78ba8d016a9af738b3cfd7ff189ccf77e4f56`.
+- Upgraded the single owner-scoped notification-preferences document to exact
+  `notification-preferences-v2`, adding one validated report recipient while
+  retaining exact read/update compatibility with v1. A legacy v1 document has
+  no recipient authority, so the client and server deliberately disable its
+  email/report schedules until an explicit validated v2 save; Rules permit
+  only v1-to-v2 migration and reject v2 downgrade, forged fields, invalid
+  mailboxes, or enabled schedules without email authority.
+- Extended the existing Desktop Settings surface with opt-in email delivery,
+  recipient, Daily time, and Weekly day/time controls. Persisted timezone stays
+  authoritative; saving preferences neither configures a provider nor sends a
+  message. Report-only changes do not enter the reminder-policy version, so
+  they cannot churn TimeBlock reminder jobs.
+- Added a pure provider-neutral schedule policy and a maximum-two-candidate
+  planner: at most the most recent Daily and Weekly occurrence. Candidate IDs
+  bind trusted UID, report type, and local report period; schedule and one-way
+  recipient-authority hashes detect stale work without persisting or placing a
+  mailbox in a future task payload.
+- Local-time resolution uses Temporal `compatible` disambiguation: a skipped
+  spring time shifts forward once, and an autumn duplicate selects the earlier
+  instant once. Sunday delivery summarizes its current Monday-Sunday calendar
+  week; a configurable Monday-Saturday delivery summarizes the last completed
+  calendar week rather than including future days. Schedule/recipient changes
+  retain the same period identity but change the expected authority hashes.
+- No report-run record, source read, report generation, archive mutation,
+  Function/callable/scheduler export, provider client/secret, cloud action,
+  API/billing change, Firebase mutation, or message send was added. The built
+  Functions entry bundle contains no schedule-candidate or `report_run_`
+  runtime symbol.
+
 ## Evidence
 
 | Check | Result |
@@ -847,13 +879,21 @@ slice changes one of those trust boundaries.
 | Frontend regression after report history | PASS; 62 files / 686 tests |
 | Report history type/build gate | PASS; frontend typecheck and Next.js 15.5.23 production static build, 4 static pages, root route 231 kB / 333 kB first load; only established unrelated lint warnings |
 | Report history security/hygiene | PASS; output-inclusive static security, Desktop attack-surface check, changed/staged credential scans, absence of server-only collection/test/provider strings in `out/`, `git diff --check`, and cached diff check |
+| Report schedule focused domain coverage | PASS; 40/40 across notification normalization and deterministic Daily/Weekly planning, including opt-in authority, forged owner/instant rejection, period identity, recipient/schedule version changes, last-completed-week semantics, and both Europe/Rome DST transitions |
+| Report preference frontend coverage | PASS; 12/12 Settings/preferences tests for recipient validation, Daily/Weekly persistence, missing authority, Desktop reminder preservation, native controls, and safe failures |
+| Notification preference v2 Rules emulator | PASS; 64/64 real Rules tests, including exact v1 compatibility/migration, invalid or missing recipient denial, schedule-without-email denial, v2 downgrade denial, owner isolation, and all prior report/reminder security cases |
+| Frontend regression after report schedules | PASS; 62 files / 689 tests |
+| Functions regression after report schedules | PASS; 33 files / 369 unit tests; 7 emulator files / 75 tests correctly skipped outside their explicit gates |
+| Report schedule type/build gate | PASS; frontend and Functions typechecks, Next.js 15.5.23 static build (4 pages; root 231 kB / 333 kB first load), and Functions production bundle; only established unrelated lint warnings |
+| Report schedule Desktop export | PASS from clean exact `f1c78ba`; reviewed `life-tracker-staging` public Web manifest, distinguishable Beta profile, 4 static pages, Desktop scan, output-inclusive static scan, and exact SHA attestation. The generic no-profile command correctly exited 1; the first sandboxed manifest lookup exited before build, and its approved read-only retry passed |
+| Report schedule security/hygiene | PASS; Desktop/static output security, changed and staged high-confidence credential scans, no scheduler symbols in the Functions entry bundle, `git diff --check`, and cached diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, and the bounded owner-scoped report-history UI are green; scheduling, secret/domain configuration, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, and DST-safe due-period planning are green; durable run orchestration, runtime scheduling, secret/domain configuration, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -881,21 +921,30 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with deterministic Daily/Weekly scheduling
-and report-generation orchestration as a separate server-only slice. Extend the
-versioned notification/report preferences with a bounded validated report
-recipient, then derive due local periods from persisted timezone and configured
-Daily/Weekly schedules across DST. Claim a privacy-safe user/type/local-period
-run identity before bounded source loading, build the deterministic report,
-archive it idempotently, and hand off only the immutable archive identity to the
-existing durable email-delivery service. Scheduler retries must neither
-regenerate conflicting content nor duplicate email; disabled email/report
-preferences, missing/invalid recipient, unavailable sources, and generation or
-chart failure must fail safely with durable non-secret state. Implement and
-prove the domain/repository/orchestrator locally and in the Firestore emulator
-before exporting any runtime scheduler. Do not read secret values, instantiate
-the Resend client, register/deploy a Function, enable APIs/billing, send a
-message, or mutate any Firebase project in this slice.
+Continue independent local R4 work with a server-only durable report-run
+repository and orchestration service. Persist the already-derived
+user/type/local-period candidate at an owner-derived
+`users/{uid}/reportRuns/{runId}` path before bounded source loading, with a
+stable first-claim generation instant, exact schedule/recipient authority
+hashes, bounded recoverable generation claims, and non-secret terminal state.
+Concurrent scheduler invocations must yield one generator. A retry may safely
+resume local deterministic generation, reuse an existing immutable archive,
+and then hand only that archive identity plus the current in-memory envelope to
+the existing durable email-delivery service.
+
+Reread and normalize authoritative preferences immediately before generation
+and again before delivery. Disabled email/schedule, a changed schedule or
+recipient authority, malformed/missing preferences, unavailable required
+sources, archive conflict, generation failure, and chart isolation must produce
+an explicit safe outcome without sending. An expired generation claim may be
+recovered because no external call precedes the durable archive; ambiguous
+provider delivery remains governed by the existing terminal no-resend email
+control. Explicitly deny browser access to report-run state and prove owner
+isolation, claim concurrency, crash recovery, stale authority, replay,
+archive reuse/conflict, missing data, and no-mailbox persistence in the local
+Firestore emulator before exporting any runtime scheduler. Do not read secret
+values, instantiate the Resend client, register/deploy a Function, enable
+APIs/billing, send a message, or mutate any Firebase project in this slice.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
