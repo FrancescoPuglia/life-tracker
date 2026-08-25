@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `2ca3b7408c578440349a011f435b923a19ddc86e`
+- Current implementation checkpoint SHA: `191fa821e1a6078b4a888c0e62de6666b2702963`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -586,6 +586,41 @@ slice changes one of those trust boundaries.
   Firebase/cloud/provider request, deployment, secret access, email send,
   API/IAM/billing change, or production-data mutation.
 
+### R4 deterministic local chart rendering
+
+- Green implementation commit: `191fa821e1a6078b4a888c0e62de6666b2702963`.
+- Added an accessible, deterministic SVG renderer for every existing
+  hash-bound report chart. It revalidates chart schema, identity, metric/data
+  hashes, ordered series, values, units, sample metadata, and bounded source
+  cardinality immediately before rendering. Titles, labels, axes, units,
+  legends, and missing-value semantics are explicit; missing values render as
+  an em dash and never as zero.
+- Visual density is capped at 12 points. Crowded Goal allocation charts select
+  the highest deterministic values and disclose the omitted count while the
+  complete metric/chart JSON remains authoritative. Hostile labels are bounded,
+  escaped text only; generated SVG has no external links, scripts, stylesheets,
+  `foreignObject`, dynamic URL references, or chart SaaS dependency.
+- Added local 2x PNG rasterization using pinned `sharp@0.35.3` on the existing
+  Node 22 Functions runtime. Inputs are capped at two million pixels and 200 kB;
+  outputs must be exact 1600x920 PNGs below 1 MB. SVG authority, active-content
+  denial, source SVG/data/metric hashes, PNG signature/hash, dimensions, byte
+  length, chart identity, and content ID are reverified before an attachment can
+  be trusted.
+- Charts render sequentially with a maximum set of ten to bound native memory.
+  Native parser/renderer failures are converted to a stable non-secret report
+  error, leave the deterministic report untouched, and cannot destroy the
+  already archived artifact. Two renders of the representative chart produced
+  byte-identical PNGs; all five weekly charts rendered successfully in one run.
+- Sharp was selected after a real Node 22 proof. Its current stable release has
+  maintained prebuilt Linux support and explicit input-pixel controls. The
+  smaller stable Resvg binding was rejected because its next prerelease adds a
+  process-panic containment fix absent from the old stable package. The
+  Functions production dependency audit reports zero vulnerabilities.
+- A real PNG was visually inspected after rendering: title, legend, axes,
+  labels, units, missing-value marker, contrast, and non-misleading two-dimensional
+  scale were readable. No runtime Function, email provider, scheduler, cloud
+  action, secret access, API/billing change, or Firebase mutation was added.
+
 ## Evidence
 
 | Check | Result |
@@ -694,13 +729,17 @@ slice changes one of those trust boundaries.
 | Firestore Rules after report archive | PASS; 63/63, including the exact owner-filtered/newest-first/limited history query and denial of archive mutation, forgery, cross-owner read, idempotency, and delivery-attempt state |
 | Functions regression after report archive | PASS; 29 files / 326 unit tests; 6 emulator files / 69 tests correctly skipped outside their explicit emulator gates |
 | Report archive type/build/security | PASS; final focused tests and strict typecheck after UID hardening; Functions build 511.3 kB with no archive runtime symbols; valid index JSON; static security; 12-file credential scan; worktree and cached diff checks |
+| Report chart renderer proof | PASS; pinned `sharp@0.35.3` on Node 22 produced byte-identical 1600x920 PNGs from the deterministic SVG contract; representative output passed direct visual inspection |
+| Report chart focused tests | PASS; 7/7 accessibility, hash binding, missing data, hostile label, cardinality, real native PNG, active SVG, malformed/oversized output, sequential rendering, and failure-isolation tests |
+| Functions regression after chart renderer | PASS; 30 files / 333 unit tests; 6 emulator files / 69 tests correctly skipped outside their explicit emulator gates |
+| Report chart type/build/security | PASS after final artifact-boundary hardening; strict Functions typecheck/build, 511.3 kB deployed bundle with no chart-renderer symbols, production dependency audit with 0 vulnerabilities, static security, changed/staged credential scans, worktree and cached diff checks |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, chart data/hashes, formula specification, scientific statement discipline, bounded owner-scoped source reads, and immutable/idempotent report archives are green; report-history UI, PNG rendering, scheduling, email provider, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, and accessible local SVG/PNG chart rendering are green; provider-neutral email/rendering, scheduling, report-history UI, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -728,17 +767,17 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with the deterministic chart-rendering
-proof. Render the existing hash-bound chart data to small accessible SVGs and
-server-side PNG buffers without sending metrics to a chart SaaS; validate exact
-labels/units/axes, deterministic output/hash binding, size bounds, empty/partial
-data, hostile labels, and renderer failure without modifying or destroying the
-archived report. Choose the smallest Functions-compatible renderer only after
-a local proof. Do not export a runtime endpoint or register a scheduler yet.
-Then implement the provider-neutral email/rendering boundary and report-history
-UI in separate green slices before any Resend credential or real email gate.
-Do not read secret values, enable APIs/billing, create provider secrets, send
-messages, or mutate any Firebase project.
+Continue independent local R4 work with a provider-neutral `EmailProvider` and
+deterministic report-email rendering boundary. Evaluate the current official
+React Email/Resend packages before pinning them; produce bounded HTML, a useful
+text fallback, inline CID chart attachments, provider-neutral delivery IDs and
+sanitized failure state. Reverify the archived report and every chart attachment
+at the boundary, keep provider failure from destroying the report, and retain a
+fully deterministic useful email when OpenAI is unavailable. Add no runtime
+endpoint or scheduler in this slice, and make no provider request. Then add the
+owner-scoped report-history UI as a separate green slice before the scheduler
+and live-delivery gates. Do not read secret values, enable APIs/billing, create
+provider secrets, send messages, or mutate any Firebase project.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
