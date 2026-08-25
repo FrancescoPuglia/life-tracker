@@ -69,8 +69,14 @@ export default function KPIDashboard({ kpis, onRefresh }: KPIDashboardProps) {
         {/* Plan vs Actual */}
         <div className={`rounded-lg p-4 ${getAdherenceColor(kpis.planVsActual)}`}>
           <div className="text-xs font-medium mb-1">PLAN vs ACTUAL</div>
-          <div className="text-2xl font-bold">{formatPercentage(kpis.planVsActual)}</div>
-          <div className="text-xs">adherence</div>
+          <div className="text-2xl font-bold">
+            {kpis.actualAvailability === 'partial' ? '≥ ' : ''}{formatPercentage(kpis.planVsActual)}
+          </div>
+          <div className="text-xs">
+            {kpis.actualAvailability === 'partial'
+              ? `known actual · ${kpis.missingActualCount ?? 0} missing`
+              : 'adherence'}
+          </div>
         </div>
 
         {/* Active Streaks */}

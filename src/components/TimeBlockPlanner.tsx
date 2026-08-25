@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
-import { TimeBlock, Task, Project, Goal } from '@/types';
+import { TimeBlock, Task, Project, Goal, Session } from '@/types';
 import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from '@/utils/dateUtils';
 import { audioManager } from '@/lib/audioManager';
 import { getVoiceService } from '@/lib/voice/voiceService';
+import { aggregateExecutionWindow } from '@/lib/executionAggregation';
 
 type ViewMode = 'day' | 'week' | 'month';
 
@@ -18,6 +19,8 @@ interface TimeBlockModalData extends Partial<TimeBlock> {
 
 interface TimeBlockPlannerProps {
   timeBlocks: TimeBlock[];
+  sessions?: Session[];
+  sessionCoverage?: 'loading' | 'ready' | 'error';
   tasks: Task[];
   projects: Project[];
   goals: Goal[];
@@ -38,6 +41,8 @@ interface TimeBlockPlannerProps {
 
 export default function TimeBlockPlanner({
   timeBlocks,
+  sessions = [],
+  sessionCoverage = 'loading',
   tasks,
   projects,
   goals,
@@ -470,30 +475,35 @@ export default function TimeBlockPlanner({
   // Pure derivation from filteredBlocks; no extra fetches, no extra state.
   // ============================================================================
   const daySummary = useMemo(() => {
-    let plannedMin = 0;
-    let completedMin = 0;
-    for (const block of filteredBlocks) {
-      const start = toDateSafe(block.startTime, selectedDate).getTime();
-      const end = toDateSafe(block.endTime, selectedDate).getTime();
-      const planned = Math.max(0, (end - start) / (1000 * 60));
-      plannedMin += planned;
-      if (block.status === 'completed') {
-        const actualStart = block.actualStartTime
-          ? toDateSafe(block.actualStartTime, selectedDate).getTime()
-          : start;
-        const actualEnd = block.actualEndTime
-          ? toDateSafe(block.actualEndTime, selectedDate).getTime()
-          : end;
-        completedMin += Math.max(0, (actualEnd - actualStart) / (1000 * 60));
-      }
+    if (!currentUserId) {
+      return { plannedMin: 0, actualMin: null, pct: null, availability: 'unavailable' as const };
     }
-    const pct = plannedMin > 0 ? Math.round((completedMin / plannedMin) * 100) : 0;
+    const dayStart = new Date(selectedDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const execution = aggregateExecutionWindow({
+      ownerUid: currentUserId,
+      start: dayStart,
+      end: dayEnd,
+      timeBlocks,
+      sessions: sessionCoverage === 'ready' ? sessions : [],
+    });
+    const plannedMin = Math.round(execution.plannedMinutes);
+    if (sessionCoverage !== 'ready') {
+      return { plannedMin, actualMin: null, pct: null, availability: 'unavailable' as const };
+    }
+    const actualMin = Math.round(execution.actualMinutes);
+    const pct = execution.availability === 'complete' && plannedMin > 0
+      ? Math.round(actualMin / plannedMin * 100)
+      : null;
     return {
-      plannedMin: Math.round(plannedMin),
-      completedMin: Math.round(completedMin),
+      plannedMin,
+      actualMin,
       pct,
+      availability: execution.availability,
     };
-  }, [filteredBlocks, selectedDate]);
+  }, [currentUserId, selectedDate, sessionCoverage, sessions, timeBlocks]);
 
   const minutesLabel = (m: number): string => {
     if (m < 60) return `${m} min`;
@@ -592,12 +602,21 @@ export default function TimeBlockPlanner({
           className="px-6 py-3 border-b border-gray-100 bg-white flex items-center gap-4 flex-wrap text-xs"
         >
           <SummaryChip label="Planned" value={minutesLabel(daySummary.plannedMin)} tone="neutral" />
-          <SummaryChip label="Completed" value={minutesLabel(daySummary.completedMin)} tone="emerald" />
-          <SummaryChip label="Completion" value={`${daySummary.pct}%`} tone={daySummary.pct >= 80 ? 'emerald' : daySummary.pct >= 50 ? 'blue' : 'neutral'} highlight />
+          <SummaryChip
+            label={daySummary.availability === 'partial' ? 'Known actual ≥' : 'Known actual'}
+            value={daySummary.actualMin === null ? 'Unavailable' : minutesLabel(daySummary.actualMin)}
+            tone="emerald"
+          />
+          <SummaryChip
+            label="Adherence"
+            value={daySummary.pct === null ? 'Unavailable' : `${daySummary.pct}%`}
+            tone={daySummary.pct !== null && daySummary.pct >= 80 ? 'emerald' : daySummary.pct !== null && daySummary.pct >= 50 ? 'blue' : 'neutral'}
+            highlight
+          />
           <div className="flex-1 min-w-[120px] h-1.5 rounded-full bg-gray-100 overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
-              style={{ width: `${Math.min(100, Math.max(0, daySummary.pct))}%` }}
+              style={{ width: `${daySummary.pct === null ? 0 : Math.min(100, Math.max(0, daySummary.pct))}%` }}
               data-testid="planner-day-summary-bar"
             />
           </div>
@@ -748,13 +767,7 @@ export default function TimeBlockPlanner({
                     onClick={(e) => {
                       e.stopPropagation();
                       const newStatus = block.status === 'completed' ? 'planned' : 'completed';
-                      onUpdateTimeBlock(block.id, {
-                        status: newStatus,
-                        ...(newStatus === 'completed' && !block.actualStartTime ? {
-                          actualStartTime: block.startTime,
-                          actualEndTime: block.endTime
-                        } : {})
-                      });
+                      onUpdateTimeBlock(block.id, { status: newStatus });
                       if (newStatus === 'completed') {
                         audioManager.taskCompleted();
                         getVoiceService()?.speakConfirmation('blockCompleted');
@@ -768,7 +781,7 @@ export default function TimeBlockPlanner({
                     title={
                       block.status === 'completed'
                         ? 'Completed - Click to mark as planned'
-                        : 'Click to COMPLETE and add to Analytics!'
+                        : 'Mark completed (execution time requires a Session)'
                     }
                   >
                     {block.status === 'completed' ? '✅' : '⭕'}
@@ -1033,13 +1046,7 @@ export default function TimeBlockPlanner({
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         const newStatus = block.status === 'completed' ? 'planned' : 'completed';
-                                        onUpdateTimeBlock(block.id, {
-                                          status: newStatus,
-                                          ...(newStatus === 'completed' && !block.actualStartTime ? {
-                                            actualStartTime: block.startTime,
-                                            actualEndTime: block.endTime
-                                          } : {})
-                                        });
+                                        onUpdateTimeBlock(block.id, { status: newStatus });
                                         if (newStatus === 'completed') {
                                           audioManager.taskCompleted();
                                           getVoiceService()?.speakConfirmation('blockCompleted');
@@ -1053,7 +1060,7 @@ export default function TimeBlockPlanner({
                                       title={
                                         block.status === 'completed'
                                           ? 'Completed - Click to mark as planned'
-                                          : 'Click to COMPLETE and add to Analytics!'
+                                          : 'Mark completed (execution time requires a Session)'
                                       }
                                     >
                                       {block.status === 'completed' ? '✅' : '⭕'}

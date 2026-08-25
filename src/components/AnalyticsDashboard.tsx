@@ -12,7 +12,9 @@ interface AnalyticsData {
     date: string;
     planned: number;
     actual: number;
-    adherence: number;
+    adherence: number | null;
+    actualAvailability: 'complete' | 'partial';
+    missingActualCount: number;
   }>;
   timeAllocation: Array<{
     domain: string;
@@ -22,23 +24,26 @@ interface AnalyticsData {
   focusTrend: Array<{
     date: string;
     focusMinutes: number;
-    mood: number;
-    energy: number;
+    mood: number | null;
+    energy: number | null;
   }>;
   correlations: Array<{
     factor1: string;
     factor2: string;
     correlation: number;
     significance: string;
+    sampleSize: number;
   }>;
   activityRankings: Array<{
     activityName: string;
     plannedHours: number;
     actualHours: number;
     discrepancy: number;
-    adherenceRate: number;
+    adherenceRate: number | null;
+    actualAvailability: 'complete' | 'partial';
+    missingActualCount: number;
     domain: string;
-    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
+    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned' | 'insufficient_data';
   }>;
   weeklyReview: {
     highlights: string[];
@@ -63,12 +68,20 @@ export default function AnalyticsDashboard({
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316'];
 
-  const formatPercentage = (value: number) => `${Math.round(value)}%`;
+  const formatPercentage = (value: number | null) => value === null ? '—' : `${Math.round(value)}%`;
   const formatHours = (value: number) => `${value.toFixed(1)}h`;
 
-  const averageAdherence = data.planVsActual.length > 0 
-    ? data.planVsActual.reduce((sum, item) => sum + item.adherence, 0) / data.planVsActual.length 
-    : 0;
+  const adherenceValues = data.planVsActual
+    .map((item) => item.adherence)
+    .filter((value): value is number => value !== null);
+  const averageAdherence = adherenceValues.length > 0
+    ? adherenceValues.reduce((sum, value) => sum + value, 0) / adherenceValues.length
+    : null;
+  const partialActual = data.planVsActual.some((item) => item.actualAvailability === 'partial');
+  const missingActualCount = data.planVsActual.reduce(
+    (sum, item) => sum + item.missingActualCount,
+    0,
+  );
 
   const totalPlannedHours = data.planVsActual.reduce((sum, item) => sum + item.planned, 0);
   const totalActualHours = data.planVsActual.reduce((sum, item) => sum + item.actual, 0);
@@ -111,6 +124,12 @@ export default function AnalyticsDashboard({
             </div>
           </div>
         </div>
+
+        {partialActual && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
+            {missingActualCount} executed block{missingActualCount === 1 ? '' : 's'} lack a completed Session or explicit actual interval. Actual values are measured lower bounds; planned time was not substituted.
+          </div>
+        )}
         
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={data.planVsActual}>
@@ -129,14 +148,14 @@ export default function AnalyticsDashboard({
         <div className="grid grid-cols-3 gap-4 mt-4">
           <div className="bg-blue-50 rounded-lg p-3">
             <div className="text-sm font-medium text-blue-600">Avg Adherence</div>
-            <div className="text-xl font-bold text-blue-900">{formatPercentage(averageAdherence)}</div>
+            <div className="text-xl font-bold text-blue-900">{partialActual && averageAdherence !== null ? '≥ ' : ''}{formatPercentage(averageAdherence)}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
             <div className="text-sm font-medium text-gray-600">Total Planned</div>
             <div className="text-xl font-bold text-gray-900">{formatHours(totalPlannedHours)}</div>
           </div>
           <div className="bg-green-50 rounded-lg p-3">
-            <div className="text-sm font-medium text-green-600">Total Actual</div>
+            <div className="text-sm font-medium text-green-600">{partialActual ? 'Known Actual' : 'Total Actual'}</div>
             <div className="text-xl font-bold text-green-900">{formatHours(totalActualHours)}</div>
           </div>
         </div>
@@ -239,10 +258,10 @@ export default function AnalyticsDashboard({
             <TrendingUp className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h4 className="text-lg font-medium text-gray-600 mb-2">No Correlation Data</h4>
             <p className="text-sm text-gray-500 mb-4">
-              Track mood, energy, and focus scores for at least 3 days to see correlations between different factors.
+              Track at least 7 pairwise-complete days of mood, energy, and measured focus to see exploratory correlations.
             </p>
             <div className="text-xs text-gray-400">
-              Correlations help you understand how sleep, exercise, and mood affect your productivity.
+              Missing measurements are excluded. Correlation is not causation.
             </div>
           </div>
         </div>
@@ -262,7 +281,7 @@ export default function AnalyticsDashboard({
                     {correlation.factor1} ↔ {correlation.factor2}
                   </div>
                   <div className="text-sm text-gray-600">
-                    Significance: {correlation.significance}
+                    {correlation.significance} · correlation is not causation
                   </div>
                 </div>
                 <div className={`text-lg font-bold ${
@@ -316,6 +335,7 @@ export default function AnalyticsDashboard({
     const leastDone = data.activityRankings.filter(a => a.rank === 'least_done').slice(0, 5);
     const overplanned = data.activityRankings.filter(a => a.rank === 'overplanned').slice(0, 3);
     const underplanned = data.activityRankings.filter(a => a.rank === 'underplanned').slice(0, 3);
+    const insufficientData = data.activityRankings.filter(a => a.rank === 'insufficient_data');
 
     const getRankColor = (rank: string, positive?: boolean) => {
       switch (rank) {
@@ -358,11 +378,13 @@ export default function AnalyticsDashboard({
               <div className="text-right">
                 <div className="flex space-x-2 text-xs">
                   <span className="text-blue-600">{activity.plannedHours}h planned</span>
-                  <span className="text-green-600">{activity.actualHours}h actual</span>
+                  <span className="text-green-600">
+                    {activity.actualHours}h {activity.actualAvailability === 'partial' ? 'known actual ≥' : 'actual'}
+                  </span>
                 </div>
                 <div className={`text-xs font-medium ${activity.discrepancy >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {activity.discrepancy >= 0 ? '+' : ''}{activity.discrepancy}h
-                  ({activity.adherenceRate}%)
+                  {activity.adherenceRate === null ? ' (adherence unavailable)' : ` (${activity.adherenceRate}%)`}
                 </div>
               </div>
             </div>
@@ -404,7 +426,7 @@ export default function AnalyticsDashboard({
               title="📈 Overplanned Activities"
               activities={overplanned}
               icon={<TrendingUp className="w-5 h-5 text-orange-600" />}
-              description="You spent more time than planned"
+              description="Planned time exceeded measured execution"
             />
           )}
           
@@ -413,10 +435,17 @@ export default function AnalyticsDashboard({
               title="📉 Underplanned Activities"
               activities={underplanned}
               icon={<Target className="w-5 h-5 text-blue-600" />}
-              description="You spent less time than planned"
+              description="Measured execution exceeded planned time"
             />
           )}
         </div>
+
+        {insufficientData.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            {insufficientData.length} activit{insufficientData.length === 1 ? 'y has' : 'ies have'} incomplete execution evidence.
+            Known actual time is a lower bound; missing Sessions were not treated as zero or replaced by planned time.
+          </div>
+        )}
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h4 className="font-semibold text-blue-800 mb-2">💡 Insights</h4>

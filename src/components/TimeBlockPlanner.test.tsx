@@ -7,23 +7,28 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import TimeBlockPlanner from './TimeBlockPlanner';
-import type { TimeBlock } from '@/types';
+import type { Session, TimeBlock } from '@/types';
 
 const FIXED_DATE = new Date('2026-05-25T10:00:00.000Z');
 
 function renderPlanner(opts: {
   timeBlocks?: TimeBlock[];
+  sessions?: Session[];
+  sessionCoverage?: 'loading' | 'ready' | 'error';
   isReady?: boolean;
   onNavigate?: (id: string) => void;
+  onUpdateTimeBlock?: (id: string, updates: Partial<TimeBlock>) => void;
 } = {}) {
   return render(
     <TimeBlockPlanner
       timeBlocks={opts.timeBlocks ?? []}
+      sessions={opts.sessions ?? []}
+      sessionCoverage={opts.sessionCoverage ?? 'ready'}
       tasks={[]}
       projects={[]}
       goals={[]}
       onCreateTimeBlock={() => {}}
-      onUpdateTimeBlock={() => {}}
+      onUpdateTimeBlock={opts.onUpdateTimeBlock ?? (() => {})}
       onDeleteTimeBlock={() => {}}
       selectedDate={FIXED_DATE}
       onDateChange={() => {}}
@@ -78,6 +83,8 @@ describe('TimeBlockPlanner — empty state', () => {
     rerender(
       <TimeBlockPlanner
         timeBlocks={[]}
+        sessions={[]}
+        sessionCoverage="ready"
         tasks={[]}
         projects={[]}
         goals={[]}
@@ -111,13 +118,54 @@ describe('TimeBlockPlanner — empty state', () => {
 });
 
 describe('TimeBlockPlanner — day summary', () => {
-  it('shows 0 min / 0 min / 0% when there are no blocks', () => {
+  it('shows an unavailable adherence denominator when there are no planned minutes', () => {
     renderPlanner();
     const summary = screen.getByTestId('planner-day-summary');
     expect(summary.textContent).toMatch(/Planned/i);
-    expect(summary.textContent).toMatch(/Completed/i);
-    expect(summary.textContent).toMatch(/Completion/i);
+    expect(summary.textContent).toMatch(/Known actual/i);
+    expect(summary.textContent).toMatch(/Adherence/i);
     expect(summary.textContent).toMatch(/0\s*min/);
-    expect(summary.textContent).toMatch(/0%/);
+    expect(summary.textContent).toMatch(/Unavailable/);
+  });
+
+  it('does not substitute a completed block planned window for execution', () => {
+    const block: TimeBlock = {
+      id: 'block-1',
+      userId: 'test-user',
+      domainId: 'domain-1',
+      title: 'Planned hour',
+      type: 'work',
+      status: 'completed',
+      startTime: new Date('2026-05-25T08:00:00.000Z'),
+      endTime: new Date('2026-05-25T09:00:00.000Z'),
+      createdAt: new Date('2026-05-24T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-25T09:00:00.000Z'),
+    };
+    renderPlanner({ timeBlocks: [block] });
+
+    const summary = screen.getByTestId('planner-day-summary');
+    expect(summary.textContent).toMatch(/Planned1 h/i);
+    expect(summary.textContent).toMatch(/Known actual ≥0 min/i);
+    expect(summary.textContent).toMatch(/AdherenceUnavailable/i);
+  });
+
+  it('manual completion changes status only and does not manufacture actual timestamps', () => {
+    const onUpdateTimeBlock = vi.fn();
+    const block: TimeBlock = {
+      id: 'block-1',
+      userId: 'test-user',
+      domainId: 'domain-1',
+      title: 'Planned hour',
+      type: 'work',
+      status: 'planned',
+      startTime: new Date('2026-05-25T08:00:00.000Z'),
+      endTime: new Date('2026-05-25T09:00:00.000Z'),
+      createdAt: new Date('2026-05-24T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-24T08:00:00.000Z'),
+    };
+    renderPlanner({ timeBlocks: [block], onUpdateTimeBlock });
+
+    fireEvent.click(screen.getByTitle('Mark completed (execution time requires a Session)'));
+    expect(onUpdateTimeBlock).toHaveBeenCalledWith('block-1', { status: 'completed' });
   });
 });

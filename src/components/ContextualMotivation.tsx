@@ -1,21 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { AlertTriangle, Target, Clock, TrendingDown, Flame } from 'lucide-react';
+import { AlertTriangle, Target } from 'lucide-react';
 import { useDataContext } from '@/providers/DataProvider';
-
-function getWeekBounds(): { start: Date; end: Date } {
-  const now = new Date();
-  const day = now.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-  return { start: monday, end: sunday };
-}
 
 interface MotivationMessage {
   text: string;
@@ -74,54 +61,10 @@ export default function ContextualMotivation({ className = '' }: { className?: s
       }
     }
 
-    // 3. Weekly execution rate
-    const { start, end } = getWeekBounds();
-    const weekBlocks = data.timeBlocks.filter(b => {
-      if (b.deleted) return false;
-      const bStart = new Date(b.startTime);
-      return bStart >= start && bStart <= end;
-    });
-
-    if (weekBlocks.length > 0) {
-      let plannedMin = 0;
-      let completedMin = 0;
-      for (const b of weekBlocks) {
-        plannedMin += (new Date(b.endTime).getTime() - new Date(b.startTime).getTime()) / (1000 * 60);
-        if (b.status === 'completed') {
-          const aStart = b.actualStartTime ? new Date(b.actualStartTime) : new Date(b.startTime);
-          const aEnd = b.actualEndTime ? new Date(b.actualEndTime) : new Date(b.endTime);
-          completedMin += (aEnd.getTime() - aStart.getTime()) / (1000 * 60);
-        }
-      }
-      const rate = Math.round((completedMin / plannedMin) * 100);
-      const plannedH = Math.round(plannedMin / 60);
-      const completedH = Math.round(completedMin / 60);
-
-      if (rate < 50 && completedMin > 0) {
-        result.push({
-          text: `Settimana al ${rate}%. ${completedH}h su ${plannedH}h pianificate. Recupera oggi.`,
-          urgency: 'warning',
-          icon: <TrendingDown className="w-3.5 h-3.5" />,
-        });
-      } else if (rate >= 80) {
-        result.push({
-          text: `${rate}% di esecuzione. ${completedH}h completate. Mantieni il ritmo.`,
-          urgency: 'positive',
-          icon: <Flame className="w-3.5 h-3.5" />,
-        });
-      } else if (plannedMin > 0 && completedMin === 0) {
-        result.push({
-          text: `${plannedH}h pianificate, 0h completate. Il piano senza esecuzione non vale nulla.`,
-          urgency: 'critical',
-          icon: <Clock className="w-3.5 h-3.5" />,
-        });
-      }
-    }
-
     // Sort: critical first, then warning, then rest
     const order = { critical: 0, warning: 1, info: 2, positive: 3 };
     return result.sort((a, b) => order[a.urgency] - order[b.urgency]).slice(0, 4);
-  }, [data.status, data.goals, data.timeBlocks]);
+  }, [data.status, data.goals]);
 
   if (messages.length === 0) return null;
 

@@ -7,6 +7,63 @@ import {
 import { Page } from '@/types/blocks';
 import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
+import { aggregateExecutionWindow } from './executionAggregation';
+import {
+  intervalOverlapMs,
+  parseCompletedSessionEvidence,
+  proportionalSessionMinutes,
+  validExecutionInterval,
+} from './executionEvidence';
+
+export interface PlanVsActualDatum {
+  date: string;
+  planned: number;
+  actual: number;
+  adherence: number | null;
+  actualAvailability: 'complete' | 'partial';
+  missingActualCount: number;
+}
+
+export interface TimeAllocationDatum {
+  domain: string;
+  hours: number;
+  color: string;
+}
+
+export interface FocusTrendDatum {
+  date: string;
+  focusMinutes: number;
+  mood: number | null;
+  energy: number | null;
+}
+
+export interface CorrelationDatum {
+  factor1: string;
+  factor2: string;
+  correlation: number;
+  significance: string;
+  sampleSize: number;
+}
+
+export type ActivityRank =
+  | 'most_done'
+  | 'least_done'
+  | 'overplanned'
+  | 'underplanned'
+  | 'insufficient_data';
+
+export interface ActivityRankingDatum {
+  activityName: string;
+  plannedHours: number;
+  /** Known actual hours; a lower bound when actualAvailability is partial. */
+  actualHours: number;
+  discrepancy: number;
+  adherenceRate: number | null;
+  actualAvailability: 'complete' | 'partial';
+  missingActualCount: number;
+  domain: string;
+  rank: ActivityRank;
+}
 
 function isPlainRecord(value: object): boolean {
   const prototype = Object.getPrototypeOf(value);
@@ -42,6 +99,283 @@ export function sanitizeForStorage<T>(data: T): T {
 export function hasSessionTag(session: { readonly tags?: unknown }, tag: string): boolean {
   return Array.isArray(session.tags)
     && session.tags.some((value) => typeof value === 'string' && value === tag);
+}
+
+export function filterOwnerActiveSessions(userId: string, sessions: Session[]): Session[] {
+  return sessions.filter((session) => session.userId === userId && session.status === 'active');
+}
+
+function localDateKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+export function buildPlanVsActualData(
+  userId: string,
+  days: number,
+  timeBlocks: TimeBlock[],
+  sessions: Session[],
+  now: Date = new Date(),
+): PlanVsActualDatum[] {
+  const count = Number.isFinite(days) ? Math.max(1, Math.min(366, Math.floor(days))) : 7;
+  const firstDay = new Date(now);
+  firstDay.setHours(0, 0, 0, 0);
+  firstDay.setDate(firstDay.getDate() - count + 1);
+  const result: PlanVsActualDatum[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const dayStart = new Date(firstDay);
+    dayStart.setDate(firstDay.getDate() + offset);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const aggregate = aggregateExecutionWindow({
+      ownerUid: userId,
+      start: dayStart,
+      end: dayEnd,
+      timeBlocks,
+      sessions,
+    });
+    const plannedHours = aggregate.plannedMinutes / 60;
+    const actualHours = aggregate.actualMinutes / 60;
+    result.push({
+      date: localDateKey(dayStart),
+      planned: Number(plannedHours.toFixed(1)),
+      actual: Number(actualHours.toFixed(1)),
+      adherence: plannedHours > 0 ? Math.round(actualHours / plannedHours * 100) : null,
+      actualAvailability: aggregate.availability,
+      missingActualCount: aggregate.blocksMissingActualCount,
+    });
+  }
+  return result;
+}
+
+export function buildTimeAllocationData(
+  userId: string,
+  days: number,
+  domains: Domain[],
+  timeBlocks: TimeBlock[],
+  sessions: Session[],
+  now: Date = new Date(),
+): TimeAllocationDatum[] {
+  const count = Number.isFinite(days) ? Math.max(1, Math.min(366, Math.floor(days))) : 7;
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - count + 1);
+  const end = new Date(now);
+  end.setDate(end.getDate() + 1);
+  end.setHours(0, 0, 0, 0);
+  const aggregate = aggregateExecutionWindow({
+    ownerUid: userId,
+    start,
+    end,
+    timeBlocks,
+    sessions,
+  });
+  const ownerDomains = domains.filter((domain) => domain.userId === userId);
+  const domainById = new Map(ownerDomains.map((domain) => [domain.id, domain]));
+  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
+  return Array.from(aggregate.actualMinutesByDomainId.entries())
+    .map(([domainId, minutes], index) => {
+      const domain = domainId ? domainById.get(domainId) : undefined;
+      return {
+        domain: domain?.name || 'Uncategorized',
+        hours: Number((minutes / 60).toFixed(1)),
+        color: domain?.color || colors[index % colors.length],
+      };
+    })
+    .sort((left, right) => right.hours - left.hours);
+}
+
+export function buildActivityRankings(
+  userId: string,
+  days: number,
+  timeBlocks: TimeBlock[],
+  sessions: Session[],
+  now: Date = new Date(),
+): ActivityRankingDatum[] {
+  const count = Number.isFinite(days) ? Math.max(1, Math.min(366, Math.floor(days))) : 7;
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - count + 1);
+  const end = new Date(now);
+  end.setDate(end.getDate() + 1);
+  end.setHours(0, 0, 0, 0);
+  const window = { start: start.getTime(), end: end.getTime() };
+  const activityMap = new Map<string, { domain: string; blocks: TimeBlock[] }>();
+
+  for (const block of timeBlocks) {
+    const scheduled = validExecutionInterval(block.startTime, block.endTime);
+    if (
+      block.userId !== userId
+      || block.deleted === true
+      || block.status === 'cancelled'
+      || block.type === 'break'
+      || block.type === 'buffer'
+      || scheduled === null
+      || intervalOverlapMs(scheduled, window) === 0
+    ) {
+      continue;
+    }
+    const activityName = block.title || block.projectId || 'Unnamed Activity';
+    const current = activityMap.get(activityName) ?? {
+      domain: block.type || 'General',
+      blocks: [],
+    };
+    current.blocks.push(block);
+    activityMap.set(activityName, current);
+  }
+
+  return Array.from(activityMap.entries())
+    .map(([activityName, activity]) => {
+      const blockIds = new Set(activity.blocks.map((block) => block.id));
+      const linkedSessions = sessions.filter((session) => (
+        session.userId === userId
+        && typeof session.timeBlockId === 'string'
+        && blockIds.has(session.timeBlockId)
+      ));
+      const execution = aggregateExecutionWindow({
+        ownerUid: userId,
+        start,
+        end,
+        timeBlocks: activity.blocks,
+        sessions: linkedSessions,
+      });
+      const plannedHours = execution.plannedMinutes / 60;
+      const actualHours = execution.actualMinutes / 60;
+      const discrepancy = actualHours - plannedHours;
+      let rank: ActivityRank;
+      if (execution.availability === 'partial') rank = 'insufficient_data';
+      else if (discrepancy <= -1) rank = 'overplanned';
+      else if (discrepancy >= 1) rank = 'underplanned';
+      else if (actualHours >= 2) rank = 'most_done';
+      else rank = 'least_done';
+
+      return {
+        activityName,
+        plannedHours: Number(plannedHours.toFixed(1)),
+        actualHours: Number(actualHours.toFixed(1)),
+        discrepancy: Number(discrepancy.toFixed(1)),
+        adherenceRate: execution.availability === 'complete' && plannedHours > 0
+          ? Math.round(actualHours / plannedHours * 100)
+          : null,
+        actualAvailability: execution.availability,
+        missingActualCount: execution.blocksMissingActualCount,
+        domain: activity.domain,
+        rank,
+      };
+    })
+    .sort((left, right) => right.actualHours - left.actualHours);
+}
+
+export function buildFocusTrendData(
+  userId: string,
+  days: number,
+  sessions: Session[],
+  now: Date = new Date(),
+): FocusTrendDatum[] {
+  const count = Number.isFinite(days) ? Math.max(1, Math.min(366, Math.floor(days))) : 7;
+  const firstDay = new Date(now);
+  firstDay.setHours(0, 0, 0, 0);
+  firstDay.setDate(firstDay.getDate() - count + 1);
+  const ownerSessions = sessions.filter((session) => session.userId === userId && !session.deleted);
+  const result: FocusTrendDatum[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const dayStart = new Date(firstDay);
+    dayStart.setDate(firstDay.getDate() + offset);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const daySessions = ownerSessions.filter((session) => {
+      const evidence = parseCompletedSessionEvidence(session);
+      return evidence !== null
+        && evidence.interval.start >= dayStart.getTime()
+        && evidence.interval.start < dayEnd.getTime();
+    });
+    const focusMinutes = daySessions.reduce((total, session) => {
+      if (!hasSessionTag(session, 'focus')) return total;
+      return total + (parseCompletedSessionEvidence(session)?.netMinutes ?? 0);
+    }, 0);
+    const moodValues = daySessions
+      .map((session) => session.mood)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const energyValues = daySessions
+      .map((session) => session.energy)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    result.push({
+      date: localDateKey(dayStart),
+      focusMinutes: Math.round(focusMinutes),
+      mood: averageOrNull(moodValues),
+      energy: averageOrNull(energyValues),
+    });
+  }
+  return result;
+}
+
+export function buildExploratoryCorrelations(focusTrend: FocusTrendDatum[]): CorrelationDatum[] {
+  const definitions: Array<Readonly<{
+    factor1: string;
+    factor2: string;
+    pairs: Array<readonly [number, number]>;
+  }>> = [
+    {
+      factor1: 'Mood',
+      factor2: 'Focus',
+      pairs: focusTrend
+        .filter((item): item is FocusTrendDatum & { mood: number } => item.mood !== null)
+        .map((item) => [item.mood, item.focusMinutes] as const),
+    },
+    {
+      factor1: 'Energy',
+      factor2: 'Focus',
+      pairs: focusTrend
+        .filter((item): item is FocusTrendDatum & { energy: number } => item.energy !== null)
+        .map((item) => [item.energy, item.focusMinutes] as const),
+    },
+    {
+      factor1: 'Mood',
+      factor2: 'Energy',
+      pairs: focusTrend
+        .filter((item): item is FocusTrendDatum & { mood: number; energy: number } => (
+          item.mood !== null && item.energy !== null
+        ))
+        .map((item) => [item.mood, item.energy] as const),
+    },
+  ];
+  return definitions.flatMap(({ factor1, factor2, pairs }) => {
+    if (pairs.length < 7) return [];
+    const correlation = pearson(
+      pairs.map(([left]) => left),
+      pairs.map(([, right]) => right),
+    );
+    if (!Number.isFinite(correlation)) return [];
+    return [{
+      factor1,
+      factor2,
+      correlation: Math.round(correlation * 100) / 100,
+      significance: `Exploratory · N=${pairs.length}`,
+      sampleSize: pairs.length,
+    }];
+  });
+}
+
+function averageOrNull(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10;
+}
+
+function pearson(x: number[], y: number[]): number {
+  if (x.length !== y.length || x.length < 2) return Number.NaN;
+  const n = x.length;
+  const sumX = x.reduce((sum, value) => sum + value, 0);
+  const sumY = y.reduce((sum, value) => sum + value, 0);
+  const sumXY = x.reduce((sum, value, index) => sum + value * y[index], 0);
+  const sumXX = x.reduce((sum, value) => sum + value * value, 0);
+  const sumYY = y.reduce((sum, value) => sum + value * value, 0);
+  const denominator = Math.sqrt(
+    (n * sumXX - sumX * sumX) * (n * sumYY - sumY * sumY),
+  );
+  return denominator === 0 ? Number.NaN : (n * sumXY - sumX * sumY) / denominator;
 }
 
 // Helper: Build normalized habit log payload (NEVER include undefined)
@@ -418,7 +752,8 @@ class IndexedDBAdapter implements DatabaseAdapter {
 
   // Specific methods for common queries
   async getActiveSessions(userId: string): Promise<Session[]> {
-    return this.getByIndex<Session>('sessions', 'status', 'active');
+    const sessions = await this.getByIndex<Session>('sessions', 'userId', userId);
+    return filterOwnerActiveSessions(userId, sessions);
   }
 
   async getActiveHabits(userId: string): Promise<Habit[]> {
@@ -447,8 +782,11 @@ class IndexedDBAdapter implements DatabaseAdapter {
 
     // Get today's completed sessions
     const sessions = await this.getByIndex<Session>('sessions', 'userId', userId);
-    const todaySessions = sessions.filter(session => 
-      session.startTime >= today && session.startTime < tomorrow && session.status === 'completed'
+    const todaySessions = sessions.filter(session =>
+      session.userId === userId
+      && session.startTime >= today
+      && session.startTime < tomorrow
+      && session.status === 'completed'
     );
 
     // Get today's time blocks
@@ -460,27 +798,24 @@ class IndexedDBAdapter implements DatabaseAdapter {
     );
     
     // Calculate focus minutes (session.duration is in seconds, convert to minutes)
+    const dayWindow = { start: today.getTime(), end: tomorrow.getTime() };
     const focusMinutes = todaySessions
       .filter(session => hasSessionTag(session, 'focus'))
-      .reduce((total, session) => total + (session.duration || 0), 0) / 60;
-
-    // Calculate plan vs actual
-    const plannedMinutes = timeBlocks.reduce((total, block) => 
-      total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60), 0
-    );
-    // Follow CLAUDE.md rules - count ALL completed blocks
-    const actualMinutes = timeBlocks
-      .filter(block => block.status === 'completed')
-      .reduce((total, block) => {
-        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
-        if (block.actualStartTime && block.actualEndTime) {
-          return total + (block.actualEndTime.getTime() - block.actualStartTime.getTime()) / (1000 * 60);
-        } else {
-          // Fallback to planned duration for completed blocks (CLAUDE.md rule)
-          return total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60);
-        }
+      .reduce((total, session) => {
+        const evidence = parseCompletedSessionEvidence(session);
+        return total + (evidence ? proportionalSessionMinutes(evidence, dayWindow) : 0);
       }, 0);
-    const planVsActual = plannedMinutes > 0 ? (actualMinutes / plannedMinutes) * 100 : 0;
+
+    const execution = aggregateExecutionWindow({
+      ownerUid: userId,
+      start: today,
+      end: tomorrow,
+      timeBlocks,
+      sessions,
+    });
+    const planVsActual = execution.plannedMinutes > 0
+      ? execution.actualMinutes / execution.plannedMinutes * 100
+      : 0;
 
     // Get active streaks
     const habits = await this.getActiveHabits(userId);
@@ -496,6 +831,8 @@ class IndexedDBAdapter implements DatabaseAdapter {
     return {
       focusMinutes: Math.round(focusMinutes),
       planVsActual: Math.round(planVsActual),
+      actualAvailability: execution.availability,
+      missingActualCount: execution.blocksMissingActualCount,
       activeStreaks,
       keyResultsProgress: Math.round(keyResultsProgress),
       mood: todaySessions.find(s => s.mood !== undefined)?.mood,
@@ -503,338 +840,31 @@ class IndexedDBAdapter implements DatabaseAdapter {
     };
   }
 
-  async calculatePlanVsActualData(userId: string, days: number = 7): Promise<Array<{
-    date: string;
-    planned: number;
-    actual: number;
-    adherence: number;
-  }>> {
-    const endDate = new Date();
-
-    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-    const userTimeBlocks = allTimeBlocks.filter(b => b.userId === userId && !b.deleted);
-
-    let startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    if (userTimeBlocks.length > 0) {
-      const earliestBlock = userTimeBlocks.reduce((earliest, block) => {
-        const blockDate = new Date(block.startTime);
-        return blockDate < earliest ? blockDate : earliest;
-      }, new Date());
-
-      const calculatedStartDate = new Date(earliestBlock);
-      calculatedStartDate.setHours(0, 0, 0, 0);
-
-      if (calculatedStartDate < startDate) {
-        startDate = calculatedStartDate;
-      }
-    }
-
-    const result = [];
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      // Filter time blocks for this day
-      const dayTimeBlocks = allTimeBlocks.filter(block => {
-        const blockStart = new Date(block.startTime);
-        return (
-          block.userId === userId &&
-          !block.deleted && // Exclude soft-deleted blocks
-          blockStart >= dayStart &&
-          blockStart <= dayEnd
-        );
-      });
-
-      // 🚨 DEBUG: Log per-day analysis
-      if ((process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_ANALYTICS === '1') && dayTimeBlocks.length > 0) {
-        console.log(`📊 Day ${d.toISOString().split('T')[0]}:`, {
-          dayTimeBlocks: dayTimeBlocks.length,
-          completedBlocks: dayTimeBlocks.filter(b => b.status === 'completed').length,
-          sampleBlocks: dayTimeBlocks.slice(0, 2).map(b => ({
-            title: b.title,
-            status: b.status,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            actualStartTime: b.actualStartTime,
-            actualEndTime: b.actualEndTime
-          }))
-        });
-      }
-
-      // Calculate planned hours
-      const plannedMinutes = dayTimeBlocks.reduce((total, block) => {
-        const startTime = new Date(block.startTime);
-        const endTime = new Date(block.endTime);
-        return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-      }, 0);
-
-      // Unified logic following CLAUDE.md Progress Rules
-      let actualMinutes = dayTimeBlocks
-        .filter(block => block.status === 'completed')
-        .reduce((total, block) => {
-          // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
-          if (block.actualStartTime && block.actualEndTime) {
-            const actualStart = new Date(block.actualStartTime);
-            const actualEnd = new Date(block.actualEndTime);
-            return total + (actualEnd.getTime() - actualStart.getTime()) / (1000 * 60);
-          } else {
-            // Fallback to planned duration for completed blocks (CLAUDE.md rule)
-            const startTime = new Date(block.startTime);
-            const endTime = new Date(block.endTime);
-            return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-          }
-        }, 0);
-      
-      // 🎯 INTELLIGENCE: Also include session data for more accurate tracking
-      const allSessions = await this.getAll<Session>('sessions');
-      const daySessions = allSessions.filter(session => 
-        session.userId === userId &&
-        new Date(session.startTime) >= dayStart &&
-        new Date(session.startTime) <= dayEnd &&
-        session.status === 'completed' &&
-        session.duration
-      );
-      
-      // Use session data if more accurate than timeblock data
-      const sessionMinutes = daySessions.reduce((total, session) => {
-        return total + (session.duration || 0) / 60; // Convert seconds to minutes
-      }, 0);
-      
-      // Use the higher value (more accurate tracking)
-      if (sessionMinutes > actualMinutes) {
-        actualMinutes = sessionMinutes;
-      }
-
-      const plannedHours = plannedMinutes / 60;
-      const actualHours = actualMinutes / 60;
-      const adherence = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
-
-      result.push({
-        date: d.toISOString().split('T')[0],
-        planned: Number(plannedHours.toFixed(1)),
-        actual: Number(actualHours.toFixed(1)),
-        adherence: Math.round(adherence)
-      });
-    }
-
-    return result;
+  async calculatePlanVsActualData(userId: string, days: number = 7): Promise<PlanVsActualDatum[]> {
+    const [timeBlocks, sessions] = await Promise.all([
+      this.getAll<TimeBlock>('timeBlocks'),
+      this.getAll<Session>('sessions'),
+    ]);
+    return buildPlanVsActualData(userId, days, timeBlocks, sessions);
   }
 
-  async calculateTimeAllocation(userId: string, days: number = 7): Promise<Array<{
-    domain: string;
-    hours: number;
-    color: string;
-  }>> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    // Get all domains
-    const allDomains = await this.getAll<Domain>('domains');
-    const userDomains = allDomains.filter(d => d.userId === userId);
-
-    // 🔧 FIX: Use TimeBlocks instead of Sessions (Sessions are rarely used)
-    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-    const periodTimeBlocks = allTimeBlocks.filter(block =>
-      block.userId === userId &&
-      !block.deleted &&
-      block.status === 'completed' && // Only count completed blocks (actual time)
-      new Date(block.startTime) >= startDate &&
-      new Date(block.startTime) <= endDate
-    );
-
-    // 📊 DEBUG: Log time allocation context
-    if (process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_DEBUG_ANALYTICS === '1') {
-      console.log('📊 calculateTimeAllocation:', {
-        userId,
-        days,
-        totalTimeBlocks: allTimeBlocks.length,
-        userTimeBlocks: allTimeBlocks.filter(b => b.userId === userId).length,
-        completedTimeBlocks: periodTimeBlocks.length,
-        userDomains: userDomains.length,
-        sampleBlocks: periodTimeBlocks.slice(0, 3).map(b => ({
-          id: b.id,
-          domainId: b.domainId,
-          title: b.title,
-          startTime: b.startTime,
-          endTime: b.endTime
-        }))
-      });
-    }
-
-    // Default colors for domains
-    const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
-
-    const domainHours = new Map<string, number>();
-
-    // Calculate hours per domain from completed time blocks
-    for (const block of periodTimeBlocks) {
-      const domain = userDomains.find(d => d.id === block.domainId);
-      const domainName = domain?.name || 'Uncategorized';
-
-      // Calculate actual duration in hours
-      const startTime = new Date(block.actualStartTime || block.startTime);
-      const endTime = new Date(block.actualEndTime || block.endTime);
-      const durationMs = endTime.getTime() - startTime.getTime();
-      const hours = durationMs / (1000 * 60 * 60);
-
-      domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
-    }
-
-    // Convert to array format
-    const result = Array.from(domainHours.entries()).map(([domain, hours], index) => ({
-      domain,
-      hours: Number(hours.toFixed(1)),
-      color: userDomains.find(d => d.name === domain)?.color || defaultColors[index % defaultColors.length]
-    }));
-
-    // Sort by hours descending
-    return result.sort((a, b) => b.hours - a.hours);
+  async calculateTimeAllocation(userId: string, days: number = 7): Promise<TimeAllocationDatum[]> {
+    const [domains, timeBlocks, sessions] = await Promise.all([
+      this.getAll<Domain>('domains'),
+      this.getAll<TimeBlock>('timeBlocks'),
+      this.getAll<Session>('sessions'),
+    ]);
+    return buildTimeAllocationData(userId, days, domains, timeBlocks, sessions);
   }
 
-  async calculateFocusTrend(userId: string, days: number = 7): Promise<Array<{
-    date: string;
-    focusMinutes: number;
-    mood: number;
-    energy: number;
-  }>> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const result = [];
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      // Get all sessions for this day
-      const allSessions = await this.getAll<Session>('sessions');
-      const daySessions = allSessions.filter(session => 
-        session.userId === userId &&
-        new Date(session.startTime) >= dayStart &&
-        new Date(session.startTime) <= dayEnd &&
-        session.status === 'completed'
-      );
-
-      // Calculate focus minutes
-      const focusMinutes = daySessions
-        .filter(session => hasSessionTag(session, 'focus'))
-        .reduce((total, session) => total + (session.duration || 0), 0) / 60;
-
-      // Calculate average mood and energy
-      const moodSessions = daySessions.filter(s => s.mood !== undefined);
-      const energySessions = daySessions.filter(s => s.energy !== undefined);
-
-      const avgMood = moodSessions.length > 0 
-        ? moodSessions.reduce((sum, s) => sum + (s.mood || 0), 0) / moodSessions.length 
-        : 5;
-
-      const avgEnergy = energySessions.length > 0
-        ? energySessions.reduce((sum, s) => sum + (s.energy || 0), 0) / energySessions.length
-        : 5;
-
-      result.push({
-        date: d.toISOString().split('T')[0],
-        focusMinutes: Math.round(focusMinutes),
-        mood: Math.round(avgMood * 10) / 10,
-        energy: Math.round(avgEnergy * 10) / 10
-      });
-    }
-
-    return result;
+  async calculateFocusTrend(userId: string, days: number = 7): Promise<FocusTrendDatum[]> {
+    const sessions = await this.getAll<Session>('sessions');
+    return buildFocusTrendData(userId, days, sessions);
   }
 
-  async calculateCorrelations(userId: string, days: number = 30): Promise<Array<{
-    factor1: string;
-    factor2: string;
-    correlation: number;
-    significance: string;
-  }>> {
+  async calculateCorrelations(userId: string, days: number = 30): Promise<CorrelationDatum[]> {
     const focusTrend = await this.calculateFocusTrend(userId, days);
-    
-    if (focusTrend.length < 3) {
-      return []; // Need at least 3 data points for correlation
-    }
-
-    const correlations = [];
-
-    // Calculate correlation between mood and focus
-    const moodFocusCorr = this.calculatePearsonCorrelation(
-      focusTrend.map(d => d.mood),
-      focusTrend.map(d => d.focusMinutes)
-    );
-
-    // Calculate correlation between energy and focus
-    const energyFocusCorr = this.calculatePearsonCorrelation(
-      focusTrend.map(d => d.energy),
-      focusTrend.map(d => d.focusMinutes)
-    );
-
-    // Calculate correlation between mood and energy
-    const moodEnergyCorr = this.calculatePearsonCorrelation(
-      focusTrend.map(d => d.mood),
-      focusTrend.map(d => d.energy)
-    );
-
-    if (!isNaN(moodFocusCorr)) {
-      correlations.push({
-        factor1: 'Mood',
-        factor2: 'Focus',
-        correlation: Math.round(moodFocusCorr * 100) / 100,
-        significance: this.getSignificance(Math.abs(moodFocusCorr))
-      });
-    }
-
-    if (!isNaN(energyFocusCorr)) {
-      correlations.push({
-        factor1: 'Energy',
-        factor2: 'Focus',
-        correlation: Math.round(energyFocusCorr * 100) / 100,
-        significance: this.getSignificance(Math.abs(energyFocusCorr))
-      });
-    }
-
-    if (!isNaN(moodEnergyCorr)) {
-      correlations.push({
-        factor1: 'Mood',
-        factor2: 'Energy',
-        correlation: Math.round(moodEnergyCorr * 100) / 100,
-        significance: this.getSignificance(Math.abs(moodEnergyCorr))
-      });
-    }
-
-    return correlations;
-  }
-
-  private calculatePearsonCorrelation(x: number[], y: number[]): number {
-    if (x.length !== y.length || x.length === 0) return NaN;
-
-    const n = x.length;
-    const sumX = x.reduce((a, b) => a + b, 0);
-    const sumY = y.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
-    const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
-    const sumYY = y.reduce((sum, yi) => sum + yi * yi, 0);
-
-    const numerator = n * sumXY - sumX * sumY;
-    const denominator = Math.sqrt((n * sumXX - sumX * sumX) * (n * sumYY - sumY * sumY));
-
-    return denominator === 0 ? NaN : numerator / denominator;
-  }
-
-  private getSignificance(correlation: number): string {
-    if (correlation >= 0.7) return 'High';
-    if (correlation >= 0.5) return 'Medium';
-    if (correlation >= 0.3) return 'Low';
-    return 'None';
+    return buildExploratoryCorrelations(focusTrend);
   }
 
   async generateWeeklyReview(userId: string): Promise<{
@@ -857,10 +887,18 @@ class IndexedDBAdapter implements DatabaseAdapter {
     const nextWeekGoals = [];
 
     // Analyze adherence
-    const avgAdherence = planVsActual.reduce((sum, day) => sum + day.adherence, 0) / planVsActual.length;
-    if (avgAdherence >= 90) {
+    const completeAdherence = planVsActual
+      .filter((day) => day.actualAvailability === 'complete' && day.adherence !== null)
+      .map((day) => day.adherence as number);
+    const hasPartialActual = planVsActual.some((day) => day.actualAvailability === 'partial');
+    const avgAdherence = completeAdherence.length > 0
+      ? completeAdherence.reduce((sum, value) => sum + value, 0) / completeAdherence.length
+      : null;
+    if (hasPartialActual) {
+      insights.push('Execution evidence is incomplete; adherence claims exclude partial days');
+    } else if (avgAdherence !== null && avgAdherence >= 90) {
       highlights.push('Excellent planning adherence this week');
-    } else if (avgAdherence < 70) {
+    } else if (avgAdherence !== null && avgAdherence < 70) {
       challenges.push('Low planning adherence - consider more realistic time blocks');
       nextWeekGoals.push('Improve time estimation accuracy');
     }
@@ -1045,99 +1083,16 @@ class IndexedDBAdapter implements DatabaseAdapter {
 
   // ========== ACTIVITY RANKINGS ==========
 
-  async calculateActivityRankings(userId: string, days: number = 7): Promise<Array<{
-    activityName: string;
-    plannedHours: number;
-    actualHours: number;
-    discrepancy: number;
-    adherenceRate: number;
-    domain: string;
-    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
-  }>> {
+  async calculateActivityRankings(
+    userId: string,
+    days: number = 7,
+  ): Promise<ActivityRankingDatum[]> {
     try {
-      const endDate = new Date();
-      const startDate = new Date(endDate.getTime() - days * 24 * 60 * 60 * 1000);
-      
-      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-      const userTimeBlocks = allTimeBlocks.filter(block => 
-        block.userId === userId &&
-        new Date(block.startTime) >= startDate && 
-        new Date(block.startTime) <= endDate
-      );
-      
-      // Group by task/project name
-      const activityMap = new Map<string, {
-        plannedMinutes: number;
-        actualMinutes: number;
-        domain: string;
-        blocks: TimeBlock[];
-      }>();
-      
-      for (const block of userTimeBlocks) {
-        const activityName = block.title || block.projectId || 'Unnamed Activity';
-        const domain = block.type || 'General';
-        
-        const plannedMinutes = (new Date(block.endTime).getTime() - new Date(block.startTime).getTime()) / (1000 * 60);
-        
-        let actualMinutes = 0;
-        if (block.status === 'completed') {
-          // CLAUDE.md compliant calculation
-          if (block.actualStartTime && block.actualEndTime) {
-            actualMinutes = (new Date(block.actualEndTime).getTime() - new Date(block.actualStartTime).getTime()) / (1000 * 60);
-          } else {
-            // Fallback to planned duration for completed blocks (CLAUDE.md rule)
-            actualMinutes = (new Date(block.endTime).getTime() - new Date(block.startTime).getTime()) / (1000 * 60);
-          }
-        }
-        
-        if (!activityMap.has(activityName)) {
-          activityMap.set(activityName, {
-            plannedMinutes: 0,
-            actualMinutes: 0,
-            domain,
-            blocks: []
-          });
-        }
-        
-        const activity = activityMap.get(activityName)!;
-        activity.plannedMinutes += plannedMinutes;
-        activity.actualMinutes += actualMinutes;
-        activity.blocks.push(block);
-      }
-      
-      // Convert to rankings
-      const activities = Array.from(activityMap.entries()).map(([name, data]) => {
-        const plannedHours = data.plannedMinutes / 60;
-        const actualHours = data.actualMinutes / 60;
-        const discrepancy = actualHours - plannedHours;
-        const adherenceRate = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
-        
-        let rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
-        if (actualHours >= 2) {
-          rank = 'most_done';
-        } else if (actualHours < 0.5 && plannedHours > 1) {
-          rank = 'least_done';
-        } else if (discrepancy > 1) {
-          rank = 'overplanned';
-        } else if (discrepancy < -1) {
-          rank = 'underplanned';
-        } else {
-          rank = actualHours > plannedHours ? 'most_done' : 'least_done';
-        }
-        
-        return {
-          activityName: name,
-          plannedHours: Number(plannedHours.toFixed(1)),
-          actualHours: Number(actualHours.toFixed(1)),
-          discrepancy: Number(discrepancy.toFixed(1)),
-          adherenceRate: Math.round(adherenceRate),
-          domain: data.domain,
-          rank
-        };
-      });
-      
-      // Sort by actual hours descending
-      return activities.sort((a, b) => b.actualHours - a.actualHours);
+      const [timeBlocks, sessions] = await Promise.all([
+        this.getAll<TimeBlock>('timeBlocks'),
+        this.getAll<Session>('sessions'),
+      ]);
+      return buildActivityRankings(userId, days, timeBlocks, sessions);
     } catch (error) {
       console.error('Error calculating activity rankings:', error);
       return [];
@@ -1585,7 +1540,8 @@ class LifeTrackerDB {
 
   // Specific methods for common queries
   async getActiveSessions(userId: string): Promise<Session[]> {
-    return this.getByIndex<Session>('sessions', 'status', 'active');
+    const sessions = await this.getByIndex<Session>('sessions', 'userId', userId);
+    return filterOwnerActiveSessions(userId, sessions);
   }
 
   async getTodayTimeBlocks(userId: string): Promise<TimeBlock[]> {
@@ -1658,8 +1614,11 @@ class LifeTrackerDB {
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const sessions = await this.getByIndex<Session>('sessions', 'userId', userId);
-    const todaySessions = sessions.filter(session => 
-      session.startTime >= today && session.startTime < tomorrow && session.status === 'completed'
+    const todaySessions = sessions.filter(session =>
+      session.userId === userId
+      && session.startTime >= today
+      && session.startTime < tomorrow
+      && session.status === 'completed'
     );
 
     const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
@@ -1669,26 +1628,24 @@ class LifeTrackerDB {
       new Date(block.startTime) < tomorrow
     );
     
+    const dayWindow = { start: today.getTime(), end: tomorrow.getTime() };
     const focusMinutes = todaySessions
       .filter(session => hasSessionTag(session, 'focus'))
-      .reduce((total, session) => total + (session.duration || 0), 0) / 60;
-
-    const plannedMinutes = timeBlocks.reduce((total, block) => 
-      total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60), 0
-    );
-    // Follow CLAUDE.md rules - count ALL completed blocks  
-    const actualMinutes = timeBlocks
-      .filter(block => block.status === 'completed')
-      .reduce((total, block) => {
-        // Use actualStartTime/actualEndTime if available, otherwise fallback to planned times
-        if (block.actualStartTime && block.actualEndTime) {
-          return total + (block.actualEndTime.getTime() - block.actualStartTime.getTime()) / (1000 * 60);
-        } else {
-          // Fallback to planned duration for completed blocks (CLAUDE.md rule)
-          return total + (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60);
-        }
+      .reduce((total, session) => {
+        const evidence = parseCompletedSessionEvidence(session);
+        return total + (evidence ? proportionalSessionMinutes(evidence, dayWindow) : 0);
       }, 0);
-    const planVsActual = plannedMinutes > 0 ? (actualMinutes / plannedMinutes) * 100 : 0;
+
+    const execution = aggregateExecutionWindow({
+      ownerUid: userId,
+      start: today,
+      end: tomorrow,
+      timeBlocks,
+      sessions,
+    });
+    const planVsActual = execution.plannedMinutes > 0
+      ? execution.actualMinutes / execution.plannedMinutes * 100
+      : 0;
 
     const habits = await this.getActiveHabits(userId);
     const activeStreaks = habits.filter(habit => habit.streakCount > 0).length;
@@ -1702,6 +1659,8 @@ class LifeTrackerDB {
     return {
       focusMinutes: Math.round(focusMinutes),
       planVsActual: Math.round(planVsActual),
+      actualAvailability: execution.availability,
+      missingActualCount: execution.blocksMissingActualCount,
       activeStreaks,
       keyResultsProgress: Math.round(keyResultsProgress),
       mood: todaySessions.find(s => s.mood !== undefined)?.mood,
@@ -1709,260 +1668,31 @@ class LifeTrackerDB {
     };
   }
 
-  async calculatePlanVsActualData(userId: string, days: number = 7): Promise<Array<{
-    date: string;
-    planned: number;
-    actual: number;
-    adherence: number;
-  }>> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const result = [];
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-      const dayTimeBlocks = allTimeBlocks.filter(block => 
-        block.userId === userId &&
-        new Date(block.startTime) >= dayStart && 
-        new Date(block.startTime) <= dayEnd
-      );
-
-      const plannedMinutes = dayTimeBlocks.reduce((total, block) => {
-        const startTime = new Date(block.startTime);
-        const endTime = new Date(block.endTime);
-        return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-      }, 0);
-
-      // Use the unified calculation from above (no duplication needed)
-      
-      const allSessions = await this.getAll<Session>('sessions');
-      const daySessions = allSessions.filter(session => 
-        session.userId === userId &&
-        new Date(session.startTime) >= dayStart &&
-        new Date(session.startTime) <= dayEnd &&
-        session.status === 'completed' &&
-        session.duration
-      );
-      
-      const sessionMinutes = daySessions.reduce((total, session) => {
-        return total + (session.duration || 0) / 60;
-      }, 0);
-      
-      // Calculate actual minutes from completed time blocks
-      let actualMinutes = dayTimeBlocks
-        .filter(block => block.status === 'completed')
-        .reduce((total, block) => {
-          const startTime = new Date(block.actualStartTime || block.startTime);
-          const endTime = new Date(block.actualEndTime || block.endTime);
-          return total + (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-        }, 0);
-      
-      if (sessionMinutes > actualMinutes) {
-        actualMinutes = sessionMinutes;
-      }
-
-      const plannedHours = plannedMinutes / 60;
-      const actualHours = actualMinutes / 60;
-      const adherence = plannedHours > 0 ? (actualHours / plannedHours) * 100 : 0;
-
-      result.push({
-        date: d.toISOString().split('T')[0],
-        planned: Number(plannedHours.toFixed(1)),
-        actual: Number(actualHours.toFixed(1)),
-        adherence: Math.round(adherence)
-      });
-    }
-
-    return result;
+  async calculatePlanVsActualData(userId: string, days: number = 7): Promise<PlanVsActualDatum[]> {
+    const [timeBlocks, sessions] = await Promise.all([
+      this.getAll<TimeBlock>('timeBlocks'),
+      this.getAll<Session>('sessions'),
+    ]);
+    return buildPlanVsActualData(userId, days, timeBlocks, sessions);
   }
 
-  async calculateTimeAllocation(userId: string, days: number = 7): Promise<Array<{
-    domain: string;
-    hours: number;
-    color: string;
-  }>> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const allDomains = await this.getAll<Domain>('domains');
-    const userDomains = allDomains.filter(d => d.userId === userId);
-
-    // 🔧 FIX: Use TimeBlocks instead of Sessions (Sessions are rarely used)
-    const allTimeBlocks = await this.getAll<TimeBlock>('timeBlocks');
-    const periodTimeBlocks = allTimeBlocks.filter(block =>
-      block.userId === userId &&
-      !block.deleted &&
-      block.status === 'completed' && // Only count completed blocks (actual time)
-      new Date(block.startTime) >= startDate &&
-      new Date(block.startTime) <= endDate
-    );
-
-    const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316'];
-
-    const domainHours = new Map<string, number>();
-
-    for (const block of periodTimeBlocks) {
-      const domain = userDomains.find(d => d.id === block.domainId);
-      const domainName = domain?.name || 'Uncategorized';
-
-      // Calculate actual duration in hours
-      const startTime = new Date(block.actualStartTime || block.startTime);
-      const endTime = new Date(block.actualEndTime || block.endTime);
-      const durationMs = endTime.getTime() - startTime.getTime();
-      const hours = durationMs / (1000 * 60 * 60);
-
-      domainHours.set(domainName, (domainHours.get(domainName) || 0) + hours);
-    }
-
-    const result = Array.from(domainHours.entries()).map(([domain, hours], index) => ({
-      domain,
-      hours: Number(hours.toFixed(1)),
-      color: userDomains.find(d => d.name === domain)?.color || defaultColors[index % defaultColors.length]
-    }));
-
-    return result.sort((a, b) => b.hours - a.hours);
+  async calculateTimeAllocation(userId: string, days: number = 7): Promise<TimeAllocationDatum[]> {
+    const [domains, timeBlocks, sessions] = await Promise.all([
+      this.getAll<Domain>('domains'),
+      this.getAll<TimeBlock>('timeBlocks'),
+      this.getAll<Session>('sessions'),
+    ]);
+    return buildTimeAllocationData(userId, days, domains, timeBlocks, sessions);
   }
 
-  async calculateFocusTrend(userId: string, days: number = 7): Promise<Array<{
-    date: string;
-    focusMinutes: number;
-    mood: number;
-    energy: number;
-  }>> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const result = [];
-
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const dayStart = new Date(d);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(d);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const allSessions = await this.getAll<Session>('sessions');
-      const daySessions = allSessions.filter(session => 
-        session.userId === userId &&
-        new Date(session.startTime) >= dayStart &&
-        new Date(session.startTime) <= dayEnd &&
-        session.status === 'completed'
-      );
-
-      const focusMinutes = daySessions
-        .filter(session => hasSessionTag(session, 'focus'))
-        .reduce((total, session) => total + (session.duration || 0), 0) / 60;
-
-      const moodSessions = daySessions.filter(s => s.mood !== undefined);
-      const energySessions = daySessions.filter(s => s.energy !== undefined);
-
-      const avgMood = moodSessions.length > 0 
-        ? moodSessions.reduce((sum, s) => sum + (s.mood || 0), 0) / moodSessions.length 
-        : 5;
-
-      const avgEnergy = energySessions.length > 0
-        ? energySessions.reduce((sum, s) => sum + (s.energy || 0), 0) / energySessions.length
-        : 5;
-
-      result.push({
-        date: d.toISOString().split('T')[0],
-        focusMinutes: Math.round(focusMinutes),
-        mood: Math.round(avgMood * 10) / 10,
-        energy: Math.round(avgEnergy * 10) / 10
-      });
-    }
-
-    return result;
+  async calculateFocusTrend(userId: string, days: number = 7): Promise<FocusTrendDatum[]> {
+    const sessions = await this.getAll<Session>('sessions');
+    return buildFocusTrendData(userId, days, sessions);
   }
 
-  async calculateCorrelations(userId: string, days: number = 30): Promise<Array<{
-    factor1: string;
-    factor2: string;
-    correlation: number;
-    significance: string;
-  }>> {
+  async calculateCorrelations(userId: string, days: number = 30): Promise<CorrelationDatum[]> {
     const focusTrend = await this.calculateFocusTrend(userId, days);
-    
-    if (focusTrend.length < 3) {
-      return [];
-    }
-
-    const correlations = [];
-
-    const moodFocusCorr = this.calculatePearsonCorrelation(
-      focusTrend.map(d => d.mood),
-      focusTrend.map(d => d.focusMinutes)
-    );
-
-    const energyFocusCorr = this.calculatePearsonCorrelation(
-      focusTrend.map(d => d.energy),
-      focusTrend.map(d => d.focusMinutes)
-    );
-
-    const moodEnergyCorr = this.calculatePearsonCorrelation(
-      focusTrend.map(d => d.mood),
-      focusTrend.map(d => d.energy)
-    );
-
-    if (!isNaN(moodFocusCorr)) {
-      correlations.push({
-        factor1: 'Mood',
-        factor2: 'Focus',
-        correlation: Math.round(moodFocusCorr * 100) / 100,
-        significance: this.getSignificance(Math.abs(moodFocusCorr))
-      });
-    }
-
-    if (!isNaN(energyFocusCorr)) {
-      correlations.push({
-        factor1: 'Energy',
-        factor2: 'Focus',
-        correlation: Math.round(energyFocusCorr * 100) / 100,
-        significance: this.getSignificance(Math.abs(energyFocusCorr))
-      });
-    }
-
-    if (!isNaN(moodEnergyCorr)) {
-      correlations.push({
-        factor1: 'Mood',
-        factor2: 'Energy',
-        correlation: Math.round(moodEnergyCorr * 100) / 100,
-        significance: this.getSignificance(Math.abs(moodEnergyCorr))
-      });
-    }
-
-    return correlations;
-  }
-
-  private calculatePearsonCorrelation(x: number[], y: number[]): number {
-    if (x.length !== y.length || x.length === 0) return NaN;
-
-    const n = x.length;
-    const sumX = x.reduce((a, b) => a + b, 0);
-    const sumY = y.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
-    const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
-    const sumYY = y.reduce((sum, yi) => sum + yi * yi, 0);
-
-    const numerator = n * sumXY - sumX * sumY;
-    const denominator = Math.sqrt((n * sumXX - sumX * sumX) * (n * sumYY - sumY * sumY));
-
-    return denominator === 0 ? NaN : numerator / denominator;
-  }
-
-  private getSignificance(correlation: number): string {
-    if (correlation >= 0.7) return 'High';
-    if (correlation >= 0.5) return 'Medium';
-    if (correlation >= 0.3) return 'Low';
-    return 'None';
+    return buildExploratoryCorrelations(focusTrend);
   }
 
   async generateWeeklyReview(userId: string): Promise<{
@@ -1980,10 +1710,18 @@ class LifeTrackerDB {
     const insights = [];
     const nextWeekGoals = [];
 
-    const avgAdherence = planVsActual.reduce((sum, day) => sum + day.adherence, 0) / planVsActual.length;
-    if (avgAdherence >= 90) {
+    const completeAdherence = planVsActual
+      .filter((day) => day.actualAvailability === 'complete' && day.adherence !== null)
+      .map((day) => day.adherence as number);
+    const hasPartialActual = planVsActual.some((day) => day.actualAvailability === 'partial');
+    const avgAdherence = completeAdherence.length > 0
+      ? completeAdherence.reduce((sum, value) => sum + value, 0) / completeAdherence.length
+      : null;
+    if (hasPartialActual) {
+      insights.push('Execution evidence is incomplete; adherence claims exclude partial days');
+    } else if (avgAdherence !== null && avgAdherence >= 90) {
       highlights.push('Excellent planning adherence this week');
-    } else if (avgAdherence < 70) {
+    } else if (avgAdherence !== null && avgAdherence < 70) {
       challenges.push('Low planning adherence - consider more realistic time blocks');
       nextWeekGoals.push('Improve time estimation accuracy');
     }

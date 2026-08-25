@@ -76,18 +76,26 @@ function makeTask(over: Partial<Task> = {}): Task {
 function makeBlock(over: Partial<TimeBlock> = {}): TimeBlock {
   const startTime = over.startTime ?? at(13, 10);
   const endTime = over.endTime ?? at(13, 12);
+  const status = over.status ?? 'planned';
+  const defaultActual =
+    (status === 'completed' || status === 'overrun')
+    && !Object.prototype.hasOwnProperty.call(over, 'actualStartTime')
+    && !Object.prototype.hasOwnProperty.call(over, 'actualEndTime')
+      ? { actualStartTime: startTime, actualEndTime: endTime }
+      : {};
   return {
     id: uid('block'),
     userId: 'u1',
     domainId: 'd1',
     title: 'Block',
     type: 'work',
-    status: 'planned',
+    status,
     startTime,
     endTime,
     // Scheduled in advance by default (createdAt before startTime).
     createdAt: over.createdAt ?? new Date(startTime.getTime() - 24 * 3600 * 1000),
     updatedAt: startTime,
+    ...defaultActual,
     ...over,
   } as TimeBlock;
 }
@@ -182,6 +190,31 @@ describe('empty and degenerate inputs', () => {
     expect(overview.summary.executionRatio).toBeNull();
     assertFiniteDeep(overview);
   });
+
+  it('defense-in-depth owner scope excludes every foreign entity type', () => {
+    const ownBlock = makeBlock({
+      status: 'completed',
+      startTime: at(13, 9),
+      endTime: at(13, 10),
+    });
+    const foreignBlock = makeBlock({
+      userId: 'u2',
+      status: 'completed',
+      startTime: at(13, 9),
+      endTime: at(13, 13),
+    });
+    const overview = compute({
+      ownerUid: 'u1',
+      timeBlocks: [ownBlock, foreignBlock],
+      sessions: [makeSession({ userId: 'u2', duration: 7_200 })],
+      goals: [makeGoal({ userId: 'u2', title: 'Foreign goal' })],
+      projects: [makeProject({ userId: 'u2' })],
+      tasks: [makeTask({ userId: 'u2' })],
+    });
+    expect(overview.summary.plannedMinutes).toBe(60);
+    expect(overview.summary.actualMinutes).toBe(60);
+    expect(overview.goals.some((goal) => goal.goalName === 'Foreign goal')).toBe(false);
+  });
 });
 
 describe('planned time', () => {
@@ -258,15 +291,24 @@ describe('actual time and data coverage', () => {
     expect(overview.dataQuality.coverageRate).toBe(1);
   });
 
-  it('falls back to the planned window for completed blocks without actuals', () => {
+  it('never substitutes the planned window for a completed block without actual evidence', () => {
     const overview = compute({
       timeBlocks: [
-        makeBlock({ status: 'completed', startTime: at(13, 10), endTime: at(13, 12) }),
+        makeBlock({
+          status: 'completed',
+          startTime: at(13, 10),
+          endTime: at(13, 12),
+          actualStartTime: undefined,
+          actualEndTime: undefined,
+        }),
       ],
     });
-    expect(overview.summary.actualMinutes).toBe(120);
-    expect(overview.dataQuality.assumedMinutes).toBe(120);
+    expect(overview.summary.actualMinutes).toBe(0);
+    expect(overview.dataQuality.measuredMinutes).toBe(0);
+    expect(overview.dataQuality.actualSourceCount).toBe(0);
+    expect(overview.dataQuality.blocksMissingActualCount).toBe(1);
     expect(overview.dataQuality.coverageRate).toBe(0);
+    expect(overview.activity[0]?.timeSource).toBe('missing');
   });
 
   it("counts 'overrun' blocks as executed and reports them", () => {
@@ -286,7 +328,7 @@ describe('actual time and data coverage', () => {
     expect(overview.dataQuality.overrunBlockCount).toBe(1);
   });
 
-  it('does not double count a session linked to its completed block', () => {
+  it('uses a linked Session as primary and does not double count the block actual interval', () => {
     const block = makeBlock({
       status: 'completed',
       startTime: at(13, 10),
@@ -300,12 +342,14 @@ describe('actual time and data coverage', () => {
         makeSession({
           timeBlockId: block.id,
           startTime: at(13, 10),
-          endTime: at(13, 12),
-          duration: 7200,
+          endTime: at(13, 11),
+          duration: 3600,
         }),
       ],
     });
-    expect(overview.summary.actualMinutes).toBe(120); // not 240
+    expect(overview.summary.actualMinutes).toBe(60); // Session, not the duplicated 120m block interval
+    expect(overview.dataQuality.actualSourceCount).toBe(1);
+    expect(overview.dataQuality.blocksMissingActualCount).toBe(0);
   });
 
   it('counts orphan completed sessions as unplanned measured actual', () => {
@@ -379,7 +423,7 @@ describe('clipping across midnight and period borders', () => {
     expect(overview.summary.actualMinutes).toBe(60);
   });
 
-  it('caps corrupt durations at 24h and flags them', () => {
+  it('rejects corrupt actual durations over 24h and flags missing evidence', () => {
     const overview = compute({
       timeBlocks: [
         makeBlock({
@@ -389,8 +433,20 @@ describe('clipping across midnight and period borders', () => {
         }),
       ],
     });
-    expect(overview.summary.actualMinutes).toBe(24 * 60);
+    expect(overview.summary.actualMinutes).toBe(0);
+    expect(overview.dataQuality.blocksMissingActualCount).toBe(1);
     expect(overview.dataQuality.anomalousDurationCount).toBeGreaterThan(0);
+  });
+
+  it('ignores an irrelevant old corrupt Session when assessing selected-period coverage', () => {
+    const overview = compute({
+      sessions: [makeSession({
+        startTime: new Date(2020, 0, 1, 8),
+        endTime: new Date(2020, 0, 1, 7),
+      })],
+    });
+    expect(overview.dataQuality.anomalousDurationCount).toBe(0);
+    expect(overview.dataQuality.actualAvailability).toBe('complete');
   });
 });
 

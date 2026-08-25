@@ -282,14 +282,15 @@ describe('PerformanceDashboard', () => {
     getByIndexMock.mockRejectedValueOnce(new Error('firestore offline'));
     render(<PerformanceDashboard />);
 
-    await waitFor(() => expect(screen.getByTestId('performance-dashboard')).toBeInTheDocument());
-    expect(screen.getByText(/sessions could not be loaded/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(screen.getByText(/actual execution is unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('performance-dashboard')).toBeNull();
 
     getByIndexMock.mockResolvedValueOnce([makeSession({})]);
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));
 
     await waitFor(() =>
-      expect(screen.queryByText(/sessions could not be loaded/i)).toBeNull()
+      expect(screen.getByTestId('performance-dashboard')).toBeInTheDocument()
     );
     expect(within(screen.getByTestId('kpi-actual')).getByText('2h 30m')).toBeInTheDocument();
   });

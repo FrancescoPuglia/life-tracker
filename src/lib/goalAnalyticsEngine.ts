@@ -4,6 +4,86 @@ import {
   GoalRecommendation, StrategicAllocation 
 } from '@/types';
 import { db } from './database';
+import { parseCompletedSessionEvidence, validExecutionInterval } from './executionEvidence';
+
+interface GoalExecutionSource {
+  readonly startedAt: Date;
+  readonly minutes: number;
+}
+
+function positiveShareMap(value: unknown): Array<readonly [string, number]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.entries(value)
+    .filter((entry): entry is [string, number] => (
+      typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0
+    ));
+}
+
+function directGoalShare(record: Session | TimeBlock, goalId: string): number | null {
+  const allocation = 'goalContribution' in record
+    ? record.goalContribution
+    : 'goalAllocation' in record
+      ? record.goalAllocation
+      : undefined;
+  const shares = positiveShareMap(allocation);
+  if (shares.length > 0) {
+    const total = shares.reduce((sum, [, value]) => sum + value, 0);
+    return (shares.find(([id]) => id === goalId)?.[1] ?? 0) / total;
+  }
+  const goalIds = Array.isArray(record.goalIds)
+    ? record.goalIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    : [];
+  if (goalIds.length > 0) return goalIds.includes(goalId) ? 1 / goalIds.length : 0;
+  if ('goalId' in record && record.goalId) return record.goalId === goalId ? 1 : 0;
+  return null;
+}
+
+function goalShare(
+  record: Session | TimeBlock,
+  goalId: string,
+  linkedBlock?: TimeBlock,
+): number {
+  const direct = directGoalShare(record, goalId);
+  if (direct !== null) return direct;
+  return linkedBlock ? directGoalShare(linkedBlock, goalId) ?? 0 : 0;
+}
+
+/** Session-primary, explicit-block-only fallback for legacy Goal Analytics. */
+export function collectGoalExecutionEvidence(
+  goalId: string,
+  sessions: readonly Session[],
+  timeBlocks: readonly TimeBlock[],
+): GoalExecutionSource[] {
+  const blockById = new Map(timeBlocks.map((block) => [block.id, block]));
+  const blocksWithValidSessions = new Set<string>();
+  const result: GoalExecutionSource[] = [];
+  for (const session of sessions) {
+    const evidence = parseCompletedSessionEvidence(session);
+    if (!evidence) continue;
+    const linkedBlock = evidence.timeBlockId ? blockById.get(evidence.timeBlockId) : undefined;
+    if (evidence.timeBlockId) blocksWithValidSessions.add(evidence.timeBlockId);
+    const share = goalShare(session, goalId, linkedBlock);
+    if (share > 0 && evidence.netMinutes > 0) {
+      result.push({ startedAt: new Date(evidence.interval.start), minutes: evidence.netMinutes * share });
+    }
+  }
+  for (const block of timeBlocks) {
+    if (
+      block.deleted
+      || blocksWithValidSessions.has(block.id)
+      || (block.status !== 'completed' && block.status !== 'overrun')
+    ) continue;
+    const interval = validExecutionInterval(block.actualStartTime, block.actualEndTime);
+    const share = goalShare(block, goalId);
+    if (interval && share > 0) {
+      result.push({
+        startedAt: new Date(interval.start),
+        minutes: (interval.end - interval.start) / 60_000 * share,
+      });
+    }
+  }
+  return result;
+}
 
 /**
  * Goal-centric analytics engine.
@@ -55,20 +135,20 @@ export class GoalAnalyticsEngine {
     const timeBlocks = await this.getGoalTimeBlocks(goalId, startDate, endDate);
 
     // Calculate daily trend
-    const dailyTrend = this.calculateDailyTimeInvestment(sessions, timeBlocks, days);
+    const dailyTrend = this.calculateDailyTimeInvestment(goalId, sessions, timeBlocks, days);
     
     // Calculate weekly trend
-    const weeklyTrend = this.calculateWeeklyTimeInvestment(sessions, timeBlocks, days);
+    const weeklyTrend = this.calculateWeeklyTimeInvestment(goalId, sessions, timeBlocks, days);
     
     // Calculate monthly comparison
     const monthlyComparison = await this.calculateMonthlyComparison(goalId);
 
-    const totalHours = this.calculateTotalHoursInvested(sessions, timeBlocks);
+    const totalHours = this.calculateTotalHoursInvested(goalId, sessions, timeBlocks);
     const dailyAverage = totalHours / days;
 
     const goal = await db.read<Goal>('goals', goalId);
     const weeklyTarget = goal?.timeAllocationTarget || 0;
-    const weeklyActual = this.calculateWeeklyActual(sessions, timeBlocks);
+    const weeklyActual = this.calculateWeeklyActual(goalId, sessions, timeBlocks);
     const adherencePercentage = weeklyTarget > 0 ? (weeklyActual / weeklyTarget) * 100 : 0;
 
     return {
@@ -355,45 +435,47 @@ export class GoalAnalyticsEngine {
   // ===== HELPER METHODS =====
 
   private async getGoalSessions(goalId: string, startDate: Date, endDate: Date): Promise<Session[]> {
-    const allSessions = await db.getAll<Session>('sessions');
-    return allSessions.filter(session => 
-      session.goalIds?.includes(goalId) &&
-      session.startTime >= startDate &&
-      session.startTime <= endDate &&
-      session.status === 'completed'
-    );
+    const goal = await db.read<Goal>('goals', goalId);
+    if (!goal) return [];
+    const [allSessions, allTimeBlocks] = await Promise.all([
+      db.getAll<Session>('sessions'),
+      db.getAll<TimeBlock>('timeBlocks'),
+    ]);
+    const ownerBlocks = allTimeBlocks.filter((block) => block.userId === goal.userId);
+    const blockById = new Map(ownerBlocks.map((block) => [block.id, block]));
+    return allSessions.filter(session => {
+      if (
+        session.userId !== goal.userId
+        || session.startTime < startDate
+        || session.startTime >= endDate
+        || session.status !== 'completed'
+      ) return false;
+      const linked = session.timeBlockId ? blockById.get(session.timeBlockId) : undefined;
+      return goalShare(session, goalId, linked) > 0
+        || linked !== undefined && (directGoalShare(linked, goalId) ?? 0) > 0;
+    });
   }
 
   private async getGoalTimeBlocks(goalId: string, startDate: Date, endDate: Date): Promise<TimeBlock[]> {
+    const goal = await db.read<Goal>('goals', goalId);
+    if (!goal) return [];
     const allTimeBlocks = await db.getAll<TimeBlock>('timeBlocks');
-    return allTimeBlocks.filter(block => 
-      block.goalIds?.includes(goalId) &&
-      block.startTime >= startDate &&
-      block.startTime <= endDate
+    return allTimeBlocks.filter(block =>
+      block.userId === goal.userId
+      && !block.deleted
+      && block.startTime >= startDate
+      && block.startTime < endDate
+      && (directGoalShare(block, goalId) ?? 0) > 0
     );
   }
 
-  private calculateTotalHoursInvested(sessions: Session[], timeBlocks: TimeBlock[]): number {
-    const sessionHours = sessions.reduce((total, session) => {
-      if (session.goalContribution) {
-        // Sum up goal-specific contributions
-        return total + Object.values(session.goalContribution).reduce((sum, contrib) => sum + contrib, 0) / 100 * ((session.duration || 0) / 3600);
-      }
-      return total + ((session.duration || 0) / 3600);
-    }, 0);
-
-    const blockHours = timeBlocks
-      .filter(block => block.status === 'completed' && block.actualStartTime && block.actualEndTime)
-      .reduce((total, block) => {
-        const duration = (block.actualEndTime!.getTime() - block.actualStartTime!.getTime()) / (1000 * 60 * 60);
-        if (block.goalAllocation) {
-          // Sum up goal-specific allocations
-          return total + Object.values(block.goalAllocation).reduce((sum, alloc) => sum + alloc, 0) / 100 * duration;
-        }
-        return total + duration;
-      }, 0);
-
-    return sessionHours + blockHours;
+  private calculateTotalHoursInvested(
+    goalId: string,
+    sessions: Session[],
+    timeBlocks: TimeBlock[],
+  ): number {
+    return collectGoalExecutionEvidence(goalId, sessions, timeBlocks)
+      .reduce((sum, source) => sum + source.minutes, 0) / 60;
   }
 
   private async getTotalHoursInvested(goalId: string, days: number): Promise<number> {
@@ -404,7 +486,7 @@ export class GoalAnalyticsEngine {
     const sessions = await this.getGoalSessions(goalId, startDate, endDate);
     const timeBlocks = await this.getGoalTimeBlocks(goalId, startDate, endDate);
 
-    return this.calculateTotalHoursInvested(sessions, timeBlocks);
+    return this.calculateTotalHoursInvested(goalId, sessions, timeBlocks);
   }
 
   private async calculateProgressAchieved(goal: Goal): Promise<number> {
@@ -620,13 +702,11 @@ export class GoalAnalyticsEngine {
       const periodStart = new Date(period);
       const periodEnd = new Date(periodStart);
       periodEnd.setDate(periodEnd.getDate() + 7);
-      const blocks = await this.getGoalTimeBlocks(goalId, periodStart, periodEnd);
-      const completedBlocks = blocks.filter(b => b.status === 'completed');
-      const hours = completedBlocks.reduce((sum, b) => {
-        const start = b.actualStartTime || b.startTime;
-        const end = b.actualEndTime || b.endTime;
-        return sum + (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-      }, 0);
+      const [sessions, blocks] = await Promise.all([
+        this.getGoalSessions(goalId, periodStart, periodEnd),
+        this.getGoalTimeBlocks(goalId, periodStart, periodEnd),
+      ]);
+      const hours = this.calculateTotalHoursInvested(goalId, sessions, blocks);
       results.push({ period, velocity: hours });
     }
     return results;
@@ -638,8 +718,14 @@ export class GoalAnalyticsEngine {
       const periodStart = new Date(period);
       const periodEnd = new Date(periodStart);
       periodEnd.setDate(periodEnd.getDate() + 7);
-      const blocks = await this.getGoalTimeBlocks(goalId, periodStart, periodEnd);
-      const daysWithActivity = new Set(blocks.filter(b => b.status === 'completed').map(b => new Date(b.startTime).toDateString())).size;
+      const [sessions, blocks] = await Promise.all([
+        this.getGoalSessions(goalId, periodStart, periodEnd),
+        this.getGoalTimeBlocks(goalId, periodStart, periodEnd),
+      ]);
+      const daysWithActivity = new Set(
+        collectGoalExecutionEvidence(goalId, sessions, blocks)
+          .map((source) => source.startedAt.toDateString()),
+      ).size;
       results.push({ period, consistency: daysWithActivity / 7 });
     }
     return results;
@@ -686,13 +772,12 @@ export class GoalAnalyticsEngine {
 
   // ===== IMPLEMENTATION HELPERS =====
 
-  private calculateDailyTimeInvestment(sessions: Session[], timeBlocks: TimeBlock[], days: number): Array<{ date: string; hours: number; sessions: number }> {
+  private calculateDailyTimeInvestment(goalId: string, sessions: Session[], timeBlocks: TimeBlock[], days: number): Array<{ date: string; hours: number; sessions: number }> {
     const dailyData = new Map();
     
-    // Process sessions
-    sessions.forEach(session => {
-      const date = session.startTime.toISOString().split('T')[0];
-      const hours = (session.duration || 0) / 3600;
+    collectGoalExecutionEvidence(goalId, sessions, timeBlocks).forEach(source => {
+      const date = source.startedAt.toISOString().split('T')[0];
+      const hours = source.minutes / 60;
       
       if (!dailyData.has(date)) {
         dailyData.set(date, { date, hours: 0, sessions: 0 });
@@ -706,7 +791,7 @@ export class GoalAnalyticsEngine {
     return Array.from(dailyData.values()).sort((a, b) => a.date.localeCompare(b.date));
   }
 
-  private calculateWeeklyTimeInvestment(sessions: Session[], timeBlocks: TimeBlock[], days: number): Array<{ week: string; hours: number; efficiency: number }> {
+  private calculateWeeklyTimeInvestment(goalId: string, sessions: Session[], timeBlocks: TimeBlock[], days: number): Array<{ week: string; hours: number; efficiency: number }> {
     // Group by week and calculate efficiency
     const weeklyData = [];
     const weeksCount = Math.ceil(days / 7);
@@ -720,7 +805,9 @@ export class GoalAnalyticsEngine {
       weekEnd.setDate(weekEnd.getDate() + 7);
       
       const weekSessions = sessions.filter(s => s.startTime >= weekStart && s.startTime < weekEnd);
-      const hours = weekSessions.reduce((sum, s) => sum + ((s.duration || 0) / 3600), 0);
+      const weekBlocks = timeBlocks.filter(b => b.startTime >= weekStart && b.startTime < weekEnd);
+      const hours = collectGoalExecutionEvidence(goalId, weekSessions, weekBlocks)
+        .reduce((sum, source) => sum + source.minutes, 0) / 60;
       const avgFocus = weekSessions.length > 0 ? weekSessions.reduce((sum, s) => sum + (s.focus || 5), 0) / weekSessions.length * 10 : 0;
       
       weeklyData.push({
@@ -745,8 +832,11 @@ export class GoalAnalyticsEngine {
       const monthEnd = new Date(monthStart);
       monthEnd.setMonth(monthEnd.getMonth() + 1);
       
-      const sessions = await this.getGoalSessions(goalId, monthStart, monthEnd);
-      const hours = sessions.reduce((sum, s) => sum + ((s.duration || 0) / 3600), 0);
+      const [sessions, blocks] = await Promise.all([
+        this.getGoalSessions(goalId, monthStart, monthEnd),
+        this.getGoalTimeBlocks(goalId, monthStart, monthEnd),
+      ]);
+      const hours = this.calculateTotalHoursInvested(goalId, sessions, blocks);
       
       monthlyData.push({
         month: monthStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
@@ -758,12 +848,13 @@ export class GoalAnalyticsEngine {
     return monthlyData.reverse();
   }
 
-  private calculateWeeklyActual(sessions: Session[], timeBlocks: TimeBlock[]): number {
+  private calculateWeeklyActual(goalId: string, sessions: Session[], timeBlocks: TimeBlock[]): number {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     
     const recentSessions = sessions.filter(s => s.startTime >= oneWeekAgo);
-    return recentSessions.reduce((sum, s) => sum + ((s.duration || 0) / 3600), 0);
+    const recentBlocks = timeBlocks.filter(b => b.startTime >= oneWeekAgo);
+    return this.calculateTotalHoursInvested(goalId, recentSessions, recentBlocks);
   }
 
   // Additional helper methods

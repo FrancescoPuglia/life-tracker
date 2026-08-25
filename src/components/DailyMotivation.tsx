@@ -76,7 +76,8 @@ export default function DailyMotivation() {
     const activeGoals = data.goals.filter(g => g.status === 'active' && !g.deleted).length;
     const completedToday = data.timeBlocks.filter(b => {
       if (b.status !== 'completed' || b.deleted) return false;
-      const d = new Date(b.actualEndTime || b.endTime);
+      if (!(b.actualEndTime instanceof Date) || Number.isNaN(b.actualEndTime.getTime())) return false;
+      const d = new Date(b.actualEndTime);
       return d.toDateString() === new Date().toDateString();
     }).length;
 
@@ -102,7 +103,7 @@ export default function DailyMotivation() {
     } else if (stats.todayTasks > 0) {
       parts.push(`${stats.todayTasks} task pendenti. La giornata non si pianifica da sola.`);
     } else {
-      parts.push('Nessun blocco completato. Il piano decide la giornata. Inizia ora.');
+      parts.push('Nessun completamento misurato oggi. Inizia una Session per registrare l\'esecuzione.');
     }
 
     return parts.join(' ');

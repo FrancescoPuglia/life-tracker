@@ -151,10 +151,10 @@ export function buildInsights(overview: PerformanceOverview): PerformanceInsight
       rule: 'low-coverage',
       kind: 'data-quality',
       priority: low ? 68 : 48,
-      title: `Only ${formatPercent(dataQuality.coverageRate)} of executed time has measured timestamps`,
-      description: `${formatMinutes(
-        dataQuality.assumedMinutes
-      )} fall back to the planned window of completed blocks — treat exact durations with care.`,
+      title: `Only ${formatPercent(dataQuality.coverageRate)} of execution records have actual-time evidence`,
+      description: `${dataQuality.blocksMissingActualCount} executed block${
+        dataQuality.blocksMissingActualCount === 1 ? '' : 's'
+      } lack a completed Session or explicit actual interval. Known actual time is a lower bound; planned windows were not substituted.`,
     });
   }
 

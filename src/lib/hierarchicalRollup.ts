@@ -1,15 +1,16 @@
 /**
  * 🎯 HIERARCHICAL ROLLUP ENGINE
  * 
- * Calculates actual hours from completed TimeBlocks and rolls them up through
- * the hierarchy: TimeBlock → Task → Project → Goal
+ * Calculates actual hours from completed Sessions or explicit block actual
+ * intervals and rolls them up: execution → Task → Project → Goal.
  * 
  * This function is called whenever a TimeBlock status changes to 'completed'
  * to update progress metrics across the hierarchy.
  */
 
-import { TimeBlock, Task, Project, Goal } from '@/types';
+import { TimeBlock, Task, Project, Goal, Session } from '@/types';
 import { db } from './database';
+import { parseCompletedSessionEvidence, validExecutionInterval } from './executionEvidence';
 
 export interface RollupResult {
   taskUpdates: { id: string; actualMinutes: number; actualHours: number }[];
@@ -18,19 +19,13 @@ export interface RollupResult {
 }
 
 /**
- * Calculate actual duration from a completed TimeBlock
- * Uses actualStartTime/actualEndTime if available, otherwise startTime/endTime
+ * Calculate explicit actual duration from an executed TimeBlock. Planned
+ * windows are not execution evidence.
  */
 function calculateTimeBlockActualMinutes(timeBlock: TimeBlock): number {
-  if (timeBlock.status !== 'completed') return 0;
-  
-  const startTime = timeBlock.actualStartTime || timeBlock.startTime;
-  const endTime = timeBlock.actualEndTime || timeBlock.endTime;
-  
-  const durationMs = endTime.getTime() - startTime.getTime();
-  const durationMinutes = Math.max(0, Math.round(durationMs / (1000 * 60)));
-  
-  return durationMinutes;
+  if (timeBlock.status !== 'completed' && timeBlock.status !== 'overrun') return 0;
+  const interval = validExecutionInterval(timeBlock.actualStartTime, timeBlock.actualEndTime);
+  return interval ? Math.round((interval.end - interval.start) / 60_000) : 0;
 }
 
 /**
@@ -44,56 +39,77 @@ export async function performHierarchicalRollup(
 ): Promise<RollupResult> {
   try {
     // Get all data
-    const [allTimeBlocks, allTasks, allProjects, allGoals] = await Promise.all([
+    const [allTimeBlocks, allSessions, allTasks, allProjects, allGoals] = await Promise.all([
       db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<Session>('sessions'),
       db.getAll<Task>('tasks'),
       db.getAll<Project>('projects'),
       db.getAll<Goal>('goals')
     ]);
 
     // Filter by userId and exclude soft-deleted entities
-    const userTimeBlocks = allTimeBlocks.filter(tb => tb.userId === userId);
+    const userTimeBlocks = allTimeBlocks.filter(tb => tb.userId === userId && !tb.deleted);
+    const userSessions = allSessions.filter(session => session.userId === userId && !session.deleted);
     const userTasks = allTasks.filter(t => t.userId === userId && !t.deleted);
     const userProjects = allProjects.filter(p => p.userId === userId && !p.deleted);
     const userGoals = allGoals.filter(g => g.userId === userId && !g.deleted);
 
-    // Calculate actual minutes for each completed TimeBlock
-    const completedBlocks = userTimeBlocks.filter(tb => tb.status === 'completed');
-    
-    // Group TimeBlocks by Task, Project, and Goal
+    const taskById = new Map(userTasks.map(task => [task.id, task]));
+    const projectById = new Map(userProjects.map(project => [project.id, project]));
+    const goalById = new Map(userGoals.map(goal => [goal.id, goal]));
+    const blockById = new Map(userTimeBlocks.map(block => [block.id, block]));
+    const blocksWithValidSessions = new Set<string>();
+
+    // Group authoritative execution evidence by Task, Project, and Goal.
     const taskActualMinutes = new Map<string, number>();
     const projectActualMinutes = new Map<string, number>();
     const goalActualMinutes = new Map<string, number>();
 
-    // Rollup from TimeBlocks
-    for (const timeBlock of completedBlocks) {
-      const actualMinutes = calculateTimeBlockActualMinutes(timeBlock);
-      
-      if (actualMinutes > 0) {
-        // Direct to Task
-        if (timeBlock.taskId) {
-          taskActualMinutes.set(
-            timeBlock.taskId, 
-            (taskActualMinutes.get(timeBlock.taskId) || 0) + actualMinutes
-          );
-        }
-        
-        // Direct to Project (if no taskId)
-        if (timeBlock.projectId && !timeBlock.taskId) {
-          projectActualMinutes.set(
-            timeBlock.projectId,
-            (projectActualMinutes.get(timeBlock.projectId) || 0) + actualMinutes
-          );
-        }
-        
-        // Direct to Goal (if no projectId or taskId)
-        if (timeBlock.goalId && !timeBlock.projectId && !timeBlock.taskId) {
-          goalActualMinutes.set(
-            timeBlock.goalId,
-            (goalActualMinutes.get(timeBlock.goalId) || 0) + actualMinutes
-          );
-        }
+    const recordActual = (
+      taskId: string | undefined,
+      projectId: string | undefined,
+      goalId: string | undefined,
+      actualMinutes: number,
+    ) => {
+      if (actualMinutes <= 0) return;
+      const task = taskId ? taskById.get(taskId) : undefined;
+      if (task) {
+        taskActualMinutes.set(task.id, (taskActualMinutes.get(task.id) || 0) + actualMinutes);
+        return;
       }
+      const project = projectId ? projectById.get(projectId) : undefined;
+      if (project) {
+        projectActualMinutes.set(project.id, (projectActualMinutes.get(project.id) || 0) + actualMinutes);
+        return;
+      }
+      const goal = goalId ? goalById.get(goalId) : undefined;
+      if (goal) goalActualMinutes.set(goal.id, (goalActualMinutes.get(goal.id) || 0) + actualMinutes);
+    };
+
+    // Sessions are primary, including Sessions linked to a TimeBlock.
+    for (const session of userSessions) {
+      const evidence = parseCompletedSessionEvidence(session);
+      if (!evidence) continue;
+      const linkedBlock = evidence.timeBlockId ? blockById.get(evidence.timeBlockId) : undefined;
+      if (evidence.timeBlockId) blocksWithValidSessions.add(evidence.timeBlockId);
+      recordActual(
+        session.taskId || linkedBlock?.taskId,
+        session.projectId || linkedBlock?.projectId,
+        session.goalIds?.[0] || linkedBlock?.goalId,
+        evidence.netMinutes,
+      );
+    }
+
+    // Explicit block actual intervals are fallback evidence only when no valid
+    // linked Session exists.
+    for (const timeBlock of userTimeBlocks) {
+      if (blocksWithValidSessions.has(timeBlock.id)) continue;
+      recordActual(
+        timeBlock.taskId,
+        timeBlock.projectId,
+        timeBlock.goalId,
+        calculateTimeBlockActualMinutes(timeBlock),
+      );
     }
 
     // Rollup from Tasks to Projects
@@ -119,23 +135,32 @@ export async function performHierarchicalRollup(
     }
 
     // Prepare updates
-    const taskUpdates = Array.from(taskActualMinutes.entries()).map(([id, minutes]) => ({
-      id,
-      actualMinutes: minutes,
-      actualHours: Math.round(minutes / 60 * 100) / 100 // Round to 2 decimal places
-    }));
+    const taskUpdates = userTasks.map(({ id }) => {
+      const minutes = taskActualMinutes.get(id) || 0;
+      return {
+        id,
+        actualMinutes: minutes,
+        actualHours: Math.round(minutes / 60 * 100) / 100,
+      };
+    });
 
-    const projectUpdates = Array.from(projectActualMinutes.entries()).map(([id, minutes]) => ({
-      id,
-      actualMinutes: minutes,
-      actualHours: Math.round(minutes / 60 * 100) / 100
-    }));
+    const projectUpdates = userProjects.map(({ id }) => {
+      const minutes = projectActualMinutes.get(id) || 0;
+      return {
+        id,
+        actualMinutes: minutes,
+        actualHours: Math.round(minutes / 60 * 100) / 100,
+      };
+    });
 
-    const goalUpdates = Array.from(goalActualMinutes.entries()).map(([id, minutes]) => ({
-      id,
-      actualMinutes: minutes,
-      actualHours: Math.round(minutes / 60 * 100) / 100
-    }));
+    const goalUpdates = userGoals.map(({ id }) => {
+      const minutes = goalActualMinutes.get(id) || 0;
+      return {
+        id,
+        actualMinutes: minutes,
+        actualHours: Math.round(minutes / 60 * 100) / 100,
+      };
+    });
 
     // Apply updates to database
     await Promise.all([
@@ -206,8 +231,9 @@ export function calculateProgressPercentage(
  */
 export async function debugTimeBlockHierarchy(userId: string, timeBlockId: string): Promise<any> {
   try {
-    const [allTimeBlocks, allTasks, allProjects, allGoals] = await Promise.all([
+    const [allTimeBlocks, allSessions, allTasks, allProjects, allGoals] = await Promise.all([
       db.getAll<TimeBlock>('timeBlocks'),
+      db.getAll<Session>('sessions'),
       db.getAll<Task>('tasks'),
       db.getAll<Project>('projects'),
       db.getAll<Goal>('goals')
@@ -222,7 +248,14 @@ export async function debugTimeBlockHierarchy(userId: string, timeBlockId: strin
     const goal = timeBlock.goalId ? allGoals.find(g => g.id === timeBlock.goalId) : 
                 project?.goalId ? allGoals.find(g => g.id === project.goalId) : null;
 
-    const actualMinutes = calculateTimeBlockActualMinutes(timeBlock);
+    const linkedSessionMinutes = allSessions
+      .filter(session => session.userId === userId && session.timeBlockId === timeBlock.id)
+      .map(parseCompletedSessionEvidence)
+      .filter((evidence): evidence is NonNullable<typeof evidence> => evidence !== null)
+      .reduce((sum, evidence) => sum + evidence.netMinutes, 0);
+    const actualMinutes = linkedSessionMinutes > 0
+      ? linkedSessionMinutes
+      : calculateTimeBlockActualMinutes(timeBlock);
 
     return {
       timeBlock: {
@@ -230,6 +263,7 @@ export async function debugTimeBlockHierarchy(userId: string, timeBlockId: strin
         title: timeBlock.title,
         status: timeBlock.status,
         actualMinutes,
+        actualSource: linkedSessionMinutes > 0 ? 'completed_sessions' : 'explicit_block_actual',
         actualHours: Math.round(actualMinutes / 60 * 100) / 100
       },
       task: task ? {

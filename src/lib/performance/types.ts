@@ -18,13 +18,10 @@
 //   NOT plan — counting them as plan would make Plan ≈ Actual by definition.
 //
 // ACTUAL MINUTES
-//   Sum of executed time of blocks with status 'completed' or 'overrun'
-//   (see `weeklyPlanner/analytics.isCompletedStatus`: an overrun block still
-//   ran), measured on [actualStartTime||startTime, actualEndTime||endTime],
-//   clipped to the period — PLUS completed Sessions that have NO timeBlockId.
-//   Sessions linked to a TimeBlock are already absorbed by that block
-//   (SessionManager writes actual times onto the block on stop), so they are
-//   skipped to avoid double counting.
+//   Sum of completed Session net minutes, including Sessions linked to a
+//   TimeBlock. A block's explicit [actualStartTime, actualEndTime] interval is
+//   accepted only when that block has no valid linked Session. Planned windows
+//   are never execution evidence. Every source is clipped to the period.
 //
 // UNPLANNED MINUTES (subset of Actual)
 //   Actual minutes coming from retro-logged blocks (createdAt >= startTime)
@@ -60,11 +57,13 @@
 //   min(today, period end).
 //
 // DATA COVERAGE
-//   measuredMinutes  = actual minutes backed by real actualStart/actualEnd
-//                      timestamps (or session durations).
-//   assumedMinutes   = actual minutes where the planned window was used as
-//                      a fallback for a completed block.
-//   coverageRate     = measured / (measured + assumed), null when no actual.
+//   measuredMinutes  = actual minutes backed by completed Sessions or explicit
+//                      block actualStart/actualEnd timestamps.
+//   coverageRate     = valid actual sources / (valid actual sources + executed
+//                      blocks missing evidence), null when neither exists.
+//   If coverage is partial, actualMinutes is a known measured lower bound and
+//   the UI must say so. Missing evidence is never converted to zero work or to
+//   the planned duration.
 //   Plus honesty counters: unclassified time, orphan sessions, open
 //   sessions (excluded), blocks whose parent entities are missing, tasks
 //   completed without any tracked time, estimated-but-unscheduled minutes.
@@ -163,11 +162,15 @@ export interface PerformanceSummary {
 }
 
 export interface PerformanceDataQuality {
+  /** Partial when known execution can still be incomplete. */
+  actualAvailability: 'complete' | 'partial';
   /** Actual minutes backed by real timestamps (block actuals or sessions). */
   measuredMinutes: number;
-  /** Actual minutes derived from the planned window fallback. */
-  assumedMinutes: number;
-  /** measured / (measured + assumed) — null when there is no actual time. */
+  /** Number of completed Session or explicit-block actual sources in-period. */
+  actualSourceCount: number;
+  /** Executed blocks in-period with neither a valid Session nor explicit actual interval. */
+  blocksMissingActualCount: number;
+  /** actualSourceCount / (actualSourceCount + blocksMissingActualCount). */
   coverageRate: number | null;
   /** Actual minutes that could not be attributed to any goal. */
   unclassifiedMinutes: number;
@@ -317,8 +320,8 @@ export interface ActivityDetailRow {
   status: string;
   /** True when scheduled in advance (createdAt < startTime). */
   plannedInAdvance: boolean;
-  /** 'measured' = real timestamps; 'assumed' = planned-window fallback. */
-  timeSource: 'measured' | 'assumed' | 'none';
+  /** 'missing' is an executed block that lacks authoritative actual evidence. */
+  timeSource: 'measured' | 'missing' | 'none';
 }
 
 export interface CarryOverTask {

@@ -90,10 +90,17 @@ export default function ActivityDetailPanel({
       {/* 1 · Data quality strip */}
       <div className="flex flex-wrap gap-1.5 mb-4" data-testid="data-quality-strip">
         <QualityChip
-          label="data coverage"
+          label="execution evidence coverage"
           value={formatPercent(dataQuality.coverageRate)}
-          title={`${formatMinutes(dataQuality.measuredMinutes)} measured with real timestamps · ${formatMinutes(dataQuality.assumedMinutes)} assumed from the planned window`}
+          title={`${dataQuality.actualSourceCount} valid source${dataQuality.actualSourceCount === 1 ? '' : 's'} · ${dataQuality.blocksMissingActualCount} executed block${dataQuality.blocksMissingActualCount === 1 ? '' : 's'} missing actual evidence · ${formatMinutes(dataQuality.measuredMinutes)} known actual time`}
         />
+        {dataQuality.blocksMissingActualCount > 0 && (
+          <QualityChip
+            label="executed blocks missing actual"
+            value={String(dataQuality.blocksMissingActualCount)}
+            title="No completed Session or valid explicit actual interval exists. Planned duration is never substituted; known actual totals are partial."
+          />
+        )}
         {dataQuality.unclassifiedMinutes > 0 && (
           <QualityChip
             label="unassigned to any goal"
@@ -301,10 +308,10 @@ export default function ActivityDetailPanel({
                         title={
                           row.timeSource === 'measured'
                             ? 'Real start/end timestamps'
-                            : 'Planned window used as fallback'
+                            : 'Executed status exists, but no authoritative actual-time evidence exists'
                         }
                         className={`text-[10px] font-medium ${
-                          row.timeSource === 'measured' ? 'text-emerald-700' : 'text-slate-400'
+                          row.timeSource === 'measured' ? 'text-emerald-700' : 'text-amber-700'
                         }`}
                       >
                         {row.timeSource}

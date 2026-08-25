@@ -109,6 +109,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
   } => {
     try {
       const input: PerformanceInput = {
+        ownerUid: data.userId,
         timeBlocks: data.timeBlocks,
         sessions,
         tasks: data.tasks,
@@ -120,7 +121,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
       console.error('[Performance] Aggregation failed:', error);
       return { overview: null, computeError: true };
     }
-  }, [data.timeBlocks, data.tasks, data.projects, data.goals, sessions, period, filters]);
+  }, [data.userId, data.timeBlocks, data.tasks, data.projects, data.goals, sessions, period, filters]);
 
   // ---- Handlers -------------------------------------------------------------
   const handlePeriodType = useCallback((type: PerformancePeriodType) => {
@@ -194,6 +195,25 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
     );
   }
 
+  if (sessionStatus === 'error') {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center" role="alert">
+        <AlertTriangle className="w-6 h-6 text-amber-600 mx-auto mb-2" aria-hidden="true" />
+        <p className="text-sm font-semibold text-amber-900">Actual execution is unavailable.</p>
+        <p className="text-xs text-amber-800 mt-1">
+          Sessions could not be loaded, so Life Tracker will not present missing work as zero.
+        </p>
+        <button
+          type="button"
+          onClick={() => setSessionReloadKey((key) => key + 1)}
+          className="mt-3 px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-semibold text-amber-900 hover:bg-amber-100"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   if (sessionStatus === 'loading' || !overview) {
     if (computeError) {
       return (
@@ -236,24 +256,6 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
 
   return (
     <div className="space-y-4" data-testid="performance-dashboard">
-      {sessionStatus === 'error' && (
-        <div
-          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center justify-between gap-3"
-          role="alert"
-        >
-          <p className="text-xs text-amber-800">
-            Ad-hoc tracked sessions could not be loaded — totals may miss session-only time.
-          </p>
-          <button
-            type="button"
-            onClick={() => setSessionReloadKey((k) => k + 1)}
-            className="shrink-0 px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
       <PerfToolbar
         period={overview.period}
         filters={filters}

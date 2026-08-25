@@ -6,6 +6,7 @@ import {
   Clock, CheckCircle, Circle, Play, Pause
 } from 'lucide-react';
 import type { Goal, GoalRoadmap, GoalMilestone, TimeBlock, Project, Task } from '@/types';
+import type { BlockExecutionRecord } from '@/lib/executionAggregation';
 
 // ============================================================================
 // PROGRESS CALCULATION UTILITIES
@@ -15,6 +16,8 @@ interface ProgressData {
   totalActualHours: number;
   totalTargetHours: number;
   progressPercentage: number;
+  actualAvailability: 'complete' | 'partial' | 'unavailable';
+  missingActualCount: number;
   milestoneProgress: Array<{
     milestone: GoalMilestone;
     isReached: boolean;
@@ -27,23 +30,33 @@ function calculateGoalProgress(
   roadmap: GoalRoadmap,
   timeBlocks: TimeBlock[],
   projects: Project[],
-  tasks: Task[]
+  tasks: Task[],
+  blockExecution: ReadonlyMap<string, BlockExecutionRecord> | null,
 ): ProgressData {
-  // Calculate actual hours from completed timeBlocks
-  const completedBlocks = timeBlocks.filter(tb => 
-    tb.status === 'completed' && 
-    (tb.goalId === goal.id || 
+  const goalBlocks = timeBlocks.filter(tb =>
+    tb.userId === goal.userId
+    && !tb.deleted
+    && (tb.goalId === goal.id ||
      (tb.projectId && projects.some(p => p.id === tb.projectId && p.goalId === goal.id)) ||
      (tb.taskId && tasks.some(t => t.id === tb.taskId && 
        projects.some(p => p.id === t.projectId && p.goalId === goal.id))))
   );
 
-  const totalActualHours = completedBlocks.reduce((sum, block) => {
-    const duration = block.actualEndTime && block.actualStartTime
-      ? (block.actualEndTime.getTime() - block.actualStartTime.getTime()) / (1000 * 60 * 60)
-      : (block.endTime.getTime() - block.startTime.getTime()) / (1000 * 60 * 60);
-    return sum + duration;
+  let missingActualCount = 0;
+  const totalActualHours = blockExecution === null ? 0 : goalBlocks.reduce((sum, block) => {
+    const execution = blockExecution.get(block.id);
+    if (!execution) return sum;
+    if (execution.actualMinutes === null) {
+      missingActualCount += 1;
+      return sum;
+    }
+    return sum + execution.actualMinutes / 60;
   }, 0);
+  const actualAvailability = blockExecution === null
+    ? 'unavailable' as const
+    : missingActualCount > 0
+      ? 'partial' as const
+      : 'complete' as const;
 
   // Calculate target hours from goal, projects, or tasks
   let totalTargetHours = 0;
@@ -56,16 +69,11 @@ function calculateGoalProgress(
         return sum + project.totalHoursTarget;
       }
       const projectTasks = tasks.filter(t => t.projectId === project.id);
-      const projectTaskHours = projectTasks.reduce((taskSum, task) => 
-        taskSum + (task.estimatedMinutes || 60) / 60, 0
+      const projectTaskHours = projectTasks.reduce((taskSum, task) =>
+        taskSum + Math.max(0, task.estimatedMinutes ?? 0) / 60, 0
       );
       return sum + projectTaskHours;
     }, 0);
-  }
-
-  // If no target hours found, use default estimation
-  if (totalTargetHours === 0) {
-    totalTargetHours = Math.max(100, totalActualHours * 2); // Default fallback
   }
 
   // Apply same precision fix as OKRManager for 0.1% accuracy
@@ -90,6 +98,8 @@ function calculateGoalProgress(
     totalActualHours,
     totalTargetHours,
     progressPercentage: Math.min(progressPercentage, 100),
+    actualAvailability,
+    missingActualCount,
     milestoneProgress
   };
 }
@@ -733,6 +743,7 @@ interface GoalRoadmapViewProps {
   timeBlocks: TimeBlock[];
   projects: Project[];
   tasks: Task[];
+  blockExecution?: ReadonlyMap<string, BlockExecutionRecord> | null;
   onMilestoneClick?: (milestone: GoalMilestone) => void;
   className?: string;
   width?: number;
@@ -745,6 +756,7 @@ export function GoalRoadmapView({
   timeBlocks,
   projects,
   tasks,
+  blockExecution = null,
   onMilestoneClick,
   className = "",
   width = 800,
@@ -754,8 +766,8 @@ export function GoalRoadmapView({
   
   // Calculate progress data
   const progressData = useMemo(() => 
-    calculateGoalProgress(goal, roadmap, timeBlocks, projects, tasks),
-    [goal, roadmap, timeBlocks, projects, tasks]
+    calculateGoalProgress(goal, roadmap, timeBlocks, projects, tasks, blockExecution),
+    [blockExecution, goal, roadmap, timeBlocks, projects, tasks]
   );
 
   // Generate path points based on style
@@ -831,11 +843,22 @@ export function GoalRoadmapView({
           
           <div className="text-right">
             <div className="text-2xl font-bold text-blue-600">
-              {progressData.progressPercentage}%
+              {progressData.totalTargetHours <= 0 || progressData.actualAvailability === 'unavailable'
+                ? 'Unavailable'
+                : `${progressData.actualAvailability === 'partial' ? '≥ ' : ''}${progressData.progressPercentage}%`}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              {progressData.totalActualHours.toFixed(1)}h / {progressData.totalTargetHours.toFixed(1)}h
+              {progressData.actualAvailability === 'unavailable'
+                ? 'Execution evidence unavailable'
+                : `${progressData.actualAvailability === 'partial' ? '≥ ' : ''}${progressData.totalActualHours.toFixed(1)}h known actual`}
+              {' / '}
+              {progressData.totalTargetHours > 0 ? `${progressData.totalTargetHours.toFixed(1)}h target` : 'target not configured'}
             </div>
+            {progressData.actualAvailability === 'partial' && (
+              <div className="text-xs text-amber-600">
+                {progressData.missingActualCount} completed block{progressData.missingActualCount === 1 ? '' : 's'} missing evidence
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -378,6 +378,9 @@ export interface Achievement {
 export interface KPI {
   focusMinutes: number;
   planVsActual: number;
+  /** Whether planVsActual is complete or a known lower bound. */
+  actualAvailability?: 'complete' | 'partial';
+  missingActualCount?: number;
   activeStreaks: number;
   keyResultsProgress: number;
   sleepHours?: number;
@@ -495,7 +498,9 @@ export interface AnalyticsData {
     date: string;
     planned: number;
     actual: number;
-    adherence: number;
+    adherence: number | null;
+    actualAvailability: 'complete' | 'partial';
+    missingActualCount: number;
   }>;
   timeAllocation: Array<{
     domain: string;
@@ -505,23 +510,26 @@ export interface AnalyticsData {
   focusTrend: Array<{
     date: string;
     focusMinutes: number;
-    mood: number;
-    energy: number;
+    mood: number | null;
+    energy: number | null;
   }>;
   correlations: Array<{
     factor1: string;
     factor2: string;
     correlation: number;
     significance: string;
+    sampleSize: number;
   }>;
   activityRankings: Array<{
     activityName: string;
     plannedHours: number;
     actualHours: number;
     discrepancy: number;
-    adherenceRate: number;
+    adherenceRate: number | null;
+    actualAvailability: 'complete' | 'partial';
+    missingActualCount: number;
     domain: string;
-    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned';
+    rank: 'most_done' | 'least_done' | 'overplanned' | 'underplanned' | 'insufficient_data';
   }>;
   weeklyReview: {
     highlights: string[];

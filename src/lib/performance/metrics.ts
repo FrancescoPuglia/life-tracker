@@ -7,6 +7,13 @@
 
 import type { Goal, Project, Session, Task, TimeBlock } from '@/types';
 import {
+  MAX_EXECUTION_INTERVAL_MS,
+  parseCompletedSessionEvidence,
+  proportionalSessionMinutes,
+  validExecutionInterval,
+  type CompletedSessionEvidence,
+} from '@/lib/executionEvidence';
+import {
   addDays,
   addMonths,
   countDays,
@@ -45,7 +52,7 @@ export const STATUS_BEHIND_RATIO = 0.85;
 /** A project with open tasks and no execution for this many days is 'inactive'. */
 export const INACTIVE_AFTER_DAYS = 14;
 /** Hard cap for a single block/session duration; longer raw data is corrupt. */
-const MAX_ITEM_MS = 24 * 60 * 60 * 1000;
+const MAX_ITEM_MS = MAX_EXECUTION_INTERVAL_MS;
 
 /** Sentinel accepted by `PerformanceFilters.goalId` to select unattributed time. */
 export const UNASSIGNED_ID = '__unassigned__';
@@ -56,6 +63,8 @@ export const UNASSIGNED_LABEL = 'Unassigned';
 // ============================================================================
 
 export interface PerformanceInput {
+  /** Optional defense-in-depth owner scope. UI callers must supply it. */
+  ownerUid?: string;
   timeBlocks: TimeBlock[];
   sessions: Session[];
   tasks: Task[];
@@ -182,7 +191,6 @@ interface DayAgg {
   actual: number;
   unplanned: number;
   measured: number;
-  assumed: number;
   tasksCompleted: number;
   goalIds: Set<string | null>;
 }
@@ -220,7 +228,6 @@ interface WindowAgg {
   plannedExecuted: number;
   unplanned: number;
   measured: number;
-  assumed: number;
   plannedTasks: number;
   completedPlannedTasks: number;
   completedTasksInPeriod: number;
@@ -236,8 +243,10 @@ interface WindowAgg {
 
 function emptyQuality(): PerformanceDataQuality {
   return {
+    actualAvailability: 'complete',
     measuredMinutes: 0,
-    assumedMinutes: 0,
+    actualSourceCount: 0,
+    blocksMissingActualCount: 0,
     coverageRate: null,
     unclassifiedMinutes: 0,
     orphanSessionCount: 0,
@@ -263,7 +272,6 @@ function getDayAgg(days: Map<string, DayAgg>, date: Date): DayAgg {
       actual: 0,
       unplanned: 0,
       measured: 0,
-      assumed: 0,
       tasksCompleted: 0,
       goalIds: new Set(),
     };
@@ -347,11 +355,52 @@ function aggregateWindow(
   const projectName = (id: string | null): string =>
     id === null ? '—' : lookup.projectById.get(id)?.name || 'Untitled project';
 
+  const blockById = new Map(input.timeBlocks.map((block) => [block.id, block]));
+  const validSessions: Array<Readonly<{
+    session: Session;
+    evidence: CompletedSessionEvidence;
+  }>> = [];
+  const blocksWithValidSessions = new Set<string>();
+
+  // Parse Sessions first because they are the primary execution source. A
+  // valid linked Session suppresses the block's duplicated explicit actual
+  // interval even when the Session falls outside this particular window.
+  for (const session of input.sessions) {
+    if (session.deleted === true) continue;
+    if (session.status !== 'completed') {
+      const startsInWindow =
+        isValidDate(session.startTime)
+        && session.startTime.getTime() >= window.start
+        && session.startTime.getTime() < window.end;
+      if (startsInWindow) quality.openSessionCount += 1;
+      continue;
+    }
+    const evidence = parseCompletedSessionEvidence(session);
+    if (!evidence) {
+      const hasValidStart = isValidDate(session.startTime);
+      const hasValidEnd = isValidDate(session.endTime);
+      const mayAffectWindow = !hasValidStart || (
+        session.startTime.getTime() < window.end
+        && (hasValidEnd
+          ? (session.endTime as Date).getTime() > window.start
+          : session.startTime.getTime() >= window.start)
+      );
+      if (mayAffectWindow) quality.anomalousDurationCount += 1;
+      continue;
+    }
+    validSessions.push({ session, evidence });
+    if (evidence.timeBlockId) blocksWithValidSessions.add(evidence.timeBlockId);
+  }
+
   // -------------------------------------------------------------- TimeBlocks
   for (const block of input.timeBlocks) {
     if (block.deleted) continue;
     if (!isValidDate(block.startTime) || !isValidDate(block.endTime)) {
-      quality.anomalousDurationCount += 1;
+      const mayAffectWindow = !isValidDate(block.startTime) || (
+        block.startTime.getTime() >= window.start
+        && block.startTime.getTime() < window.end
+      );
+      if (mayAffectWindow) quality.anomalousDurationCount += 1;
       continue;
     }
 
@@ -387,23 +436,17 @@ function aggregateWindow(
 
     const executed = isExecutedStatus(block.status);
 
-    // Actual interval: real timestamps when both exist, else planned window.
+    // Completed Sessions are primary. Use the block's explicit actual interval
+    // only when no valid linked Session exists. Never substitute the plan.
     let actualInterval: Interval | null = null;
-    let timeSource: 'measured' | 'assumed' | 'none' = 'none';
-    if (executed) {
-      if (isValidDate(block.actualStartTime) && isValidDate(block.actualEndTime)) {
-        actualInterval = {
-          start: block.actualStartTime.getTime(),
-          end: block.actualEndTime.getTime(),
-        };
+    let timeSource: 'measured' | 'missing' | 'none' = 'none';
+    const hasLinkedSession = blocksWithValidSessions.has(block.id);
+    if (executed && !hasLinkedSession) {
+      const explicit = validExecutionInterval(block.actualStartTime, block.actualEndTime);
+      if (explicit) {
+        actualInterval = { start: explicit.start, end: explicit.end };
         timeSource = 'measured';
-      }
-      if (!actualInterval || actualInterval.end <= actualInterval.start) {
-        actualInterval = { ...plannedInterval };
-        timeSource = 'assumed';
-      }
-      if (actualInterval.end - actualInterval.start > MAX_ITEM_MS) {
-        actualInterval.end = actualInterval.start + MAX_ITEM_MS;
+      } else if (block.actualStartTime !== undefined || block.actualEndTime !== undefined) {
         quality.anomalousDurationCount += 1;
       }
     }
@@ -411,10 +454,12 @@ function aggregateWindow(
 
     const countsPlanned = plannedInAdvance && plannedOverlap > 0;
     const countsActual = actualOverlap > 0;
-    if (!countsPlanned && !countsActual) continue;
+    const missingActualInWindow =
+      executed && !hasLinkedSession && actualInterval === null && plannedOverlap > 0;
+    if (!countsPlanned && !countsActual && !missingActualInWindow) continue;
 
     if (attr.missingParent) quality.blocksWithMissingParents += 1;
-    if (block.status === 'overrun' && countsActual) quality.overrunBlockCount += 1;
+    if (block.status === 'overrun' && plannedOverlap > 0) quality.overrunBlockCount += 1;
 
     // Source filter narrows by time provenance (task counters are documented
     // as unaffected — they have no provenance dimension).
@@ -423,6 +468,11 @@ function aggregateWindow(
       (filters.source === 'planned' && plannedInAdvance) ||
       (filters.source === 'unplanned' && !plannedInAdvance);
     if (!passesSource) continue;
+
+    if (missingActualInWindow) {
+      quality.blocksMissingActualCount += 1;
+      timeSource = 'missing';
+    }
 
     if (block.taskId) {
       taskIdsWithBlocks.add(block.taskId);
@@ -458,8 +508,8 @@ function aggregateWindow(
         gAgg.unplanned += actualOverlap;
         if (pAgg) pAgg.unplanned += actualOverlap;
       }
-      if (timeSource === 'measured') quality.measuredMinutes += actualOverlap;
-      else quality.assumedMinutes += actualOverlap;
+      quality.measuredMinutes += actualOverlap;
+      quality.actualSourceCount += 1;
       if (attr.goalId === null) quality.unclassifiedMinutes += actualOverlap;
       if (attr.taskId) {
         taskActualMinutes.set(
@@ -472,8 +522,7 @@ function aggregateWindow(
         dayAgg.actual += minutes;
         dayAgg.goalIds.add(attr.goalId);
         if (!plannedInAdvance) dayAgg.unplanned += minutes;
-        if (timeSource === 'measured') dayAgg.measured += minutes;
-        else dayAgg.assumed += minutes;
+        dayAgg.measured += minutes;
       });
     }
 
@@ -501,72 +550,80 @@ function aggregateWindow(
   }
 
   // ---------------------------------------------------------------- Sessions
-  for (const session of input.sessions) {
-    if (!isValidDate(session.startTime)) continue;
-
-    if (session.status !== 'completed') {
-      // Running/paused sessions are excluded from every total (glossary).
-      const startsInWindow =
-        session.startTime.getTime() >= window.start && session.startTime.getTime() < window.end;
-      if (startsInWindow) quality.openSessionCount += 1;
-      continue;
-    }
-    // Sessions linked to a TimeBlock are absorbed by that block on stop
-    // (SessionManager writes actual times onto it) — skip to avoid double
-    // counting.
-    if (session.timeBlockId) continue;
-
-    let endMs: number | null = null;
-    if (isValidDate(session.endTime)) endMs = session.endTime.getTime();
-    else if (typeof session.duration === 'number' && session.duration > 0) {
-      endMs = session.startTime.getTime() + session.duration * 1000; // duration is seconds
-    }
-    if (endMs === null || endMs <= session.startTime.getTime()) {
-      quality.anomalousDurationCount += 1;
-      continue;
-    }
-    const interval: Interval = { start: session.startTime.getTime(), end: endMs };
-    if (interval.end - interval.start > MAX_ITEM_MS) {
-      interval.end = interval.start + MAX_ITEM_MS;
-      quality.anomalousDurationCount += 1;
-    }
-
+  for (const { session, evidence } of validSessions) {
+    const interval: Interval = {
+      start: evidence.interval.start,
+      end: evidence.interval.end,
+    };
+    const linkedBlock = evidence.timeBlockId ? blockById.get(evidence.timeBlockId) ?? null : null;
     const attr = resolveAttribution(
-      { taskId: session.taskId, projectId: session.projectId, goalId: session.goalIds?.[0] },
+      {
+        taskId: session.taskId || linkedBlock?.taskId,
+        projectId: session.projectId || linkedBlock?.projectId,
+        goalId: session.goalIds?.[0] || linkedBlock?.goalId,
+      },
       lookup
     );
     if (!matchesFilters(attr, filters)) continue;
-    if (filters.source === 'planned') continue; // orphan sessions are unplanned by definition
 
-    const minutes = overlapMinutes(interval, window);
+    const minutes = proportionalSessionMinutes(evidence, window);
     if (minutes <= 0) continue;
+
+    // Rest/slack stays excluded even when it has a linked execution Session.
+    if (linkedBlock?.type === 'break' || linkedBlock?.type === 'buffer') {
+      quality.excludedBreakMinutes += minutes;
+      continue;
+    }
+
+    const linkedPlannedInterval = linkedBlock
+      && !linkedBlock.deleted
+      && linkedBlock.status !== 'cancelled'
+      && isValidDate(linkedBlock.startTime)
+      && isValidDate(linkedBlock.endTime)
+      ? { start: linkedBlock.startTime.getTime(), end: linkedBlock.endTime.getTime() }
+      : null;
+    const plannedInAdvance = linkedPlannedInterval !== null
+      && (isValidDate(linkedBlock?.createdAt)
+        ? linkedBlock.createdAt.getTime() < linkedPlannedInterval.start
+        : true);
+    const passesSource =
+      filters.source === 'all'
+      || (filters.source === 'planned' && plannedInAdvance)
+      || (filters.source === 'unplanned' && !plannedInAdvance);
+    if (!passesSource) continue;
 
     if (attr.missingParent) quality.blocksWithMissingParents += 1;
 
     actual += minutes;
-    unplanned += minutes;
-    quality.measuredMinutes += minutes; // sessions carry real timestamps
-    quality.orphanSessionCount += 1;
-    quality.orphanSessionMinutes += minutes;
+    if (plannedInAdvance) plannedExecuted += minutes;
+    else unplanned += minutes;
+    quality.measuredMinutes += minutes;
+    quality.actualSourceCount += 1;
+    if (!linkedBlock) {
+      quality.orphanSessionCount += 1;
+      quality.orphanSessionMinutes += minutes;
+    }
     if (attr.goalId === null) quality.unclassifiedMinutes += minutes;
 
     const gAgg = getEntityAgg(goalAgg, attr.goalId);
     gAgg.actual += minutes;
-    gAgg.unplanned += minutes;
+    if (!plannedInAdvance) gAgg.unplanned += minutes;
     if (attr.projectId) {
       const pAgg = getEntityAgg(projectAgg, attr.projectId);
       pAgg.actual += minutes;
-      pAgg.unplanned += minutes;
+      if (!plannedInAdvance) pAgg.unplanned += minutes;
       gAgg.activeProjectIds.add(attr.projectId);
     }
     if (attr.taskId) {
       taskActualMinutes.set(attr.taskId, (taskActualMinutes.get(attr.taskId) || 0) + minutes);
     }
 
-    eachOverlapDay(interval, window, (dayStart, dayMinutes) => {
+    const wallMinutes = (interval.end - interval.start) / 60_000;
+    eachOverlapDay(interval, window, (dayStart, overlappedWallMinutes) => {
+      const dayMinutes = evidence.netMinutes * overlappedWallMinutes / wallMinutes;
       const dayAgg = getDayAgg(days, dayStart);
       dayAgg.actual += dayMinutes;
-      dayAgg.unplanned += dayMinutes;
+      if (!plannedInAdvance) dayAgg.unplanned += dayMinutes;
       dayAgg.measured += dayMinutes;
       dayAgg.goalIds.add(attr.goalId);
     });
@@ -587,7 +644,7 @@ function aggregateWindow(
         plannedMinutes: 0,
         actualMinutes: Math.round(minutes),
         status: 'session',
-        plannedInAdvance: false,
+        plannedInAdvance,
         timeSource: 'measured',
       });
     }
@@ -700,9 +757,15 @@ function aggregateWindow(
   }
 
   quality.coverageRate = safeRatio(
-    quality.measuredMinutes,
-    quality.measuredMinutes + quality.assumedMinutes
+    quality.actualSourceCount,
+    quality.actualSourceCount + quality.blocksMissingActualCount
   );
+  quality.actualAvailability =
+    quality.blocksMissingActualCount > 0
+    || quality.openSessionCount > 0
+    || quality.anomalousDurationCount > 0
+      ? 'partial'
+      : 'complete';
 
   return {
     planned,
@@ -711,7 +774,6 @@ function aggregateWindow(
     plannedExecuted,
     unplanned,
     measured: quality.measuredMinutes,
-    assumed: quality.assumedMinutes,
     plannedTasks,
     completedPlannedTasks,
     completedTasksInPeriod,
@@ -915,18 +977,33 @@ function buildLastActivityMap(input: PerformanceInput, lookup: Lookup): Map<stri
     const current = map.get(projectId);
     if (!current || when.getTime() > current.getTime()) map.set(projectId, when);
   };
-  for (const block of input.timeBlocks) {
-    if (block.deleted || !isExecutedStatus(block.status)) continue;
-    const attr = resolveAttribution(block, lookup);
-    bump(attr.projectId, block.actualEndTime || block.endTime);
-  }
+  const blockById = new Map(input.timeBlocks.map((block) => [block.id, block]));
+  const blocksWithValidSessions = new Set<string>();
   for (const session of input.sessions) {
-    if (session.status !== 'completed' || session.timeBlockId) continue;
+    const evidence = parseCompletedSessionEvidence(session);
+    if (!evidence) continue;
+    if (evidence.timeBlockId) blocksWithValidSessions.add(evidence.timeBlockId);
+    const linkedBlock = evidence.timeBlockId ? blockById.get(evidence.timeBlockId) : undefined;
     const attr = resolveAttribution(
-      { taskId: session.taskId, projectId: session.projectId },
+      {
+        taskId: session.taskId || linkedBlock?.taskId,
+        projectId: session.projectId || linkedBlock?.projectId,
+        goalId: session.goalIds?.[0] || linkedBlock?.goalId,
+      },
       lookup
     );
-    bump(attr.projectId, session.endTime || session.startTime);
+    bump(attr.projectId, new Date(evidence.interval.end));
+  }
+  for (const block of input.timeBlocks) {
+    if (
+      block.deleted
+      || !isExecutedStatus(block.status)
+      || blocksWithValidSessions.has(block.id)
+    ) continue;
+    const interval = validExecutionInterval(block.actualStartTime, block.actualEndTime);
+    if (!interval) continue;
+    const attr = resolveAttribution(block, lookup);
+    bump(attr.projectId, new Date(interval.end));
   }
   return map;
 }
@@ -941,15 +1018,25 @@ export function computePerformanceOverview(
   filters: PerformanceFilters = EMPTY_FILTERS,
   now: Date = new Date()
 ): PerformanceOverview {
+  const scopedInput: PerformanceInput = input.ownerUid
+    ? {
+        ...input,
+        timeBlocks: input.timeBlocks.filter((item) => item.userId === input.ownerUid),
+        sessions: input.sessions.filter((item) => item.userId === input.ownerUid),
+        tasks: input.tasks.filter((item) => item.userId === input.ownerUid),
+        projects: input.projects.filter((item) => item.userId === input.ownerUid),
+        goals: input.goals.filter((item) => item.userId === input.ownerUid),
+      }
+    : input;
   const lookup: Lookup = {
-    taskById: new Map(input.tasks.map((t) => [t.id, t])),
-    projectById: new Map(input.projects.map((p) => [p.id, p])),
-    goalById: new Map(input.goals.map((g) => [g.id, g])),
+    taskById: new Map(scopedInput.tasks.map((t) => [t.id, t])),
+    projectById: new Map(scopedInput.projects.map((p) => [p.id, p])),
+    goalById: new Map(scopedInput.goals.map((g) => [g.id, g])),
   };
 
-  const main = aggregateWindow(input, period.start, period.end, filters, lookup, true, now);
+  const main = aggregateWindow(scopedInput, period.start, period.end, filters, lookup, true, now);
   const prev = aggregateWindow(
-    input,
+    scopedInput,
     period.comparisonStart,
     period.comparisonEnd,
     filters,
@@ -970,7 +1057,7 @@ export function computePerformanceOverview(
       goalIds.add(filteredProject.goalId);
     }
   } else {
-    for (const goal of input.goals) {
+    for (const goal of scopedInput.goals) {
       if (goal.status === 'active') goalIds.add(goal.id); // show planned-but-idle goals
     }
   }
@@ -1021,10 +1108,10 @@ export function computePerformanceOverview(
     });
 
   // ----- Project rows ------------------------------------------------------
-  const lastActivity = buildLastActivityMap(input, lookup);
+  const lastActivity = buildLastActivityMap(scopedInput, lookup);
   const openStatuses = new Set(['pending', 'in_progress', 'todo', 'blocked']);
   const openTasksByProject = new Map<string, number>();
-  for (const task of input.tasks) {
+  for (const task of scopedInput.tasks) {
     if (task.deleted || !task.projectId || !openStatuses.has(task.status)) continue;
     openTasksByProject.set(task.projectId, (openTasksByProject.get(task.projectId) || 0) + 1);
   }
@@ -1036,7 +1123,7 @@ export function computePerformanceOverview(
   }
 
   const projectIds = new Set<string>(Array.from(main.projectAgg.keys()));
-  for (const project of input.projects) {
+  for (const project of scopedInput.projects) {
     if (project.status === 'active') projectIds.add(project.id);
   }
   const projects: ProjectPerformance[] = Array.from(projectIds)

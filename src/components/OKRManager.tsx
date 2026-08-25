@@ -9,8 +9,9 @@ import {
   CheckCircle, AlertTriangle, Flag, ChevronRight, X, Loader2,
   FolderOpen, ListTodo, AlertCircle, Check, FileText, Map, Sparkles
 } from 'lucide-react';
-import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
+import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Session, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
 import { stripGaiKeyMarker } from '@/lib/goalArchitect';
+import { collectBlockExecutionRecords, type BlockExecutionRecord } from '@/lib/executionAggregation';
 import { RichNoteEditor } from './RichNoteEditor';
 import { GoalRoadmapView } from './GoalRoadmapView';
 import VisionBoardEnhanced from './VisionBoardEnhanced';
@@ -28,6 +29,8 @@ interface OKRManagerProps {
   projects: Project[];
   tasks: Task[];
   timeBlocks?: TimeBlock[];
+  sessions?: Session[];
+  sessionCoverage?: 'loading' | 'ready' | 'error';
   currentUserId?: string;
   isLoading?: boolean;
 
@@ -65,6 +68,8 @@ interface OKRContextValue {
   projects: Project[];
   tasks: Task[];
   keyResults: KeyResult[];
+  blockExecution: ReadonlyMap<string, BlockExecutionRecord> | null;
+  sessionCoverage: 'loading' | 'ready' | 'error';
 }
 
 const OKRContext = createContext<OKRContextValue | null>(null);
@@ -263,7 +268,7 @@ function statusAllowed(mode: Mode, status?: string): boolean {
   if (mode === "actual") {
     return status === "completed" || status === "overrun"; // CRITICAL FIX
   }
-  return ["planned", "in_progress", "completed"].includes(status);
+  return ["planned", "in_progress", "completed", "overrun"].includes(status);
 }
 
 // ============================================================================
@@ -273,6 +278,8 @@ function statusAllowed(mode: Mode, status?: string): boolean {
 interface AggregationResult {
   totalMinutes: number;
   entriesCount: number;
+  actualAvailability: 'complete' | 'partial' | 'unavailable';
+  missingActualCount: number;
   debugInfo?: {
     viaProject: number;
     directGoal: number;
@@ -286,10 +293,20 @@ function aggregateGoalMinutes(args: {
   timeBlocks: TimeBlock[];
   projects: Project[];
   userId: string;
+  blockExecution: ReadonlyMap<string, BlockExecutionRecord> | null;
 }): AggregationResult {
-  const { goalId, mode, timeBlocks, projects, userId } = args;
+  const { goalId, mode, timeBlocks, projects, userId, blockExecution } = args;
 
-  const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+  if (mode === 'actual' && blockExecution === null) {
+    return {
+      totalMinutes: 0,
+      entriesCount: 0,
+      actualAvailability: 'unavailable',
+      missingActualCount: 0,
+      debugInfo: { viaProject: 0, directGoal: 0, viaTask: 0 },
+    };
+  }
+  const userTimeBlocks = timeBlocks.filter((tb) => !tb.deleted && tb.userId === userId);
   const goalProjectIds = new Set(
     projects.filter((p) => !p.deleted && p.goalId === goalId && p.userId === userId).map((p) => p.id)
   );
@@ -299,9 +316,10 @@ function aggregateGoalMinutes(args: {
   let viaProject = 0;
   let directGoal = 0;
   let viaTask = 0;
+  let missingActualCount = 0;
 
   for (const tb of userTimeBlocks) {
-    if (!statusAllowed(mode, tb.status)) continue;
+    if (mode === 'planned' && !statusAllowed(mode, tb.status)) continue;
 
     const startISO = formatISOSafe(tb.startTime);
     const endISO = formatISOSafe(tb.endTime);
@@ -326,8 +344,14 @@ function aggregateGoalMinutes(args: {
     seen.add(uniqueKey);
 
     let duration: number;
-    if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
-      duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
+    if (mode === 'actual') {
+      const execution = blockExecution?.get(tb.id);
+      if (!execution) continue;
+      if (execution.actualMinutes === null) {
+        missingActualCount += 1;
+        continue;
+      }
+      duration = execution.actualMinutes;
     } else {
       duration = computeDurationMinutes(tb.startTime, tb.endTime);
     }
@@ -335,7 +359,13 @@ function aggregateGoalMinutes(args: {
     totalMinutes += duration;
   }
 
-  return { totalMinutes, entriesCount: seen.size, debugInfo: { viaProject, directGoal, viaTask } };
+  return {
+    totalMinutes,
+    entriesCount: seen.size,
+    actualAvailability: missingActualCount > 0 ? 'partial' : 'complete',
+    missingActualCount,
+    debugInfo: { viaProject, directGoal, viaTask },
+  };
 }
 
 function aggregateProjectMinutes(args: {
@@ -343,10 +373,14 @@ function aggregateProjectMinutes(args: {
   mode: Mode;
   timeBlocks: TimeBlock[];
   userId: string;
+  blockExecution: ReadonlyMap<string, BlockExecutionRecord> | null;
 }): AggregationResult {
-  const { projectId, mode, timeBlocks, userId } = args;
+  const { projectId, mode, timeBlocks, userId, blockExecution } = args;
 
-  const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+  if (mode === 'actual' && blockExecution === null) {
+    return { totalMinutes: 0, entriesCount: 0, actualAvailability: 'unavailable', missingActualCount: 0 };
+  }
+  const userTimeBlocks = timeBlocks.filter((tb) => !tb.deleted && tb.userId === userId);
   
   // 🔍 DETECTIVE DEBUG - Critical aggregation investigation
   if (process.env.NODE_ENV !== 'production') {
@@ -365,9 +399,10 @@ function aggregateProjectMinutes(args: {
   
   const seen = new Set<string>();
   let totalMinutes = 0;
+  let missingActualCount = 0;
 
   for (const tb of userTimeBlocks) {
-    if (!statusAllowed(mode, tb.status)) continue;
+    if (mode === 'planned' && !statusAllowed(mode, tb.status)) continue;
     if (tb.projectId !== projectId) continue;
 
     const startISO = formatISOSafe(tb.startTime);
@@ -378,8 +413,14 @@ function aggregateProjectMinutes(args: {
     seen.add(uniqueKey);
 
     let duration: number;
-    if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
-      duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
+    if (mode === 'actual') {
+      const execution = blockExecution?.get(tb.id);
+      if (!execution) continue;
+      if (execution.actualMinutes === null) {
+        missingActualCount += 1;
+        continue;
+      }
+      duration = execution.actualMinutes;
     } else {
       duration = computeDurationMinutes(tb.startTime, tb.endTime);
     }
@@ -387,7 +428,12 @@ function aggregateProjectMinutes(args: {
     totalMinutes += duration;
   }
 
-  return { totalMinutes, entriesCount: seen.size };
+  return {
+    totalMinutes,
+    entriesCount: seen.size,
+    actualAvailability: missingActualCount > 0 ? 'partial' : 'complete',
+    missingActualCount,
+  };
 }
 
 function aggregateTaskMinutes(args: {
@@ -395,15 +441,20 @@ function aggregateTaskMinutes(args: {
   mode: Mode;
   timeBlocks: TimeBlock[];
   userId: string;
+  blockExecution: ReadonlyMap<string, BlockExecutionRecord> | null;
 }): AggregationResult {
-  const { taskId, mode, timeBlocks, userId } = args;
+  const { taskId, mode, timeBlocks, userId, blockExecution } = args;
 
-  const userTimeBlocks = timeBlocks.filter((tb) => !tb.userId || tb.userId === userId);
+  if (mode === 'actual' && blockExecution === null) {
+    return { totalMinutes: 0, entriesCount: 0, actualAvailability: 'unavailable', missingActualCount: 0 };
+  }
+  const userTimeBlocks = timeBlocks.filter((tb) => !tb.deleted && tb.userId === userId);
   const seen = new Set<string>();
   let totalMinutes = 0;
+  let missingActualCount = 0;
 
   for (const tb of userTimeBlocks) {
-    if (!statusAllowed(mode, tb.status)) continue;
+    if (mode === 'planned' && !statusAllowed(mode, tb.status)) continue;
     if (tb.taskId !== taskId) continue;
 
     const startISO = formatISOSafe(tb.startTime);
@@ -414,8 +465,14 @@ function aggregateTaskMinutes(args: {
     seen.add(uniqueKey);
 
     let duration: number;
-    if (mode === "actual" && tb.actualStartTime && tb.actualEndTime) {
-      duration = computeDurationMinutes(tb.actualStartTime, tb.actualEndTime);
+    if (mode === 'actual') {
+      const execution = blockExecution?.get(tb.id);
+      if (!execution) continue;
+      if (execution.actualMinutes === null) {
+        missingActualCount += 1;
+        continue;
+      }
+      duration = execution.actualMinutes;
     } else {
       duration = computeDurationMinutes(tb.startTime, tb.endTime);
     }
@@ -423,7 +480,12 @@ function aggregateTaskMinutes(args: {
     totalMinutes += duration;
   }
 
-  return { totalMinutes, entriesCount: seen.size };
+  return {
+    totalMinutes,
+    entriesCount: seen.size,
+    actualAvailability: missingActualCount > 0 ? 'partial' : 'complete',
+    missingActualCount,
+  };
 }
 
 // ============================================================================
@@ -431,7 +493,7 @@ function aggregateTaskMinutes(args: {
 // ============================================================================
 
 function useGoalMetrics(goal: Goal) {
-  const { timeBlocks, projects, keyResults, currentUserId } = useOKRContext();
+  const { timeBlocks, projects, keyResults, currentUserId, blockExecution } = useOKRContext();
 
   return useMemo(() => {
     if (!currentUserId) {
@@ -443,7 +505,9 @@ function useGoalMetrics(goal: Goal) {
         progress: 0, 
         krProgress: null,
         variance: 0,
-        efficiency: 0
+        efficiency: 0,
+        actualAvailability: 'unavailable' as const,
+        missingActualCount: 0,
       };
     }
 
@@ -453,6 +517,7 @@ function useGoalMetrics(goal: Goal) {
       timeBlocks,
       projects,
       userId: currentUserId,
+      blockExecution,
     });
 
     const actualResult = aggregateGoalMinutes({
@@ -461,6 +526,7 @@ function useGoalMetrics(goal: Goal) {
       timeBlocks,
       projects,
       userId: currentUserId,
+      blockExecution,
     });
 
     const plannedHours = plannedResult.totalMinutes / 60;
@@ -506,7 +572,9 @@ function useGoalMetrics(goal: Goal) {
 
     return { 
       plannedHours, 
-      actualHours, 
+      actualHours,
+      actualAvailability: actualResult.actualAvailability,
+      missingActualCount: actualResult.missingActualCount,
       targetHours, 
       weeklyHoursTarget, 
       progress, 
@@ -514,15 +582,23 @@ function useGoalMetrics(goal: Goal) {
       variance,
       efficiency: Math.round(efficiency)
     };
-  }, [goal, timeBlocks, projects, keyResults, currentUserId]);
+  }, [blockExecution, goal, timeBlocks, projects, keyResults, currentUserId]);
 }
 
 function useProjectMetrics(project: Project) {
-  const { timeBlocks, tasks, currentUserId } = useOKRContext();
+  const { timeBlocks, tasks, currentUserId, blockExecution } = useOKRContext();
 
   return useMemo(() => {
     if (!currentUserId) {
-      return { plannedHours: 0, actualHours: 0, completedTasks: 0, totalTasks: 0, progress: 0 };
+      return {
+        plannedHours: 0,
+        actualHours: 0,
+        actualAvailability: 'unavailable' as const,
+        missingActualCount: 0,
+        completedTasks: 0,
+        totalTasks: 0,
+        progress: 0,
+      };
     }
 
     // 🔍 DETECTIVE DEBUG - Critical Progress Bug Investigation
@@ -542,6 +618,7 @@ function useProjectMetrics(project: Project) {
       mode: "planned",
       timeBlocks,
       userId: currentUserId,
+      blockExecution,
     });
 
     const actualResult = aggregateProjectMinutes({
@@ -549,6 +626,7 @@ function useProjectMetrics(project: Project) {
       mode: "actual",
       timeBlocks,
       userId: currentUserId,
+      blockExecution,
     });
 
     const projectTasks = tasks.filter(
@@ -574,19 +652,28 @@ function useProjectMetrics(project: Project) {
     return {
       plannedHours: plannedResult.totalMinutes / 60,
       actualHours,
+      actualAvailability: actualResult.actualAvailability,
+      missingActualCount: actualResult.missingActualCount,
       completedTasks,
       totalTasks,
       progress: Math.round(progress * 10) / 10, // 🔧 Preserve decimal precision
     };
-  }, [project, timeBlocks, tasks, currentUserId]);
+  }, [blockExecution, project, timeBlocks, tasks, currentUserId]);
 }
 
 function useTaskMetrics(task: Task) {
-  const { timeBlocks, currentUserId } = useOKRContext();
+  const { timeBlocks, currentUserId, blockExecution } = useOKRContext();
 
   return useMemo(() => {
     if (!currentUserId) {
-      return { plannedMinutes: 0, actualMinutes: 0, progress: 0, isOvertime: false };
+      return {
+        plannedMinutes: 0,
+        actualMinutes: 0,
+        actualAvailability: 'unavailable' as const,
+        missingActualCount: 0,
+        progress: 0,
+        isOvertime: false,
+      };
     }
 
     const plannedResult = aggregateTaskMinutes({
@@ -594,6 +681,7 @@ function useTaskMetrics(task: Task) {
       mode: "planned",
       timeBlocks,
       userId: currentUserId,
+      blockExecution,
     });
 
     const actualResult = aggregateTaskMinutes({
@@ -601,6 +689,7 @@ function useTaskMetrics(task: Task) {
       mode: "actual",
       timeBlocks,
       userId: currentUserId,
+      blockExecution,
     });
 
     const estimated = task.estimatedMinutes ?? 0;
@@ -619,10 +708,12 @@ function useTaskMetrics(task: Task) {
     return {
       plannedMinutes: plannedResult.totalMinutes,
       actualMinutes: actualResult.totalMinutes,
+      actualAvailability: actualResult.actualAvailability,
+      missingActualCount: actualResult.missingActualCount,
       progress: Math.round(progress),
       isOvertime,
     };
-  }, [task, timeBlocks, currentUserId]);
+  }, [blockExecution, task, timeBlocks, currentUserId]);
 }
 
 // ============================================================================
@@ -862,10 +953,15 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes,
         />
         <MetricRow
           icon={<TrendingUp className="w-3.5 h-3.5" />}
-          label="Actual"
-          value={`${formatHours(metrics.actualHours)}h`}
-          subValue={metrics.targetHours > 0 ? `/ ${formatHours(metrics.targetHours)}h` : undefined}
+          label={metrics.actualAvailability === 'partial' ? 'Known actual ≥' : 'Known actual'}
+          value={metrics.actualAvailability === 'unavailable' ? 'Unavailable' : `${formatHours(metrics.actualHours)}h`}
+          subValue={metrics.actualAvailability !== 'unavailable' && metrics.targetHours > 0 ? `/ ${formatHours(metrics.targetHours)}h` : undefined}
         />
+        {metrics.actualAvailability === 'partial' && (
+          <p className="text-xs text-amber-700">
+            {metrics.missingActualCount} completed block{metrics.missingActualCount === 1 ? '' : 's'} lack Session or explicit actual evidence.
+          </p>
+        )}
       </div>
 
       <div>
@@ -1030,8 +1126,10 @@ function ProjectCard({ project, isSelected, onSelect, onUpdate, onDelete }: Proj
         </span>
         <span className="flex items-center gap-1">
           <Clock className="w-3.5 h-3.5" />
-          {formatHours(metrics.actualHours)}h
-          {(project.totalHoursTarget ?? 0) > 0 && <span className="text-gray-400">/ {project.totalHoursTarget}h</span>}
+          {metrics.actualAvailability === 'unavailable'
+            ? 'Actual unavailable'
+            : `${metrics.actualAvailability === 'partial' ? '≥ ' : ''}${formatHours(metrics.actualHours)}h actual`}
+          {metrics.actualAvailability !== 'unavailable' && (project.totalHoursTarget ?? 0) > 0 && <span className="text-gray-400">/ {project.totalHoursTarget}h</span>}
         </span>
       </div>
 
@@ -1127,9 +1225,15 @@ function TaskCard({ task, onToggleComplete, onUpdate, onDelete }: TaskCardProps)
             {metrics.actualMinutes > 0 && (
               <span className={`text-xs flex items-center gap-1 ${metrics.isOvertime ? "text-red-600" : "text-indigo-600"}`}>
                 <TrendingUp className="w-3 h-3" />
-                {metrics.actualMinutes}min
+                {metrics.actualAvailability === 'partial' ? '≥ ' : ''}{metrics.actualMinutes}min measured
                 {metrics.isOvertime && " ⚠️"}
               </span>
+            )}
+            {metrics.actualAvailability === 'unavailable' && (
+              <span className="text-xs text-amber-700">Execution unavailable</span>
+            )}
+            {metrics.actualAvailability === 'partial' && metrics.actualMinutes === 0 && (
+              <span className="text-xs text-amber-700">Execution evidence missing</span>
             )}
           </div>
 
@@ -1772,6 +1876,8 @@ export default function OKRManager(props: OKRManagerProps) {
     projects,
     tasks,
     timeBlocks = [],
+    sessions = [],
+    sessionCoverage = 'loading',
     currentUserId,
     isLoading = false,
     onCreateGoal,
@@ -1832,14 +1938,27 @@ export default function OKRManager(props: OKRManagerProps) {
 
   const visibleKeyResults = useMemo(() => {
     if (!currentUserId) return [];
-    // nel tuo progetto alcuni KR legacy potrebbero non avere userId
-    return keyResults.filter((kr) => !kr.deleted && (!kr.userId || kr.userId === currentUserId));
+    return keyResults.filter((kr) => !kr.deleted && kr.userId === currentUserId);
   }, [keyResults, currentUserId]);
 
   const visibleTimeBlocks = useMemo(() => {
     if (!currentUserId) return [];
-    return timeBlocks.filter((tb) => !tb.userId || tb.userId === currentUserId);
+    return timeBlocks.filter((tb) => !tb.deleted && tb.userId === currentUserId);
   }, [timeBlocks, currentUserId]);
+
+  const visibleSessions = useMemo(() => {
+    if (!currentUserId) return [];
+    return sessions.filter((session) => !session.deleted && session.userId === currentUserId);
+  }, [currentUserId, sessions]);
+
+  const blockExecution = useMemo(() => {
+    if (!currentUserId || sessionCoverage !== 'ready') return null;
+    return collectBlockExecutionRecords({
+      ownerUid: currentUserId,
+      timeBlocks: visibleTimeBlocks,
+      sessions: visibleSessions,
+    });
+  }, [currentUserId, sessionCoverage, visibleSessions, visibleTimeBlocks]);
 
   // --------------------------------------------------------------------------
   // DERIVED SELECTIONS
@@ -1966,6 +2085,8 @@ export default function OKRManager(props: OKRManagerProps) {
       projects: visibleProjects,
       tasks: visibleTasks,
       keyResults: visibleKeyResults,
+      blockExecution,
+      sessionCoverage,
     }),
     [
       currentUserId,
@@ -1975,6 +2096,8 @@ export default function OKRManager(props: OKRManagerProps) {
       visibleProjects,
       visibleTasks,
       visibleKeyResults,
+      blockExecution,
+      sessionCoverage,
     ]
   );
 
@@ -2017,6 +2140,11 @@ export default function OKRManager(props: OKRManagerProps) {
   return (
     <OKRContext.Provider value={contextValue}>
       <div className="space-y-6">
+        {sessionCoverage === 'error' && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+            Execution evidence is unavailable. Planned work remains visible, but actual-time and adherence values are withheld.
+          </div>
+        )}
         {/* Top toolbar */}
         <div className="flex flex-wrap items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
           <button
@@ -2369,9 +2497,10 @@ export default function OKRManager(props: OKRManagerProps) {
                         <GoalRoadmapView
                           goal={selectedGoal}
                           roadmap={existingRoadmap}
-                          timeBlocks={timeBlocks}
+                          timeBlocks={visibleTimeBlocks}
                           projects={visibleProjects}
                           tasks={visibleTasks}
+                          blockExecution={blockExecution}
                           className="border border-gray-200 dark:border-gray-700 rounded-lg"
                         />
                       );

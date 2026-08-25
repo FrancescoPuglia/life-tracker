@@ -1,7 +1,13 @@
 import type { Note, Session, TimeBlock } from '@/types';
+import {
+  dateEpoch,
+  intervalOverlapMs,
+  parseCompletedSessionEvidence,
+  proportionalSessionMinutes,
+  validExecutionInterval,
+  type ExecutionInterval,
+} from './executionEvidence';
 
-const MAX_INTERVAL_MS = 24 * 60 * 60 * 1_000;
-const SESSION_DURATION_TOLERANCE_SECONDS = 5;
 const DAY_SEARCH_RADIUS_MS = 36 * 60 * 60 * 1_000;
 const QUICK_CAPTURE_MAX_LENGTH = 1_000;
 
@@ -45,17 +51,6 @@ export interface TodayExecutionInput {
   readonly sessionCoverage: TodaySessionCoverage;
 }
 
-interface Interval {
-  readonly start: number;
-  readonly end: number;
-}
-
-interface ParsedSession {
-  readonly interval: Interval;
-  readonly netMinutes: number;
-  readonly timeBlockId: string | null;
-}
-
 export function resolveLocalDayBounds(now: Date, timezone: string): LocalDayBounds {
   const nowEpoch = dateEpoch(now);
   if (nowEpoch === null) throw new Error('Today reference time is invalid.');
@@ -86,14 +81,14 @@ export function computeTodayExecutionMetrics(
 
   let plannedMinutes = 0;
   let invalidPlannedBlockCount = 0;
-  const eligibleBlocks: Array<Readonly<{ block: TimeBlock; interval: Interval }>> = [];
-  const scheduledIntervals = new Map<string, Interval>();
+  const eligibleBlocks: Array<Readonly<{ block: TimeBlock; interval: ExecutionInterval }>> = [];
+  const scheduledIntervals = new Map<string, ExecutionInterval>();
   const ownerBlocks = input.timeBlocks.filter((block) => (
     block.userId === input.ownerUid && block.deleted !== true
   ));
 
   for (const block of ownerBlocks) {
-    const interval = validInterval(block.startTime, block.endTime);
+    const interval = validExecutionInterval(block.startTime, block.endTime);
     if (!interval) {
       const start = dateEpoch(block.startTime);
       if (start !== null && start >= bounds.start && start < bounds.end) {
@@ -102,10 +97,10 @@ export function computeTodayExecutionMetrics(
       continue;
     }
     scheduledIntervals.set(block.id, interval);
-    if (overlapMs(interval, bounds) <= 0) continue;
+    if (intervalOverlapMs(interval, bounds) <= 0) continue;
     eligibleBlocks.push({ block, interval });
     if (productiveBlock(block)) {
-      plannedMinutes += overlapMs(interval, bounds) / 60_000;
+      plannedMinutes += intervalOverlapMs(interval, bounds) / 60_000;
     }
   }
 
@@ -157,7 +152,7 @@ export function computeTodayExecutionMetrics(
       }
       continue;
     }
-    const parsed = parseCompletedSession(session);
+    const parsed = parseCompletedSessionEvidence(session);
     if (!parsed) {
       if (sessionStart !== null && sessionStart >= bounds.start && sessionStart < bounds.end) {
         invalidActualSourceCount += 1;
@@ -165,24 +160,23 @@ export function computeTodayExecutionMetrics(
       continue;
     }
     if (parsed.timeBlockId) blocksWithValidSessions.add(parsed.timeBlockId);
-    const overlap = overlapMs(parsed.interval, bounds);
-    if (overlap <= 0) continue;
-    const wallMs = parsed.interval.end - parsed.interval.start;
-    actualMinutes += parsed.netMinutes * overlap / wallMs;
+    const sessionMinutes = proportionalSessionMinutes(parsed, bounds);
+    if (sessionMinutes <= 0) continue;
+    actualMinutes += sessionMinutes;
     completedSessionCount += 1;
   }
 
   for (const block of ownerBlocks) {
     if (blocksWithValidSessions.has(block.id)) continue;
     const scheduled = scheduledIntervals.get(block.id) ?? null;
-    const scheduledOverlapsToday = scheduled !== null && overlapMs(scheduled, bounds) > 0;
+    const scheduledOverlapsToday = scheduled !== null && intervalOverlapMs(scheduled, bounds) > 0;
     const hasAnyActualField = block.actualStartTime !== undefined || block.actualEndTime !== undefined;
     let validExplicitActual = false;
     if (hasAnyActualField) {
-      const actual = validInterval(block.actualStartTime, block.actualEndTime);
+      const actual = validExecutionInterval(block.actualStartTime, block.actualEndTime);
       if (actual) {
         validExplicitActual = true;
-        const overlap = overlapMs(actual, bounds);
+        const overlap = intervalOverlapMs(actual, bounds);
         if (overlap > 0) {
           actualMinutes += overlap / 60_000;
           explicitActualBlockCount += 1;
@@ -264,8 +258,7 @@ export function buildQuickCaptureNote(
 }
 
 export function completedSessionNetMinutes(session: Session): number | null {
-  if (session.status !== 'completed' || session.deleted === true) return null;
-  return parseCompletedSession(session)?.netMinutes ?? null;
+  return parseCompletedSessionEvidence(session)?.netMinutes ?? null;
 }
 
 function productiveBlock(block: TimeBlock): boolean {
@@ -274,56 +267,6 @@ function productiveBlock(block: TimeBlock): boolean {
 
 function executedBlock(block: TimeBlock): boolean {
   return block.status === 'completed' || block.status === 'overrun';
-}
-
-function parseCompletedSession(session: Session): ParsedSession | null {
-  const start = dateEpoch(session.startTime);
-  if (start === null) return null;
-  const durationSeconds = typeof session.duration === 'number' && Number.isFinite(session.duration)
-    ? session.duration
-    : null;
-  if (durationSeconds !== null && durationSeconds < 0) return null;
-  const explicitEnd = dateEpoch(session.endTime);
-  let end = explicitEnd;
-  let netMinutes = durationSeconds === null ? null : durationSeconds / 60;
-  if (end === null && netMinutes !== null) end = start + netMinutes * 60_000;
-  if (end === null) return null;
-  const wallSeconds = (end - start) / 1_000;
-  if (wallSeconds <= 0 || wallSeconds > MAX_INTERVAL_MS / 1_000) return null;
-  if (netMinutes === null) netMinutes = wallSeconds / 60;
-  if (
-    netMinutes < 0
-    || netMinutes * 60 > wallSeconds + SESSION_DURATION_TOLERANCE_SECONDS
-    || netMinutes > MAX_INTERVAL_MS / 60_000
-  ) {
-    return null;
-  }
-  return {
-    interval: { start, end },
-    netMinutes,
-    timeBlockId: typeof session.timeBlockId === 'string' && session.timeBlockId.length > 0
-      ? session.timeBlockId
-      : null,
-  };
-}
-
-function validInterval(rawStart: unknown, rawEnd: unknown): Interval | null {
-  const start = dateEpoch(rawStart);
-  const end = dateEpoch(rawEnd);
-  if (start === null || end === null || end <= start || end - start > MAX_INTERVAL_MS) {
-    return null;
-  }
-  return { start, end };
-}
-
-function dateEpoch(value: unknown): number | null {
-  if (!(value instanceof Date)) return null;
-  const epoch = value.getTime();
-  return Number.isFinite(epoch) ? epoch : null;
-}
-
-function overlapMs(left: Interval, right: Pick<LocalDayBounds, 'start' | 'end'>): number {
-  return Math.max(0, Math.min(left.end, right.end) - Math.max(left.start, right.start));
 }
 
 function localDateFormatter(timezone: string): Intl.DateTimeFormat {

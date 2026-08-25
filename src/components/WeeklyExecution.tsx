@@ -1,21 +1,25 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Target, Clock, TrendingUp, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import type { Session } from '@/types';
+import { db } from '@/lib/database';
+import { computePerformanceOverview, type PerformanceInput } from '@/lib/performance/metrics';
+import { dayKey, resolvePeriod } from '@/lib/performance/period';
+import { toDateSafe } from '@/utils/dateUtils';
 import { useDataContext } from '@/providers/DataProvider';
 import WpiWeeklyExecutionSummary from '@/components/WeeklyPlanning/WpiWeeklyExecutionSummary';
 
-function getWeekBounds(date: Date): { start: Date; end: Date } {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-  return { start: monday, end: sunday };
+type SessionStatus = 'loading' | 'ready' | 'error';
+
+function deserializeSession(raw: Session): Session {
+  return {
+    ...raw,
+    startTime: toDateSafe(raw.startTime),
+    endTime: raw.endTime ? toDateSafe(raw.endTime) : undefined,
+    createdAt: toDateSafe(raw.createdAt),
+    updatedAt: toDateSafe(raw.updatedAt),
+  };
 }
 
 function formatHours(minutes: number): string {
@@ -26,140 +30,152 @@ function formatHours(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
-interface GoalBreakdown {
-  goalId: string;
-  goalTitle: string;
-  planned: number;
-  completed: number;
-  measured: number; // blocks with actual start/end times
-  estimated: number; // blocks using planned times as fallback
-  blocks: number;
-  completedBlocks: number;
+function rateText(rate: number | null, partial = false): string {
+  if (rate === null) return '—';
+  return `${partial ? '≥ ' : ''}${rate}%`;
+}
+
+function rateTone(rate: number | null): string {
+  if (rate === null) return 'text-gray-400';
+  if (rate >= 80) return 'text-green-400';
+  if (rate >= 50) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
+function rateBar(rate: number | null): string {
+  if (rate === null) return 'bg-gray-500';
+  if (rate >= 80) return 'bg-green-500';
+  if (rate >= 50) return 'bg-yellow-500';
+  return 'bg-red-500';
 }
 
 export default function WeeklyExecution() {
   const data = useDataContext();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>('loading');
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSessionStatus('loading');
+    (async () => {
+      try {
+        const raw = await db.getByIndex<Session>('sessions', 'userId', data.userId);
+        if (cancelled) return;
+        setSessions(raw.filter((item) => item.userId === data.userId).map(deserializeSession));
+        setSessionStatus('ready');
+      } catch (error) {
+        console.error('[WeeklyExecution] Failed to load sessions:', error);
+        if (cancelled) return;
+        setSessions([]);
+        setSessionStatus('error');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.userId, reloadKey]);
 
   const weekData = useMemo(() => {
-    if (data.status !== 'ready') return null;
-
+    if (data.status !== 'ready' || sessionStatus !== 'ready') return null;
     const now = new Date();
-    const { start, end } = getWeekBounds(now);
-
-    const weekBlocks = data.timeBlocks.filter(b => {
-      if (b.deleted) return false;
-      const bStart = new Date(b.startTime);
-      return bStart >= start && bStart <= end;
+    const period = resolvePeriod(now, 'week', now);
+    const input: PerformanceInput = {
+      ownerUid: data.userId,
+      timeBlocks: data.timeBlocks,
+      sessions,
+      tasks: data.tasks,
+      projects: data.projects,
+      goals: data.goals,
+    };
+    const overview = computePerformanceOverview(input, period, undefined, now);
+    const productiveWeekBlocks = data.timeBlocks.filter((block) => {
+      if (
+        block.userId !== data.userId
+        || block.deleted
+        || block.type === 'break'
+        || block.type === 'buffer'
+      ) return false;
+      const start = block.startTime instanceof Date ? block.startTime.getTime() : Number.NaN;
+      return Number.isFinite(start) && start >= period.start.getTime() && start < period.end.getTime();
     });
-
-    let totalPlanned = 0;
-    let totalCompleted = 0;
-    let completedCount = 0;
-    let skippedCount = 0;
-    let measuredCount = 0; // blocks with real actualStartTime/actualEndTime
-    let estimatedCount = 0; // completed blocks using planned time as proxy
-    const goalMap = new Map<string, GoalBreakdown>();
-
-    for (const block of weekBlocks) {
-      const startTime = new Date(block.startTime);
-      const endTime = new Date(block.endTime);
-      const plannedMin = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-      totalPlanned += plannedMin;
-
-      let actualMin = 0;
-      let isMeasured = false;
-      if (block.status === 'completed') {
-        completedCount++;
-        isMeasured = !!(block.actualStartTime && block.actualEndTime);
-        if (isMeasured) {
-          measuredCount++;
-          const aStart = new Date(block.actualStartTime!);
-          const aEnd = new Date(block.actualEndTime!);
-          actualMin = (aEnd.getTime() - aStart.getTime()) / (1000 * 60);
-        } else {
-          estimatedCount++;
-          // Fallback: use planned duration for completed blocks without actual times
-          actualMin = plannedMin;
-        }
-        totalCompleted += actualMin;
-      } else if (block.status === 'cancelled') {
-        skippedCount++;
-      }
-
-      // Goal breakdown
-      const gId = block.goalId || '_unlinked';
-      if (!goalMap.has(gId)) {
-        const goal = data.goals.find(g => g.id === gId);
-        goalMap.set(gId, {
-          goalId: gId,
-          goalTitle: goal?.title || 'Senza Goal',
-          planned: 0,
-          completed: 0,
-          measured: 0,
-          estimated: 0,
-          blocks: 0,
-          completedBlocks: 0,
-        });
-      }
-      const entry = goalMap.get(gId)!;
-      entry.planned += plannedMin;
-      entry.blocks += 1;
-      if (block.status === 'completed') {
-        entry.completed += actualMin;
-        entry.completedBlocks += 1;
-        if (isMeasured) entry.measured++; else entry.estimated++;
-      }
-    }
-
-    // Today stats
-    const todayStr = now.toDateString();
-    const todayBlocks = weekBlocks.filter(b => new Date(b.startTime).toDateString() === todayStr);
-    let todayPlanned = 0;
-    let todayCompleted = 0;
-    for (const b of todayBlocks) {
-      const pMin = (new Date(b.endTime).getTime() - new Date(b.startTime).getTime()) / (1000 * 60);
-      todayPlanned += pMin;
-      if (b.status === 'completed') {
-        if (b.actualStartTime && b.actualEndTime) {
-          todayCompleted += (new Date(b.actualEndTime).getTime() - new Date(b.actualStartTime).getTime()) / (1000 * 60);
-        } else {
-          todayCompleted += pMin; // fallback to planned
-        }
-      }
-    }
-
-    const execRate = totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 100) : 0;
-    const todayRate = todayPlanned > 0 ? Math.round((todayCompleted / todayPlanned) * 100) : 0;
-    // Confidence: what fraction of completed blocks have real measured times
-    const confidenceRate = completedCount > 0 ? Math.round((measuredCount / completedCount) * 100) : 0;
-
-    const goalBreakdown = Array.from(goalMap.values())
-      .filter(g => g.planned > 0)
-      .sort((a, b) => b.planned - a.planned);
+    const completedCount = productiveWeekBlocks.filter(
+      (block) => block.status === 'completed' || block.status === 'overrun',
+    ).length;
+    const skippedCount = productiveWeekBlocks.filter((block) => block.status === 'cancelled').length;
+    const currentDayKey = dayKey(now);
+    const today = overview.timeSeries.find((point) => point.key === currentDayKey);
+    const todayMissingCount = overview.activity.filter(
+      (row) => row.dayKey === currentDayKey && row.timeSource === 'missing',
+    ).length;
+    const totalPlanned = overview.summary.plannedMinutes;
+    const totalCompleted = overview.summary.actualMinutes;
+    const execRate = totalPlanned > 0 ? Math.round(totalCompleted / totalPlanned * 100) : null;
+    const todayPlanned = today?.plannedMinutes ?? 0;
+    const todayCompleted = today?.actualMinutes ?? 0;
+    const todayRate = todayPlanned > 0 ? Math.round(todayCompleted / todayPlanned * 100) : null;
+    const actualPartial = overview.dataQuality.actualAvailability === 'partial';
+    const goalBreakdown = overview.goals
+      .filter((goal) => goal.plannedMinutes > 0 || goal.actualMinutes > 0)
+      .map((goal) => ({
+        goalId: goal.goalId ?? '_unlinked',
+        goalTitle: goal.goalName,
+        planned: goal.plannedMinutes,
+        completed: goal.actualMinutes,
+      }));
 
     return {
-      start,
-      end,
+      period,
       totalPlanned,
       totalCompleted,
       execRate,
-      totalBlocks: weekBlocks.length,
       completedCount,
       skippedCount,
-      measuredCount,
-      estimatedCount,
-      confidenceRate,
+      actualSourceCount: overview.dataQuality.actualSourceCount,
+      missingActualCount: overview.dataQuality.blocksMissingActualCount,
+      openSessionCount: overview.dataQuality.openSessionCount,
+      anomalousDurationCount: overview.dataQuality.anomalousDurationCount,
+      actualPartial,
       todayPlanned,
       todayCompleted,
       todayRate,
+      todayPartial: todayMissingCount > 0,
       goalBreakdown,
     };
-  }, [data.status, data.timeBlocks, data.goals]);
+  }, [data, sessionStatus, sessions]);
+
+  if (data.status === 'error') {
+    return (
+      <div className="bg-red-950/40 rounded-2xl border border-red-500/30 p-6 text-center" role="alert">
+        <AlertTriangle className="w-6 h-6 text-red-400 mx-auto mb-2" />
+        <p className="text-sm font-semibold text-red-200">I dati settimanali non sono disponibili.</p>
+      </div>
+    );
+  }
+
+  if (sessionStatus === 'error') {
+    return (
+      <div className="bg-amber-950/30 rounded-2xl border border-amber-500/30 p-6 text-center" role="alert">
+        <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+        <p className="text-sm font-semibold text-amber-200">L'esecuzione reale non è disponibile.</p>
+        <p className="text-xs text-amber-300/80 mt-1">
+          Le Session non sono state caricate: Life Tracker non mostrerà il dato mancante come zero.
+        </p>
+        <button
+          type="button"
+          onClick={() => setReloadKey((key) => key + 1)}
+          className="mt-3 px-3 py-1.5 rounded-lg border border-amber-400/40 bg-gray-900 text-xs font-semibold text-amber-100"
+        >
+          Riprova
+        </button>
+      </div>
+    );
+  }
 
   if (!weekData) {
     return (
       <div className="bg-gray-900 rounded-2xl border border-gray-700/50 p-6">
-        <div className="animate-pulse space-y-4">
+        <div className="animate-pulse space-y-4" data-testid="weekly-execution-skeleton">
           <div className="h-6 bg-gray-800 rounded w-48" />
           <div className="h-20 bg-gray-800 rounded" />
         </div>
@@ -167,14 +183,11 @@ export default function WeeklyExecution() {
     );
   }
 
-  const rateColor = weekData.execRate >= 80 ? 'text-green-400' : weekData.execRate >= 50 ? 'text-yellow-400' : 'text-red-400';
-  const rateBg = weekData.execRate >= 80 ? 'bg-green-500' : weekData.execRate >= 50 ? 'bg-yellow-500' : 'bg-red-500';
-
-  const weekLabel = `${weekData.start.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${weekData.end.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+  const weekEnd = new Date(weekData.period.end.getTime() - 1);
+  const weekLabel = `${weekData.period.start.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${weekEnd.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
 
   return (
     <div className="bg-gray-900 rounded-2xl border border-gray-700/50 overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between p-5 border-b border-gray-700/50">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -183,17 +196,17 @@ export default function WeeklyExecution() {
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">{weekLabel}</p>
         </div>
-        <div className={`text-3xl font-black ${rateColor}`}>
-          {weekData.execRate}%
+        <div className={`text-3xl font-black ${rateTone(weekData.execRate)}`}>
+          {rateText(weekData.execRate, weekData.actualPartial)}
         </div>
       </div>
 
       <div className="p-5 space-y-5">
-        {/* Main progress bar */}
         <div>
           <div className="flex justify-between text-sm mb-2">
             <span className="text-gray-400">
-              Completato: <span className="text-white font-semibold">{formatHours(weekData.totalCompleted)}</span>
+              {weekData.actualPartial ? 'Reale noto' : 'Reale'}:{' '}
+              <span className="text-white font-semibold">{formatHours(weekData.totalCompleted)}</span>
             </span>
             <span className="text-gray-400">
               Pianificato: <span className="text-white font-semibold">{formatHours(weekData.totalPlanned)}</span>
@@ -201,65 +214,67 @@ export default function WeeklyExecution() {
           </div>
           <div className="h-4 bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full ${rateBg} rounded-full transition-all duration-700`}
-              style={{ width: `${Math.min(100, weekData.execRate)}%` }}
+              className={`h-full ${rateBar(weekData.execRate)} rounded-full transition-all duration-700`}
+              style={{ width: `${Math.min(100, weekData.execRate ?? 0)}%` }}
             />
           </div>
         </div>
 
-        {/* Confidence indicator */}
-        {weekData.completedCount > 0 && weekData.confidenceRate < 100 && (
-          <div className="flex items-center gap-2 text-xs">
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
-            <span className="text-gray-500">
-              {weekData.measuredCount}/{weekData.completedCount} blocchi con tempo reale misurato
-              {weekData.estimatedCount > 0 && (
-                <span className="text-yellow-500/70"> - {weekData.estimatedCount} usano il tempo pianificato</span>
-              )}
+        {weekData.actualPartial && (
+          <div className="flex items-start gap-2 text-xs rounded-lg border border-amber-500/20 bg-amber-950/20 p-2.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <span className="text-amber-200/80">
+              {weekData.missingActualCount > 0
+                ? `${weekData.missingActualCount} blocchi eseguiti senza Session o intervallo reale. `
+                : ''}
+              {weekData.openSessionCount > 0
+                ? `${weekData.openSessionCount} Session ancora aperte sono escluse. `
+                : ''}
+              {weekData.anomalousDurationCount > 0
+                ? `${weekData.anomalousDurationCount} intervalli non validi sono esclusi. `
+                : ''}
+              Il totale è un minimo misurato; il tempo pianificato non viene usato come sostituto.
             </span>
           </div>
         )}
 
-        {/* Stats grid */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-gray-800/60 rounded-xl p-3 text-center border border-gray-700/30">
             <CheckCircle2 className="w-4 h-4 mx-auto mb-1 text-green-400" />
             <div className="text-lg font-bold text-white">{weekData.completedCount}</div>
-            <div className="text-[10px] text-gray-500 uppercase">Completati</div>
+            <div className="text-[10px] text-gray-500 uppercase">Eseguiti</div>
           </div>
           <div className="bg-gray-800/60 rounded-xl p-3 text-center border border-gray-700/30">
             <Clock className="w-4 h-4 mx-auto mb-1 text-blue-400" />
-            <div className="text-lg font-bold text-white">{weekData.totalBlocks}</div>
-            <div className="text-[10px] text-gray-500 uppercase">Pianificati</div>
+            <div className="text-lg font-bold text-white">{weekData.actualSourceCount}</div>
+            <div className="text-[10px] text-gray-500 uppercase">Fonti reali</div>
           </div>
           <div className="bg-gray-800/60 rounded-xl p-3 text-center border border-gray-700/30">
             <XCircle className="w-4 h-4 mx-auto mb-1 text-red-400" />
             <div className="text-lg font-bold text-white">{weekData.skippedCount}</div>
-            <div className="text-[10px] text-gray-500 uppercase">Saltati</div>
+            <div className="text-[10px] text-gray-500 uppercase">Annullati</div>
           </div>
         </div>
 
-        {/* Today */}
         <div className="bg-gray-800/40 rounded-xl p-4 border border-gray-700/30">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-gray-300">Oggi</span>
-            <span className={`text-sm font-bold ${weekData.todayRate >= 80 ? 'text-green-400' : weekData.todayRate >= 50 ? 'text-yellow-400' : 'text-gray-400'}`}>
-              {weekData.todayRate}%
+            <span className={`text-sm font-bold ${rateTone(weekData.todayRate)}`}>
+              {rateText(weekData.todayRate, weekData.todayPartial)}
             </span>
           </div>
           <div className="flex justify-between text-xs text-gray-500 mb-1.5">
-            <span>{formatHours(weekData.todayCompleted)} completate</span>
+            <span>{formatHours(weekData.todayCompleted)} reali{weekData.todayPartial ? ' noti' : ''}</span>
             <span>{formatHours(weekData.todayPlanned)} pianificate</span>
           </div>
           <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
             <div
-              className={`h-full ${weekData.todayRate >= 80 ? 'bg-green-500' : weekData.todayRate >= 50 ? 'bg-yellow-500' : 'bg-gray-500'} rounded-full transition-all`}
-              style={{ width: `${Math.min(100, weekData.todayRate)}%` }}
+              className={`h-full ${rateBar(weekData.todayRate)} rounded-full transition-all`}
+              style={{ width: `${Math.min(100, weekData.todayRate ?? 0)}%` }}
             />
           </div>
         </div>
 
-        {/* Goal breakdown */}
         {weekData.goalBreakdown.length > 0 && (
           <div>
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
@@ -267,25 +282,24 @@ export default function WeeklyExecution() {
               Per Goal
             </h3>
             <div className="space-y-2.5">
-              {weekData.goalBreakdown.map(g => {
-                const rate = g.planned > 0 ? Math.round((g.completed / g.planned) * 100) : 0;
+              {weekData.goalBreakdown.map((goal) => {
+                const rate = goal.planned > 0 ? Math.round(goal.completed / goal.planned * 100) : null;
                 return (
-                  <div key={g.goalId} className="bg-gray-800/40 rounded-lg p-3 border border-gray-700/20">
+                  <div key={goal.goalId} className="bg-gray-800/40 rounded-lg p-3 border border-gray-700/20">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-medium text-gray-200 truncate flex-1">{g.goalTitle}</span>
-                      <span className={`text-xs font-bold ml-2 ${rate >= 80 ? 'text-green-400' : rate >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-                        {rate}%
+                      <span className="text-sm font-medium text-gray-200 truncate flex-1">{goal.goalTitle}</span>
+                      <span className={`text-xs font-bold ml-2 ${rateTone(rate)}`}>
+                        {rateText(rate, weekData.actualPartial)}
                       </span>
                     </div>
                     <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden mb-1">
                       <div
-                        className={`h-full rounded-full ${rate >= 80 ? 'bg-green-500' : rate >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                        style={{ width: `${Math.min(100, rate)}%` }}
+                        className={`h-full rounded-full ${rateBar(rate)}`}
+                        style={{ width: `${Math.min(100, rate ?? 0)}%` }}
                       />
                     </div>
-                    <div className="flex justify-between text-[10px] text-gray-500">
-                      <span>{formatHours(g.completed)} / {formatHours(g.planned)}</span>
-                      <span>{g.completedBlocks}/{g.blocks} blocchi</span>
+                    <div className="text-[10px] text-gray-500">
+                      {formatHours(goal.completed)} reali{weekData.actualPartial ? ' noti' : ''} / {formatHours(goal.planned)} pianificate
                     </div>
                   </div>
                 );
@@ -294,21 +308,20 @@ export default function WeeklyExecution() {
           </div>
         )}
 
-        {/* Motivational message */}
-        {weekData.totalPlanned > 0 && (
+        {weekData.totalPlanned > 0 && !weekData.actualPartial && (
           <div className={`rounded-xl p-3 border text-center text-sm font-medium ${
-            weekData.execRate >= 80 ? 'bg-green-900/20 border-green-500/20 text-green-300' :
-            weekData.execRate >= 50 ? 'bg-yellow-900/20 border-yellow-500/20 text-yellow-300' :
+            (weekData.execRate ?? 0) >= 80 ? 'bg-green-900/20 border-green-500/20 text-green-300' :
+            (weekData.execRate ?? 0) >= 50 ? 'bg-yellow-900/20 border-yellow-500/20 text-yellow-300' :
             'bg-red-900/20 border-red-500/20 text-red-300'
           }`}>
-            {weekData.execRate >= 80 ? (
-              <>{formatHours(weekData.totalCompleted)} completate. Esecuzione solida.</>
-            ) : weekData.execRate >= 50 ? (
-              <>A meta\' strada. Hai ancora {formatHours(weekData.totalPlanned - weekData.totalCompleted)} da recuperare.</>
-            ) : weekData.execRate > 0 ? (
-              <>Esecuzione al {weekData.execRate}%. Recupera adesso, non domani.</>
+            {(weekData.execRate ?? 0) >= 80 ? (
+              <>{formatHours(weekData.totalCompleted)} misurate. Esecuzione solida.</>
+            ) : (weekData.execRate ?? 0) >= 50 ? (
+              <>Esecuzione misurata al {weekData.execRate}% del piano.</>
+            ) : (weekData.execRate ?? 0) > 0 ? (
+              <>Esecuzione misurata al {weekData.execRate}%.</>
             ) : (
-              <>Nessun blocco completato. Il piano non vale nulla senza esecuzione.</>
+              <>Nessuna esecuzione misurata questa settimana.</>
             )}
           </div>
         )}
@@ -321,8 +334,6 @@ export default function WeeklyExecution() {
           </div>
         )}
 
-        {/* Optional: Weekly Planning Intelligence cross-link. The component
-            renders nothing if no WPI-tagged TimeBlocks exist for the week. */}
         <WpiWeeklyExecutionSummary />
       </div>
     </div>

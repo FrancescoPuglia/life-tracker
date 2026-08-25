@@ -69,6 +69,10 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
     summary.planFulfillmentRate !== null && previous.planFulfillmentRate !== null
       ? summary.planFulfillmentRate - previous.planFulfillmentRate
       : null;
+  const actualIsPartial = dataQuality.actualAvailability === 'partial';
+  const partialReason = actualIsPartial
+    ? ` Execution evidence is partial (${dataQuality.blocksMissingActualCount} executed blocks missing actual, ${dataQuality.openSessionCount} open sessions, ${dataQuality.anomalousDurationCount} invalid intervals), so this is a measured lower bound.`
+    : '';
 
   return (
     <div
@@ -79,11 +83,11 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
     >
       <Tile
         testId="kpi-actual"
-        label="Actual"
+        label={actualIsPartial ? 'Known actual' : 'Actual'}
         value={formatMinutes(summary.actualMinutes)}
         delta={`${formatSignedMinutes(summary.actualMinutes - previous.actualMinutes)}`}
         sub={vsLabel}
-        title={`Actual = executed time from completed/overrun blocks (real timestamps when present, planned window otherwise) + ad-hoc sessions, clipped to the period.${vsExplainer}`}
+        title={`Actual = completed Session net time plus an explicit block actual interval only when no valid linked Session exists. Planned windows are never actual fallback.${partialReason}${vsExplainer}`}
       />
       <Tile
         testId="kpi-planned"
@@ -103,7 +107,7 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
             ? `variance · ${formatPercent(summary.executionRatioToDate)} of plan to date`
             : 'variance'
         }
-        title="Execution ratio = actual ÷ planned (full period). Variance = actual − planned. While the period is in progress, 'of plan to date' compares actual against only the plan matured so far. Shown as — when nothing was planned; over 100% is not automatically good."
+        title={`Execution ratio = known actual ÷ planned (full period). Variance = known actual − planned. While the period is in progress, 'of plan to date' compares actual against only the plan matured so far. Shown as — when nothing was planned; over 100% is not automatically good.${actualIsPartial ? ' Actual evidence is partial, so interpret this ratio as a lower bound.' : ''}`}
       />
       <Tile
         testId="kpi-tasks"
@@ -144,14 +148,14 @@ export default function PerfKpiGrid({ summary, previous, dataQuality, isPartial 
       />
       <Tile
         testId="kpi-coverage"
-        label="Data coverage"
+        label="Evidence coverage"
         value={formatPercent(dataQuality.coverageRate)}
         sub={
           dataQuality.coverageRate !== null
-            ? `${formatMinutes(dataQuality.measuredMinutes)} measured`
-            : 'no actual time'
+            ? `${dataQuality.actualSourceCount} sources · ${formatMinutes(dataQuality.measuredMinutes)}`
+            : 'no execution records'
         }
-        title="Share of actual time backed by real start/end timestamps rather than the planned-window fallback. Low coverage = treat exact durations with care."
+        title="Valid completed Session or explicit-block actual sources divided by those sources plus executed blocks missing actual evidence. Missing evidence is never replaced with planned duration."
       />
     </div>
   );

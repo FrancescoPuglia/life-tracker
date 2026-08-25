@@ -92,13 +92,20 @@ function buildMonthOverview(blocks?: TimeBlock[]) {
           actualStartTime: day(2, 9, 15),
           actualEndTime: day(2, 11, 45),
         }),
-        // Jul 6: planned 2h, fully executed via planned window (assumed).
-        makeBlock({ startTime: day(6, 9), endTime: day(6, 11) }),
+        // Jul 6: planned 2h, fully executed via explicit actual evidence.
+        makeBlock({
+          startTime: day(6, 9),
+          endTime: day(6, 11),
+          actualStartTime: day(6, 9),
+          actualEndTime: day(6, 11),
+        }),
         // Jul 8: retro-logged 1h30m ⇒ unplanned actual.
         makeBlock({
           startTime: day(8, 20),
           endTime: day(8, 21, 30),
           createdAt: day(8, 21, 35),
+          actualStartTime: day(8, 20),
+          actualEndTime: day(8, 21, 30),
         }),
         // Jul 9: planned 6h, never executed.
         makeBlock({ status: 'planned', startTime: day(9, 9), endTime: day(9, 15) }),

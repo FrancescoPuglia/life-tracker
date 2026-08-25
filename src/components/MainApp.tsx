@@ -659,6 +659,8 @@ export default function MainApp({ buildId }: MainAppProps) {
                     )}
                     <TimeBlockPlanner
                       timeBlocks={data.timeBlocks}
+                      sessions={sessions}
+                      sessionCoverage={sessionCoverage}
                       tasks={data.tasks}
                       projects={data.projects}
                       goals={data.goals}
@@ -742,6 +744,8 @@ export default function MainApp({ buildId }: MainAppProps) {
                     projects={data.projects}
                     tasks={data.tasks}
                     timeBlocks={data.timeBlocks}
+                    sessions={sessions}
+                    sessionCoverage={sessionCoverage}
                     currentUserId={data.userId}
                     isLoading={data.status === 'loading'}
                     
