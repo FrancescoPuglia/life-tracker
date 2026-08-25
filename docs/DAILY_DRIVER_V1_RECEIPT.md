@@ -11,8 +11,10 @@ production mutation without a separate human gate.
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
 - Final SHA: pending final receipt commit
-- Remote HEAD: pending first release-branch push
-- Worktree: clean at sprint start; final state pending
+- Remote HEAD at installed staging source checkpoint:
+  `be35501d4b9c1df40714aaa51fb0fb2ea9d0414d`
+- Worktree: clean at sprint start and before this receipt update; final state
+  pending
 
 ## Staging deployment
 
@@ -51,15 +53,59 @@ Milestone: `R1 STAGING FUNCTION DEPLOY VERIFIED`
 
 ## Installed staging safety gate
 
-- Installer name/path/SHA-256: NOT RUN
-- Executable SHA-256: NOT RUN
-- Login, durable fixture, Planner, Session, Secure AI, restart, and tray: NOT RUN
+- Source: `be35501d4b9c1df40714aaa51fb0fb2ea9d0414d`, current Daily Driver
+  branch, staging environment, Desktop runtime.
+- Demonstrated installed-startup blocker: Tauri's non-default prototype freeze
+  made Firebase/Long initialization throw before React mount. The minimal fix
+  restored Firebase-compatible startup while retaining the restrictive CSP,
+  disabled asset protocol, and all other Desktop hardening checks.
+- Focused adjacent gates: Desktop profile tests PASS; Desktop security PASS;
+  static/output security PASS; `git diff --check` PASS.
+- Installer:
+  `src-tauri/target/release/bundle/nsis/Life Tracker Beta_1.0.0_x64-setup.exe`
+  (SHA-256
+  `6bd9f7ce7123e6e9702cb34a139cb4c1807f2bd08d4b29649f09476e4c7332e5`).
+- Built executable SHA-256:
+  `816bffe602b231ba1998a7946197b3b60dfbd5ed50fd7f5c8935b2627d76cc61`.
+  Installed NSIS-patched executable SHA-256:
+  `c268660fdd4dfd5294557d51a65be25a0273a57f38a3d40d1e07a38ac64f2faa`.
+- Binary/provider-secret scan: PASS. No OpenAI/Twilio/private-key/provider
+  secret names or Pages runtime shapes were present; the sole broad `re_`
+  signature was the pinned `tauri_runtime_wry` dependency name.
+- Launch and Firebase Auth: PASS with a disposable staging-only account; no
+  ErrorBoundary.
+- Durable disposable Goal: authoritative owner-scoped Firestore read PASS;
+  reload PASS; full Desktop process restart and reread PASS.
+- Planner: PASS.
+- Session start/pause/resume/stop: PASS; authoritative reread found one
+  completed, owner-matched Session with measured nonzero duration (40 seconds),
+  preserved after Desktop restart.
+- Secure AI from `https://tauri.localhost`: authenticated POST 200; grounded
+  read returned the exact authoritative disposable Goal title.
+- Preview/Reject: PASS with zero matching authoritative Domain after Reject.
+  Fresh Preview/Apply created the exact owner-scoped Domain and exact requested
+  fields; Undo removed it on authoritative reread.
+- Tray/single-instance: closing the window retained the same process; launching
+  the installed executable restored the same singleton. Controlled restart
+  created a new process and preserved Auth/data.
+- Cleanup: both disposable Firestore documents and the AI-created Domain were
+  absent after cleanup; the one exact disposable Firebase Auth account was
+  deleted through the staging project admin API. Immutable backend audit data
+  was not altered.
+
+Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 
 ## Production Daily Driver
 
 - Production project: `life-tracker-12000` (`970402762590`)
 - Production resources changed: none
-- Recovery/rollback state: NOT YET ESTABLISHED FOR PROMOTION
+- Recovery/rollback state: the existing audit confirms no PITR, delete
+  protection, backup schedule, or existing backup. A recoverable export/backup
+  plus pre-change resource inventory is required before production mutation.
+- Human cost gate: production has no linked billing account; billing is
+  disabled. Cloud Functions, Cloud Run, Artifact Registry, Cloud Build, and
+  Secret Manager APIs are disabled, so the minimum Secure AI backend cannot be
+  promoted until the project is upgraded to Blaze/pay-as-you-go by Francesco.
 - Forward-durability acceptance: NOT RUN
 - Weekly Planner acceptance: NOT RUN
 - Session acceptance: NOT RUN
