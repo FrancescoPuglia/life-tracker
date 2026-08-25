@@ -69,6 +69,7 @@ const SERVER_ONLY_COLLECTIONS = [
   'reminderProviderCallbackRoutes',
   'reminderApiRateLimits',
   'reportIdempotency',
+  'reportEmailDelivery',
   'reportDeliveryAttempts',
 ] as const;
 

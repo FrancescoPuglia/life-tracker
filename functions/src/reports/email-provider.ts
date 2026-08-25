@@ -270,3 +270,17 @@ export function validateReportEmailSendRequest(request: ReportEmailSendRequest):
   validateEmailMailbox(request.to, 'Recipient');
   validateComposedScientificReportEmail(request.email);
 }
+
+/** One-way authority persisted for a delivery claim; mailbox values are not stored. */
+export function reportEmailSendAuthorityHash(request: ReportEmailSendRequest): string {
+  validateReportEmailSendRequest(request);
+  return sha256(canonicalJson({
+    schemaVersion: REPORT_EMAIL_SCHEMA_VERSION,
+    from: request.from,
+    to: request.to,
+    reportId: request.email.reportId,
+    reportType: request.email.reportType,
+    contentHash: request.email.contentHash,
+    idempotencyKey: request.email.idempotencyKey,
+  }));
+}

@@ -398,6 +398,9 @@ service cloud.firestore {
       match /reportIdempotency/{document=**} {
         allow read, write: if false;
       }
+      match /reportEmailDelivery/{document=**} {
+        allow read, write: if false;
+      }
       match /reportDeliveryAttempts/{document=**} {
         allow read, write: if false;
       }
@@ -434,6 +437,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /reportIdempotency/{document=**} {
+      allow read, write: if false;
+    }
+    match /reportEmailDelivery/{document=**} {
       allow read, write: if false;
     }
     match /reportDeliveryAttempts/{document=**} {

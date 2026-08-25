@@ -59,7 +59,7 @@ implements ScientificReportArchiveRepository {
         throw new DomainError('INTERNAL', 'Report archive idempotency state is inconsistent.');
       }
       if (archiveSnapshot.exists) {
-        const existing = decodeArchive(uid, archiveSnapshot);
+        const existing = decodeStoredScientificReportArchiveSnapshot(uid, archiveSnapshot);
         const existingMarker = decodeIdempotencyMarker(uid, markerSnapshot);
         assertMarkerCoherence(existing, existingMarker);
         if (existing.artifactHash !== candidate.artifactHash) {
@@ -81,7 +81,7 @@ implements ScientificReportArchiveRepository {
     assertUid(uid);
     assertReportId(reportId);
     const snapshot = await this.archiveRef(uid, reportId).get();
-    return snapshot.exists ? decodeArchive(uid, snapshot) : null;
+    return snapshot.exists ? decodeStoredScientificReportArchiveSnapshot(uid, snapshot) : null;
   }
 
   async listArchiveSummaries(
@@ -97,7 +97,8 @@ implements ScientificReportArchiveRepository {
       .orderBy('generatedAt', 'desc')
       .limit(maximum + 1)
       .get();
-    const decoded = snapshot.docs.map((document) => decodeArchive(uid, document));
+    const decoded = snapshot.docs.map((document) =>
+      decodeStoredScientificReportArchiveSnapshot(uid, document));
     return Object.freeze({
       items: Object.freeze(decoded.slice(0, maximum).map(reportArchiveSummary)),
       overflow: decoded.length > maximum,
@@ -129,15 +130,7 @@ function encodeArchive(archive: StoredScientificReportArchive): DocumentData {
     metricHash: archive.metricHash,
     artifactHash: archive.artifactHash,
     report: archive.report,
-    delivery: {
-      ...archive.delivery,
-      lastAttemptAt: archive.delivery.lastAttemptAt
-        ? Timestamp.fromDate(new Date(archive.delivery.lastAttemptAt))
-        : null,
-      sentAt: archive.delivery.sentAt
-        ? Timestamp.fromDate(new Date(archive.delivery.sentAt))
-        : null,
-    },
+    delivery: encodeStoredReportDeliveryState(archive.delivery),
     generatedAt: Timestamp.fromDate(new Date(archive.generatedAt)),
     createdAt: Timestamp.fromDate(new Date(archive.createdAt)),
     updatedAt: Timestamp.fromDate(new Date(archive.updatedAt)),
@@ -158,7 +151,11 @@ function encodeIdempotencyMarker(marker: ReportArchiveIdempotencyRecord): Docume
   };
 }
 
-function decodeArchive(uid: string, snapshot: DocumentSnapshot): StoredScientificReportArchive {
+/** @internal Shared with the server-only delivery transaction adapter. */
+export function decodeStoredScientificReportArchiveSnapshot(
+  uid: string,
+  snapshot: DocumentSnapshot,
+): StoredScientificReportArchive {
   const value = snapshot.data() ?? {};
   if (
     value.schemaVersion !== REPORT_ARCHIVE_SCHEMA_VERSION
@@ -222,6 +219,21 @@ function decodeArchive(uid: string, snapshot: DocumentSnapshot): StoredScientifi
     createdAt,
     updatedAt,
   });
+}
+
+/** @internal Shared with the server-only delivery transaction adapter. */
+export function encodeStoredReportDeliveryState(
+  delivery: StoredScientificReportArchive['delivery'],
+): DocumentData {
+  return {
+    ...delivery,
+    lastAttemptAt: delivery.lastAttemptAt
+      ? Timestamp.fromDate(new Date(delivery.lastAttemptAt))
+      : null,
+    sentAt: delivery.sentAt
+      ? Timestamp.fromDate(new Date(delivery.sentAt))
+      : null,
+  };
 }
 
 function decodeIdempotencyMarker(

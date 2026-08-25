@@ -1,8 +1,10 @@
 export { buildReportChartData } from './charts';
 export { computeScientificMetricBundle } from './metrics';
 export * from './archive';
+export * from './email-delivery';
 export * from './email-provider';
 export { FirestoreScientificReportArchiveRepository } from './firestore-archive-repository';
+export { FirestoreScientificReportEmailDeliveryRepository } from './firestore-email-delivery-repository';
 export * from './png-chart-renderer';
 export * from './report-email-template';
 export * from './resend-email-provider';
