@@ -65,6 +65,7 @@ const SERVER_ONLY_COLLECTIONS = [
   'reminderDeliveryCounters',
   'providerDeliveryStatuses',
   'reminderProviderCallbackRoutes',
+  'reminderApiRateLimits',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [

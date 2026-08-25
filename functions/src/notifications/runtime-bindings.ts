@@ -21,6 +21,8 @@ import {
   createUserProfileReminderReconciliationFunction,
 } from './reconciliation-trigger';
 import type { ReminderReconciliationExecutor } from './reconciliation-trigger';
+import { createDesktopReminderCallableFunction } from './desktop-reminder-api';
+import { FirestoreDesktopReminderRateLimiter } from './desktop-reminder-rate-limiter';
 import {
   createPrivateReminderTaskFunction,
   type ReminderDeliveryExecutor,
@@ -276,5 +278,11 @@ export const twilioWhatsAppStatusCallback = createLazyTwilioStatusCallbackFuncti
     runtimeParameters,
   ),
   secrets: [TWILIO_AUTH_TOKEN],
+  logger: functionsLogger,
+});
+
+export const desktopReminderApi = createDesktopReminderCallableFunction({
+  repository: runtime.repository,
+  rateLimiter: new FirestoreDesktopReminderRateLimiter(getFirestore(runtime.app)),
   logger: functionsLogger,
 });

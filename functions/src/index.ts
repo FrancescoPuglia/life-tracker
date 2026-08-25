@@ -222,6 +222,8 @@ export * from './domain/tool-definitions';
 export * from './domain/types';
 export * from './mcp/read-only-adapter';
 export * from './notifications/domain';
+export * from './notifications/desktop-reminder-api';
+export * from './notifications/desktop-reminder-rate-limiter';
 export * from './notifications/cloud-tasks-queue';
 export * from './notifications/delivery';
 export * from './notifications/delivery-service';

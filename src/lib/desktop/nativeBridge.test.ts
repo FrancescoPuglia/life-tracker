@@ -90,6 +90,36 @@ describe('Desktop native bridge', () => {
     expect(dependencies.sendNotification).not.toHaveBeenCalled();
   });
 
+  it('sends only a bounded display reminder and exposes no completion action', async () => {
+    dependencies.isPermissionGranted.mockResolvedValue(true);
+    const jobId = 'a'.repeat(64);
+    const attemptId = 'b'.repeat(64);
+
+    await availableBridge().sendReminderNotification({
+      jobId,
+      attemptId,
+      body: 'Deep work starts in 15 min at 10:00. Planned: 60 min.',
+    });
+
+    expect(dependencies.sendNotification).toHaveBeenCalledWith({
+      title: 'Life Tracker reminder',
+      body: expect.stringContaining('Deep work'),
+      autoCancel: true,
+      extra: { kind: 'reminder', jobId, attemptId },
+    });
+    expect(JSON.stringify(dependencies.sendNotification.mock.calls)).not.toMatch(/complete|done/i);
+  });
+
+  it('rejects malformed native reminder identity or control characters', async () => {
+    dependencies.isPermissionGranted.mockResolvedValue(true);
+    await expect(availableBridge().sendReminderNotification({
+      jobId: '../other',
+      attemptId: 'b'.repeat(64),
+      body: 'hostile\u0000body',
+    })).rejects.toThrow(/invalid/);
+    expect(dependencies.sendNotification).not.toHaveBeenCalled();
+  });
+
   it('rereads the authoritative autostart state after changing it', async () => {
     dependencies.isAutostartEnabled
       .mockResolvedValueOnce(true)

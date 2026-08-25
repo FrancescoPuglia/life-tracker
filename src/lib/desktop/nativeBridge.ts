@@ -12,11 +12,18 @@ export interface DesktopNativeStatus {
   readonly autostartEnabled: boolean | null;
 }
 
+export interface DesktopReminderNotification {
+  readonly jobId: string;
+  readonly attemptId: string;
+  readonly body: string;
+}
+
 export interface DesktopNativeBridge {
   isAvailable(): boolean;
   readStatus(): Promise<DesktopNativeStatus>;
   requestNotificationPermission(): Promise<DesktopNotificationPermission>;
   sendTestNotification(): Promise<void>;
+  sendReminderNotification(notification: DesktopReminderNotification): Promise<void>;
   setAutostart(enabled: boolean): Promise<boolean>;
   focusWindow(): Promise<void>;
   subscribeToNotificationClicks(): Promise<() => Promise<void>>;
@@ -127,6 +134,33 @@ export function createDesktopNativeBridge(options: BridgeOptions): DesktopNative
         body: 'Desktop notifications are ready. Click to return to Life Tracker.',
         autoCancel: true,
         extra: { kind: 'settings-test' },
+      });
+    },
+
+    async sendReminderNotification(notification) {
+      const dependencies = await load();
+      if (!(await dependencies.isPermissionGranted())) {
+        throw new Error('Desktop notification permission is not granted.');
+      }
+      if (
+        !/^[a-f0-9]{64}$/.test(notification.jobId)
+        || !/^[a-f0-9]{64}$/.test(notification.attemptId)
+        || typeof notification.body !== 'string'
+        || notification.body.length < 1
+        || notification.body.length > 500
+        || /[\u0000-\u001f\u007f]/u.test(notification.body)
+      ) {
+        throw new Error('Desktop reminder notification is invalid.');
+      }
+      dependencies.sendNotification({
+        title: 'Life Tracker reminder',
+        body: notification.body,
+        autoCancel: true,
+        extra: {
+          kind: 'reminder',
+          jobId: notification.jobId,
+          attemptId: notification.attemptId,
+        },
       });
     },
 

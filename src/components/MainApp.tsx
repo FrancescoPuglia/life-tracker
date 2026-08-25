@@ -676,7 +676,7 @@ export default function MainApp({ buildId }: MainAppProps) {
 
                 {activeTab === 'settings' && (
                   <Suspense fallback={null}>
-                    <DesktopSettings />
+                    <DesktopSettings userId={user!.uid} />
                   </Suspense>
                 )}
               </div>

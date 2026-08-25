@@ -57,6 +57,11 @@ import {
   type StoredReminderJob,
   type StoredReminderJobState,
 } from './repository';
+import type {
+  DesktopReminderCandidateBatch,
+  DesktopReminderClaimPreparation,
+  DesktopReminderRepository,
+} from './desktop-reminder-api';
 export const REMINDER_MANIFEST_SCHEMA_VERSION = 'reminder-manifest-v1' as const;
 export const REMINDER_PROVIDER_CALLBACK_ROUTE_SCHEMA_VERSION =
   'reminder-provider-callback-route-v1' as const;
@@ -105,6 +110,7 @@ export class FirestoreReminderRepository implements
   ReminderReconciliationRepository,
   ReminderDeliveryRepository,
   ReminderReconciliationSource,
+  DesktopReminderRepository,
   ProviderDeliveryStatusRepository {
   constructor(private readonly firestore: Firestore) {}
 
@@ -929,6 +935,246 @@ export class FirestoreReminderRepository implements
         }));
       }
       return 'recorded';
+    });
+  }
+
+  async listDesktopReminderCandidates(input: {
+    readonly uid: string;
+    readonly now: string;
+    readonly lookbackMs: number;
+    readonly horizonMs: number;
+    readonly maximum: number;
+  }): Promise<DesktopReminderCandidateBatch> {
+    assertIdentity(input.uid, 'UID');
+    const timestamp = normalizeInstant(input.now, 'Desktop reminder feed time');
+    if (
+      !Number.isInteger(input.lookbackMs)
+      || input.lookbackMs < 0
+      || input.lookbackMs > 10 * 60_000
+      || !Number.isInteger(input.horizonMs)
+      || input.horizonMs < 60_000
+      || input.horizonMs > 24 * 60 * 60_000
+      || !Number.isInteger(input.maximum)
+      || input.maximum < 1
+      || input.maximum > 64
+    ) {
+      throw new Error('Desktop reminder feed bounds are invalid.');
+    }
+    const nowMs = Date.parse(timestamp);
+    const snapshot = await this.firestore.collection(`users/${input.uid}/reminderJobs`)
+      .where('state', '==', 'client_pending')
+      .where('scheduledFor', '>=', Timestamp.fromMillis(nowMs - input.lookbackMs))
+      .where('scheduledFor', '<=', Timestamp.fromMillis(nowMs + input.horizonMs))
+      .orderBy('scheduledFor', 'asc')
+      .limit(input.maximum + 1)
+      .get();
+    const jobs = snapshot.docs.slice(0, input.maximum).map((document) => {
+      const job = decodeStoredJob(input.uid, document);
+      if (job.state !== 'client_pending' || job.channel !== 'desktop') {
+        throw new Error('Desktop reminder feed contains an invalid job.');
+      }
+      return Object.freeze({ jobId: job.id, scheduledFor: job.scheduledFor });
+    });
+    return Object.freeze({
+      jobs: Object.freeze(jobs),
+      overflow: snapshot.size > input.maximum,
+    });
+  }
+
+  async claimDesktopReminder(input: {
+    readonly uid: string;
+    readonly jobId: string;
+    readonly now: string;
+  }): Promise<DesktopReminderClaimPreparation> {
+    assertIdentity(input.uid, 'UID');
+    assertHash(input.jobId, 'Desktop reminder job ID');
+    const timestamp = normalizeInstant(input.now, 'Desktop reminder claim time');
+
+    return this.firestore.runTransaction(async (transaction) => {
+      const jobRef = this.jobRef(input.uid, input.jobId);
+      const jobSnapshot = await transaction.get(jobRef);
+      if (!jobSnapshot.exists) return Object.freeze({ action: 'no_op' });
+      const current = decodeStoredJob(input.uid, jobSnapshot);
+      if (current.state !== 'client_pending') return Object.freeze({ action: 'no_op' });
+      if (current.channel !== 'desktop' || current.taskId !== null) {
+        throw new Error('Desktop reminder job state or channel is invalid.');
+      }
+
+      const attemptId = deliveryAttemptId(current);
+      const counterId = deliveryCounterId(current);
+      const authoritySnapshots = await transaction.getAll(
+        this.firestore.doc(`users/${input.uid}/timeBlocks/${current.timeBlockId}`),
+        this.firestore.doc(`users/${input.uid}`),
+        this.firestore.doc(`users/${input.uid}/notificationPreferences/default`),
+        this.notificationIdempotencyRef(input.uid, current.idempotencyKey),
+        this.deliveryAttemptRef(input.uid, attemptId),
+        this.deliveryReceiptRef(input.uid, attemptId),
+        this.deliveryCounterRef(input.uid, counterId),
+      );
+      const sessionDocuments = current.kind === 'missed_start'
+        ? (await transaction.get(
+          this.firestore.collection(`users/${input.uid}/sessions`)
+            .where('timeBlockId', '==', current.timeBlockId)
+            .limit(1),
+        )).docs
+        : [];
+      const [timeBlockSnapshot, userSnapshot, preferenceSnapshot,
+        idempotencySnapshot, attemptSnapshot, receiptSnapshot, counterSnapshot]
+        = authoritySnapshots;
+      if (
+        !timeBlockSnapshot
+        || !userSnapshot
+        || !preferenceSnapshot
+        || !idempotencySnapshot
+        || !attemptSnapshot
+        || !receiptSnapshot
+        || !counterSnapshot
+      ) {
+        throw new Error('Desktop reminder authority read is incomplete.');
+      }
+      if (idempotencySnapshot.exists || attemptSnapshot.exists || receiptSnapshot.exists) {
+        throw new Error('Desktop reminder claim state is inconsistent.');
+      }
+
+      const rawTimeBlock = timeBlockSnapshot.exists ? timeBlockSnapshot.data() ?? {} : null;
+      const timeBlock = rawTimeBlock
+        ? createReminderTimeBlock(input.uid, current.timeBlockId, rawTimeBlock)
+        : null;
+      const persistedTimezone = persistedUserTimezone(
+        input.uid,
+        userSnapshot.exists ? userSnapshot.data() ?? {} : null,
+      );
+      const rawPreferences = preferenceSnapshot.exists
+        ? preferenceSnapshot.data() ?? {}
+        : {};
+      if (preferenceSnapshot.exists) {
+        assertScopedDocumentOwner(input.uid, rawPreferences, 'Notification preferences');
+      }
+      const preferences = normalizeNotificationPreferences(
+        input.uid,
+        rawPreferences,
+        persistedTimezone,
+      );
+      const policy = deriveReminderPolicy(preferences);
+      const counter = counterSnapshot.exists
+        ? decodeDeliveryCounter(input.uid, current, counterId, counterSnapshot)
+        : emptyDeliveryCounter(input.uid, current, counterId, timestamp);
+      const decision = evaluateReminderDelivery({
+        job: current,
+        authenticatedUid: input.uid,
+        timeBlock,
+        policy,
+        now: timestamp,
+        hasStartedSession: hasStartedSession(input.uid, current.timeBlockId, sessionDocuments),
+        consumedDeliverySlotsForBlockAndChannel: counter.claimedCount,
+        idempotencyConsumed: false,
+      });
+      if (decision.action === 'suppress') {
+        writeJob(transaction, jobRef, Object.freeze({
+          ...current,
+          state: 'suppressed',
+          updatedAt: timestamp,
+          deliverySuppressionReason: decision.reason,
+          deliveryFinalizedAt: timestamp,
+        }));
+        return Object.freeze({ action: 'no_op' });
+      }
+      if (decision.action === 'retry_later') {
+        return Object.freeze({ action: 'retry_later', notBefore: decision.notBefore });
+      }
+      if (!rawTimeBlock || !timeBlock) {
+        throw new Error('Desktop reminder authority changed unexpectedly.');
+      }
+
+      // The handoff is consumed atomically before returning display data. If the
+      // response or WebView disappears, the reminder may be missed but can never
+      // be duplicated by a retry after an ambiguous native dispatch.
+      const nativeDispatchId = `desktop-native:${attemptId}`;
+      const attempt: ReminderDeliveryAttemptRecord = Object.freeze({
+        schemaVersion: DELIVERY_ATTEMPT_SCHEMA_VERSION,
+        id: attemptId,
+        uid: input.uid,
+        jobId: current.id,
+        timeBlockId: current.timeBlockId,
+        channel: 'desktop',
+        idempotencyKey: current.idempotencyKey,
+        state: 'accepted',
+        claimedAt: timestamp,
+        finalizedAt: timestamp,
+        outcome: 'accepted',
+        providerMessageId: nativeDispatchId,
+        failureReason: null,
+      });
+      const idempotency: NotificationIdempotencyRecord = Object.freeze({
+        schemaVersion: NOTIFICATION_IDEMPOTENCY_SCHEMA_VERSION,
+        id: current.idempotencyKey,
+        uid: input.uid,
+        jobId: current.id,
+        attemptId,
+        state: 'finalized',
+        claimedAt: timestamp,
+        finalizedAt: timestamp,
+        outcome: 'accepted',
+      });
+      const receipt: ReminderDeliveryReceipt = Object.freeze({
+        schemaVersion: DELIVERY_RECEIPT_SCHEMA_VERSION,
+        id: attemptId,
+        uid: input.uid,
+        jobId: current.id,
+        attemptId,
+        timeBlockId: current.timeBlockId,
+        channel: 'desktop',
+        outcome: 'accepted',
+        providerMessageId: nativeDispatchId,
+        failureReason: null,
+        createdAt: timestamp,
+      });
+      const nextCounter: ReminderDeliveryCounter = Object.freeze({
+        ...counter,
+        claimedCount: counter.claimedCount + 1,
+        acceptedCount: counter.acceptedCount + 1,
+        updatedAt: timestamp,
+      });
+      writeJob(transaction, jobRef, Object.freeze({
+        ...current,
+        state: 'accepted',
+        updatedAt: timestamp,
+        deliveryAttemptId: attemptId,
+        deliveryOutcome: 'accepted',
+        deliverySuppressionReason: null,
+        deliveryFinalizedAt: timestamp,
+      }));
+      transaction.set(
+        this.deliveryAttemptRef(input.uid, attemptId),
+        encodeDeliveryAttempt(attempt, current.scheduledFor, timestamp),
+      );
+      transaction.set(
+        this.notificationIdempotencyRef(input.uid, current.idempotencyKey),
+        encodeNotificationIdempotency(idempotency, current.scheduledFor, timestamp),
+      );
+      transaction.set(
+        this.deliveryReceiptRef(input.uid, attemptId),
+        encodeDeliveryReceipt(receipt, current.scheduledFor),
+      );
+      transaction.set(
+        this.deliveryCounterRef(input.uid, counterId),
+        encodeDeliveryCounter(nextCounter, current.scheduledFor, timestamp),
+      );
+      return Object.freeze({
+        action: 'dispatch',
+        dispatch: Object.freeze({
+          jobId: current.id,
+          attemptId,
+          kind: current.kind,
+          offsetMinutes: current.offsetMinutes,
+          scheduledFor: current.scheduledFor,
+          title: reminderDisplayTitle(rawTimeBlock.title),
+          startTime: timeBlock.startTime,
+          plannedMinutes: plannedMinutes(timeBlock.startTime, timeBlock.endTime),
+          timezone: policy.timezone,
+          locale: preferences.locale,
+        }),
+      });
     });
   }
 

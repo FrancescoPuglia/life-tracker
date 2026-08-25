@@ -11,6 +11,14 @@ import {
   type DesktopNativeBridge,
   type DesktopNativeStatus,
 } from '@/lib/desktop/nativeBridge';
+import { DESKTOP_REMINDER_REFRESH_EVENT } from '@/lib/desktop/reminderCoordinator';
+import {
+  defaultNotificationPreferences,
+  normalizeEditableNotificationPreferences,
+  notificationPreferencesStore,
+  type EditableNotificationPreferences,
+  type NotificationPreferencesStore,
+} from '@/lib/notifications/preferences';
 
 const UNAVAILABLE_STATUS: DesktopNativeStatus = {
   available: false,
@@ -19,17 +27,26 @@ const UNAVAILABLE_STATUS: DesktopNativeStatus = {
 };
 
 interface DesktopSettingsProps {
+  readonly userId: string;
   readonly bridge?: DesktopNativeBridge;
+  readonly preferencesStore?: NotificationPreferencesStore;
 }
 
 export default function DesktopSettings({
+  userId,
   bridge = desktopNativeBridge,
+  preferencesStore = notificationPreferencesStore,
 }: DesktopSettingsProps) {
   const [status, setStatus] = useState<DesktopNativeStatus>(UNAVAILABLE_STATUS);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<EditableNotificationPreferences>(
+    defaultNotificationPreferences,
+  );
+  const [offsetText, setOffsetText] = useState('15');
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,20 +65,25 @@ export default function DesktopSettings({
   }, [refresh]);
 
   useEffect(() => {
-    if (!bridge.isAvailable()) return undefined;
     let disposed = false;
-    let unsubscribe: (() => Promise<void>) | undefined;
-    void bridge.subscribeToNotificationClicks()
-      .then((cleanup) => {
-        if (disposed) void cleanup().catch(() => undefined);
-        else unsubscribe = cleanup;
+    setPreferencesLoading(true);
+    void preferencesStore.load(userId)
+      .then((value) => {
+        if (disposed) return;
+        setPreferences(value);
+        setOffsetText(value.reminderOffsetsMinutes.join(', '));
+        setError(null);
       })
-      .catch(() => undefined);
-    return () => {
-      disposed = true;
-      if (unsubscribe) void unsubscribe().catch(() => undefined);
-    };
-  }, [bridge]);
+      .catch(() => {
+        if (!disposed) {
+          setError('Reminder preferences could not be loaded. Tracking data was not changed.');
+        }
+      })
+      .finally(() => {
+        if (!disposed) setPreferencesLoading(false);
+      });
+    return () => { disposed = true; };
+  }, [preferencesStore, userId]);
 
   const run = async (name: string, action: () => Promise<void>) => {
     setBusyAction(name);
@@ -70,7 +92,9 @@ export default function DesktopSettings({
     try {
       await action();
     } catch {
-      setError('The native Desktop action failed safely. No tracking data was changed.');
+      setError(name === 'reminder-policy'
+        ? 'The reminder policy is invalid or unavailable. No tracking data was changed.'
+        : 'The native Desktop action failed safely. No tracking data was changed.');
     } finally {
       setBusyAction(null);
     }
@@ -82,6 +106,7 @@ export default function DesktopSettings({
     setMessage(notificationPermission === 'granted'
       ? 'Native notifications are enabled.'
       : 'Notification permission was not granted. You can keep using Life Tracker without it.');
+    window.dispatchEvent(new Event(DESKTOP_REMINDER_REFRESH_EVENT));
   });
 
   const testNotifications = () => run('test', async () => {
@@ -95,6 +120,21 @@ export default function DesktopSettings({
     setMessage(authoritativeState
       ? 'Life Tracker will start when you sign in to Windows.'
       : 'Windows autostart is disabled.');
+  });
+
+  const saveReminderPolicy = () => run('reminder-policy', async () => {
+    const reminderOffsetsMinutes = offsetText
+      .split(',')
+      .map((value) => Number(value.trim()));
+    const normalized = normalizeEditableNotificationPreferences({
+      ...preferences,
+      reminderOffsetsMinutes,
+    });
+    await preferencesStore.save(userId, normalized);
+    setPreferences(normalized);
+    setOffsetText(normalized.reminderOffsetsMinutes.join(', '));
+    setMessage('Reminder policy saved. Future TimeBlocks will be reconciled safely.');
+    window.dispatchEvent(new Event(DESKTOP_REMINDER_REFRESH_EVENT));
   });
 
   return (
@@ -150,6 +190,170 @@ export default function DesktopSettings({
             {busyAction === 'test' ? 'Sending…' : 'Send test notification'}
           </button>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="text-lg font-bold text-slate-900">Reminder policy</h3>
+        <p className="mt-1 text-sm text-slate-600">
+          The backend creates version-bound jobs and rereads the current TimeBlock before display.
+          Moved, completed, cancelled, or deleted blocks are suppressed.
+        </p>
+
+        <fieldset disabled={preferencesLoading || busyAction !== null} className="mt-5 space-y-5">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={preferences.desktopEnabled}
+              onChange={(event) => setPreferences((current) => ({
+                ...current,
+                desktopEnabled: event.target.checked,
+              }))}
+              className="mt-1 h-4 w-4"
+            />
+            <span>
+              <span className="block font-semibold text-slate-900">Scheduled Desktop reminders</span>
+              <span className="block text-sm text-slate-600">
+                Requires native permission above and Life Tracker running in the tray.
+              </span>
+            </span>
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="text-sm font-semibold text-slate-800">
+              Timezone
+              <input
+                aria-label="Reminder timezone"
+                value={preferences.timezone}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  timezone: event.target.value,
+                }))}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+              />
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              Minutes before (comma-separated)
+              <input
+                aria-label="Reminder offsets"
+                inputMode="numeric"
+                value={offsetText}
+                onChange={(event) => setOffsetText(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+              />
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              Maximum per block
+              <input
+                aria-label="Maximum reminders per block"
+                type="number"
+                min={1}
+                max={8}
+                value={preferences.maxRemindersPerBlock}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  maxRemindersPerBlock: Number(event.target.value),
+                }))}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                checked={preferences.atStartEnabled}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  atStartEnabled: event.target.checked,
+                }))}
+              />
+              Notify at block start
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                checked={preferences.missedStart.enabled}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  missedStart: { ...current.missedStart, enabled: event.target.checked },
+                }))}
+              />
+              Missed-start warning
+            </label>
+          </div>
+
+          <label className="block max-w-xs text-sm font-semibold text-slate-800">
+            Missed-start delay (minutes)
+            <input
+              aria-label="Missed-start delay"
+              type="number"
+              min={1}
+              max={240}
+              value={preferences.missedStart.afterMinutes}
+              onChange={(event) => setPreferences((current) => ({
+                ...current,
+                missedStart: {
+                  ...current.missedStart,
+                  afterMinutes: Number(event.target.value),
+                },
+              }))}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+            />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="flex items-center gap-2 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                checked={preferences.quietHours.enabled}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  quietHours: { ...current.quietHours, enabled: event.target.checked },
+                }))}
+              />
+              Quiet hours
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              Quiet from
+              <input
+                aria-label="Quiet hours start"
+                type="time"
+                value={preferences.quietHours.start}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  quietHours: { ...current.quietHours, start: event.target.value },
+                }))}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+              />
+            </label>
+            <label className="text-sm font-semibold text-slate-800">
+              Quiet until
+              <input
+                aria-label="Quiet hours end"
+                type="time"
+                value={preferences.quietHours.end}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  quietHours: { ...current.quietHours, end: event.target.value },
+                }))}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+              />
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={saveReminderPolicy}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {busyAction === 'reminder-policy' ? 'Saving…' : 'Save reminder policy'}
+          </button>
+        </fieldset>
+
+        <p className="mt-4 text-xs text-slate-500">
+          WhatsApp and email remain off until their backend providers are configured and verified.
+        </p>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

@@ -5,6 +5,7 @@ import { AuthProvider, useAuthContext } from '@/providers/AuthProvider';
 import { DataProvider, useDataContext } from '@/providers/DataProvider';
 import AuthModal from '@/components/AuthModal';
 import MainApp from '@/components/MainApp';
+import DesktopReminderRuntime from '@/components/desktop/DesktopReminderRuntime';
 import { BUILD_ID } from '@/lib/buildInfo';
 
 // ============================================================================
@@ -65,6 +66,7 @@ function DataGate() {
   
   return (
     <DataProvider userId={user.uid}>
+      <DesktopReminderRuntime uid={user.uid} />
       <DataLoadingGate />
     </DataProvider>
   );

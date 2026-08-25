@@ -407,6 +407,9 @@ service cloud.firestore {
     match /reminderProviderCallbackRoutes/{document=**} {
       allow read, write: if false;
     }
+    match /reminderApiRateLimits/{document=**} {
+      allow read, write: if false;
+    }
 
     // Deny by default, including unknown top-level collections, unknown user
     // subcollections, and any nested documents not explicitly matched above.

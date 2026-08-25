@@ -7,6 +7,7 @@ import type {
 } from '../../src/notifications/delivery';
 import {
   createLazyTwilioReminderDeliveryExecutor,
+  desktopReminderApi,
   deliverReminderTask,
   reconcileNotificationPreferenceReminders,
   reconcileTimeBlockReminders,
@@ -30,6 +31,7 @@ describe('notification runtime bindings', () => {
   it('exports the exact private/internal functions and one signature-authenticated public edge', () => {
     const taskEndpoint = endpoint(deliverReminderTask);
     const callbackEndpoint = endpoint(twilioWhatsAppStatusCallback);
+    const desktopEndpoint = endpoint(desktopReminderApi);
 
     expect(taskEndpoint).toMatchObject({
       region: ['europe-west1'],
@@ -50,6 +52,16 @@ describe('notification runtime bindings', () => {
       concurrency: 10,
       secretEnvironmentVariables: [{ key: 'TWILIO_AUTH_TOKEN' }],
     });
+    expect(desktopEndpoint).toMatchObject({
+      region: ['europe-west1'],
+      ingressSettings: 'ALLOW_ALL',
+      timeoutSeconds: 15,
+      minInstances: 0,
+      maxInstances: 2,
+      concurrency: 20,
+      callableTrigger: {},
+    });
+    expect(JSON.stringify(desktopEndpoint)).not.toMatch(/OPENAI|TWILIO|RESEND|secretEnvironment/i);
     for (const fn of [
       reconcileTimeBlockReminders,
       reconcileNotificationPreferenceReminders,
