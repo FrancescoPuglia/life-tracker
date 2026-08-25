@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `169dfadae60b2e830b291fef5544db77f6768a3a`
+- Current implementation checkpoint SHA: `099c5794a962d7a859a5ebc5f3231cf8cf1b34cd`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -1127,6 +1127,40 @@ slice changes one of those trust boundaries.
   isolated builds, both production audits, security scans, and diff hygiene are
   green.
 
+### R6 isolated read-only MCP deploy boundary
+
+- Green isolation commit: `099c5794a962d7a859a5ebc5f3231cf8cf1b34cd`.
+- Moved the sole MCP runtime export into checked-in Firebase codebase `mcp`
+  behind `firebase.mcp.json`. The config contains no Firestore, Hosting, Auth,
+  Storage, emulator, or other deploy target; its predeploy builds and discovers
+  the exact isolated package from its lockfile.
+- Full SDK discovery proves exactly `lifeTrackerMcp`, four non-secret
+  default-off parameters, zero secret bindings, zero task queues, zero
+  schedulers, zero custom roles, and zero required APIs. The 387,871-byte bundle
+  has SHA-256 `80410572...` and contains no AI HTTP/configuration, provider
+  secret, report/scheduler, reminder/Cloud Tasks, Twilio, or Resend surface.
+- The ordinary default codebase is now Secure-AI-only: exactly
+  `lifeTrackerAiApi`, its existing eight parameter names/two secret bindings,
+  and zero required APIs. Its source fingerprint is `sha256:bec32f91...` and
+  its 531,718-byte bundle SHA-256 is `31724c2a...`. No AI implementation file or
+  detached R1 deployment authority changed, and no live Goal 1 revision was
+  touched.
+- The corrected runbook pins exact source/config/lock/runtime blobs, the
+  one-Function diff, current official ChatGPT Developer Mode connection steps,
+  stable CIMD/PKCE/issuer contract, current Rules hash, and the exact five-TTL
+  additive metadata transition from R4's six-composite/sixteen-override state
+  to six composites/twenty-one overrides.
+- Focused MCP plus deployment-surface coverage passed 8 files / 43 tests. The
+  full Functions regression passed 49 files / 471 tests with 11 emulator files
+  / 97 tests explicitly skipped outside emulator gates. The dedicated local
+  Firestore emulator then passed all 3 MCP transaction/concurrency tests using
+  the previously hash-verified temporary JRE and shut down cleanly.
+- The isolated production audit reports zero vulnerabilities; isolated/default
+  builds and discovery, static security, config/credential-shape scans, and
+  diff hygiene are green. Nothing was deployed or enabled, and no Firebase,
+  ChatGPT, provider, account, billing, secret, IAM, Rules, index, TTL, or user
+  data changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1297,6 +1331,11 @@ slice changes one of those trust boundaries.
 | MCP type/build/endpoint gate | PASS; strict Functions typecheck and Node 22 production build; source fingerprint `sha256:06b87ff4e25edfd8931533d5cc351f0ed85d07b71db9320dea6386ca8f5f9167`; one public HTTPS OAuth-protected endpoint, region `europe-west1`, 60-second timeout, 512 MiB, concurrency 20, max instances 2, no secret bindings |
 | MCP dependency/security/hygiene | PASS; production dependency audit 0 vulnerabilities, static/Desktop security, valid Rules/index JSON, changed/staged and generated-bundle high-confidence credential scans, `git diff --check`, staged diff check, and no unstaged overlap |
 | MCP deployment and real ChatGPT acceptance | NOT RUN; runtime remains default-off, no endpoint/account setting changed, and real Developer Mode questions remain an explicit later human/cloud gate |
+| Isolated MCP deployment surface | PASS at exact `099c579`; one endpoint, four non-secret params, zero secrets/task queues/schedulers/custom roles/required APIs; bundle SHA-256 `80410572...` |
+| Default deployment after MCP isolation | PASS; Secure AI endpoint only, no MCP/report/reminder endpoint, zero required APIs; source fingerprint `sha256:bec32f91...` |
+| MCP isolation focused/broad regression | PASS; focused 8 files / 43 tests with only 3 emulator cases skipped there; broad 49 files / 471 tests with 97 emulator-only skips |
+| MCP isolation Firestore emulator | PASS; 3/3 code/refresh replay serialization, hashes-only persistence, revocation, tamper, owner isolation, and rate-limit serialization |
+| MCP isolation dependency/build/security | PASS; isolated production audit 0 vulnerabilities, strict isolated/default builds and discovery, static/config/credential scans, and diff hygiene |
 | Live GitHub/Pages privacy snapshot | PASS read-only; repository public, `has_pages: true`, Pages HTTP 200, one active custom deployment workflow plus the GitHub Pages system workflow, latest deployment successful at `main@5ea3280`, zero releases/tags/forks/stars/subscribers, and 30/30 listed artifacts expired |
 | Desktop repository-independence tests | PASS; 7/7 Desktop config test files, including negative Pages/raw/content/archive/API/release/object URL assertions and safe local/Firebase controls |
 | Desktop repository-independence enforcement | PASS; runtime/config/source scan, updater dependency/init denial, Desktop security, expanded all-workflow static security, syntax/JSON parsing, changed/staged credential scans, and diff hygiene |
@@ -1335,7 +1374,7 @@ slice changes one of those trust boundaries.
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, authenticated native coordinator/policy, server-side cloud-channel gate, and an exact isolated four-endpoint native staging codebase are green; staging deployment and installed/live delivery remain pending
 - R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, isolated exact two-endpoint deploy codebase, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, Scheduler staging gate, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
-- R6 ChatGPT read integration: IN PROGRESS — the authenticated, owner-scoped, bounded, zero-write MCP/OAuth server is green locally and in the Firestore/Rules emulators; deployment and a real ChatGPT Developer Mode connection remain pending
+- R6 ChatGPT read integration: IN PROGRESS — the authenticated, owner-scoped, bounded, zero-write MCP/OAuth server is green locally and in the Firestore/Rules emulators, and its exact one-Function isolated deployment boundary is green; staging deployment/enablement and a real ChatGPT Developer Mode connection remain pending
 - R7 Pages removal and repository privacy conversion: PREPARED — live state refreshed, recovery/conversion runbook and Desktop runtime-independence guard are green; workflow replacement, explicit unpublish, private conversion, and post-change acceptance remain gated
 
 ## External blockers
@@ -1378,13 +1417,15 @@ one exact maximum-cost staging action is approved. Goal 1's verified Sol staging
 revision remains untouched.
 
 The read-only MCP server has a separate deployment/connection gate documented
-in `docs/MCP_RUNTIME_PREDEPLOY.md`. Its local implementation is default-off and
-has no provider secret, but real acceptance requires one explicit root HTTPS
-deployment origin, reviewed Firebase public Web configuration, the fixed owner,
-and Francesco's interactive Firebase consent inside ChatGPT Developer Mode.
-Do not deploy it, enable the runtime, change a ChatGPT account setting, or claim
-real-client verification until the production/staging target and cost diff are
-approved. This does not block privacy/release dependency preparation.
+in `docs/MCP_RUNTIME_PREDEPLOY.md`. Its local implementation is default-off,
+has no provider secret, and now deploys only from isolated codebase `mcp` behind
+`firebase.mcp.json`. Real acceptance still requires one explicit root HTTPS
+deployment origin, the reviewed four non-secret parameters, the exact five-TTL
+metadata addition after R4, and Francesco's interactive Firebase consent inside
+ChatGPT Developer Mode. Do not deploy it, enable the runtime, change a ChatGPT
+account setting, or claim real-client verification until the named staging
+target/resource/cost diff is approved. This does not block privacy/release
+dependency preparation.
 
 R7 account mutations remain a late release gate. The repository and Pages site
 are still public by design, and the active deployment workflow is unchanged.

@@ -30,8 +30,11 @@ no OpenAI request was made, and no email was sent.
   `f4c3acecaabd0023408b0048355080fa3d0fd646`
 - Isolated deploy bundle: 429,711 bytes; SHA-256
   `498b110426e80f0843a6bd0001b3917d50358e3ae03e834d025efb536a86cf9c`
-- Default Functions source fingerprint after separation:
+- Default Functions source fingerprint at the report-isolation checkpoint:
   `sha256:82c541689189779ae8742a9dd98dabf198611609a5ee5c769d40a16a24338aeb`
+- Current default Functions source fingerprint after the later isolated MCP
+  separation at `099c579`:
+  `sha256:bec32f91c16273d006d14221438e974bc2ed836be6e85d35e04ba6965694d655`
 - Runtime/toolchain: Node 22; Firebase CLI `15.28.1`
 
 `firebase.reports.json` contains one Functions source, codebase `reports`, and
@@ -40,8 +43,10 @@ builds the checked-in isolated package from its exact lockfile. Full Firebase
 SDK discovery returns exactly the two report endpoints below, nine reviewed
 parameters, the two scheduled-delivery secret names, zero task queues, one
 Scheduler trigger, one required API (`cloudscheduler.googleapis.com`), and no
-custom role. The default codebase now discovers only `lifeTrackerAiApi` and
-`lifeTrackerMcp`, zero report/reminder endpoints, and zero required APIs.
+custom role. At this report checkpoint the default codebase discovered only
+`lifeTrackerAiApi` and `lifeTrackerMcp`. The later MCP isolation at `099c579`
+further reduced current default discovery to only `lifeTrackerAiApi`; the
+isolated report authority and bundle are unchanged.
 
 The runtime is fail-closed and single-owner:
 
@@ -229,8 +234,9 @@ capture and review:
 | Full Functions regression | PASS; 49 files / 471 tests; 11 emulator files / 97 tests explicitly skipped outside emulator gates |
 | Isolated report typecheck/build | PASS; 429,711-byte bundle, SHA-256 `498b1104...` |
 | Isolated SDK discovery | PASS; exact two endpoints/nine params/two scheduled secrets/one Scheduler/zero task queues |
-| Default SDK discovery | PASS; exact AI + MCP endpoints, no report/reminder endpoint, zero required APIs |
-| Default strict build | PASS; 636.8 kB bundle, source fingerprint `sha256:82c54168...` |
+| Default SDK discovery at report isolation | PASS; exact AI + MCP endpoints, no report/reminder endpoint, zero required APIs |
+| Current default SDK discovery | PASS at later `099c579`; Secure AI endpoint only, zero required APIs |
+| Default strict build at report isolation | PASS; 636.8 kB bundle, source fingerprint `sha256:82c54168...` |
 | Production dependency audits | PASS; default and isolated packages each report 0 vulnerabilities |
 | Security/hygiene | PASS; static/Desktop security, isolated bundle credential scan, `git diff --check`, staged diff check |
 | Live staging Function inventory | PASS read-only; one unchanged Goal 1 AI Function |

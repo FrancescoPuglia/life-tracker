@@ -28,8 +28,11 @@ access was bounded read-only metadata and count-only Firestore aggregation.
   `ed8ce32053b3d09bb339c1cb69b1fcfb9983d0b4`
 - Isolated deploy bundle: 119,038 bytes; SHA-256
   `1e5ba4f135cc3ad2542b7f2981691c614a90b960142c5e91fa139959e953cef2`
-- Default Functions source fingerprint after separation:
+- Default Functions source fingerprint at the native-isolation checkpoint:
   `sha256:cd838b04e641d893473a81e5444dc187c10f1c766b5044ad1017f2b9899b2a5a`
+- Current default Functions source fingerprint after later report/MCP
+  separation at `099c579`:
+  `sha256:bec32f91c16273d006d14221438e974bc2ed836be6e85d35e04ba6965694d655`
 - Functions runtime/toolchain: Node 22; pinned Firebase CLI `15.28.1`
 - Locked isolated dependencies resolve to `firebase-admin@14.3.0` and
   `firebase-functions@7.3.2`
@@ -203,13 +206,14 @@ compiled export surface:
 - `deliverScheduledScientificReports`
 - `lifeTrackerMcp`
 
-The current default codebase separately discovers exactly
+At this native-isolation checkpoint the default codebase separately discovered
 `lifeTrackerAiApi`, `lifeTrackerMcp`, `reconcileScientificReportSchedules`, and
-`deliverScheduledScientificReports`. It contains no reminder endpoint. The
-default report surface declares Cloud Scheduler, which is precisely why the
-native deploy must use `firebase.reminders.json` rather than relying on
-`--only` filtering of the ordinary config: Firebase CLI prerequisite checks
-occur against the discovered backend before endpoint filtering.
+`deliverScheduledScientificReports`; it contained no reminder endpoint. Later
+report and MCP isolation reduced the current default codebase to only
+`lifeTrackerAiApi` at `099c579`. This history is precisely why the native deploy
+must use `firebase.reminders.json` rather than relying on `--only` filtering of
+the ordinary config: Firebase CLI prerequisite checks occur against the
+discovered backend before endpoint filtering.
 
 This separation preserves the verified Goal 1 revision and its pending,
 separately reviewed Desktop-CORS deployment. It prevents creation of a Cloud
@@ -343,7 +347,8 @@ This is a low-volume personal workload, not a zero-cost promise.
 | Prior coupled reminder Firestore emulator | 20/20 PASS; persistence code is unchanged by `3f0d441` |
 | Current Firestore Rules emulator | 72/72 PASS; Rules unchanged since that checkpoint |
 | Isolated SDK deploy discovery | PASS; exact four endpoints, zero params/secrets/task queues/schedulers/custom roles/required APIs |
-| Default SDK deploy discovery | PASS; exact AI/MCP/two-report surface and no reminder endpoint; not used for this deploy |
+| Default SDK deploy discovery at native isolation | PASS; exact AI/MCP/two-report surface and no reminder endpoint; not used for this deploy |
+| Current default SDK discovery | PASS at later `099c579`; Secure AI endpoint only; isolated native authority unchanged |
 | Isolated production dependency audit | PASS; 0 vulnerabilities |
 | Default Functions production dependency audit | PASS; 0 vulnerabilities |
 | Static security | PASS |
