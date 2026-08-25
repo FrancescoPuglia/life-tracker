@@ -1314,6 +1314,28 @@ slice changes one of those trust boundaries.
   No production, billing, API, secret, provider, reminder, report, MCP, GitHub,
   or other cloud action is included or performed.
 
+### Current-source Daily Driver release regression
+
+- The active-goal continuation resumed execution from the clean controlled-stop
+  checkpoint without changing the exact R1 authorization boundary.
+- Full frontend regression at implementation SHA `be06815` passed 71 files /
+  743 tests. This includes the new one-ID Session lifecycle, Today, NowBar,
+  Planner, Weekly Planning, Goal Architect, Ask AI, reports, reminders,
+  performance analytics, Firebase ownership, and execution evidence.
+- Canonical `npm run typecheck` passed. Canonical `npm run build` passed with
+  four static pages and a 239 kB / 342 kB root route; only the established
+  unrelated lint warnings were emitted.
+- The complete Desktop configuration lane passed 8 suites / 27 tests. The
+  output-inclusive static security scan and Desktop attack-surface scan passed.
+  The tracked worktree remained clean and the implementation diff's
+  high-confidence credential scan had no matches.
+- One further bounded non-JSON Firebase account check produced no output and
+  timed out after 15 seconds. It established no authenticated identity and made
+  no mutation. Do not repeat the check or deploy blind; interactive login in
+  Francesco's own terminal remains the single immediate R1 gate.
+- No Firebase project, provider, production resource, installed Desktop,
+  billing setting, secret, Pages setting, or repository visibility changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1529,6 +1551,9 @@ slice changes one of those trust boundaries.
 | Planned-as-actual source audit | PASS; no remaining frontend planned-window fallback or manual planned-timestamp manufacture; the sole `sessionManager` start preservation uses the authoritative current Session start |
 | Persisted Session lifecycle focused proof | PASS at `be06815`; 4 files / 17 tests for one-ID pause/resume/stop, net active duration, legacy zombie suppression, owner/ambiguity failure, persistence failure, NowBar, and Today controls |
 | Persisted Session lifecycle static/hygiene | PASS; focused TypeScript check exit 0, `git diff --check`, staged diff check, and exact seven-file high-confidence credential scan |
+| Current-source full frontend regression | PASS at `be06815`; 71 files / 743 tests |
+| Current-source release type/build | PASS; canonical typecheck and Next.js 15.5.23 static build, 4 pages, root 239 kB / 342 kB first load |
+| Current-source Desktop/security gate | PASS; 8 suites / 27 Desktop configuration tests, output-inclusive static security, Desktop attack-surface security, diff hygiene, and implementation credential scan |
 | Firebase CLI credential containment | PASS for containment, deployment NOT RUN; credential-bearing JSON output was not reused or reproduced, CLI logout/revocation exited 0, safe non-JSON follow-up confirmed no authorized accounts, and fresh interactive login remains required |
 
 ## Release status
@@ -1624,18 +1649,14 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Master Goal execution is under a human-requested controlled stop after green
-implementation SHA `be06815`. Do not begin another implementation, audit,
-deployment, provider, release, or privacy slice until Francesco gives a new
-release decision. The exact R1 Function-only approval remains recorded and
-valid but does not override this controlled stop.
+The controlled-stop checkpoint remains preserved in Git. The subsequent active-
+goal continuation resumed local release verification only. The exact R1
+Function-only approval remains recorded and narrow; it does not authorize any
+other mutation.
 
-When explicitly resumed, the shortest Daily Driver dependency remains:
-
-Verify the public live staging fingerprint and safe CLI authentication state.
-If the CLI remains logged out, the sole
-immediate human action is a fresh Firebase CLI login in Francesco's own terminal
-from the repository:
+Do not repeat bounded CLI probes: current evidence still establishes no usable
+Firebase authentication. The sole immediate human action is a fresh Firebase
+CLI login in Francesco's own terminal from the repository:
 
 `node node_modules/firebase-tools/lib/bin/firebase.js login --reauth`
 
