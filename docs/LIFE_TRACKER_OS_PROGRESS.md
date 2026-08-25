@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `f1070cc69b80aa2cd6724c4e297c99ec110db5fd`
+- Current implementation checkpoint SHA: `169dfadae60b2e830b291fef5544db77f6768a3a`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -1095,6 +1095,38 @@ slice changes one of those trust boundaries.
   error because network was restricted. Its explicitly approved read-only
   retry passed; no cloud or provider state changed.
 
+### R4 isolated scientific-report deploy boundary
+
+- Green isolation commit: `169dfadae60b2e830b291fef5544db77f6768a3a`.
+- Moved the two report endpoint exports into checked-in Firebase codebase
+  `reports` behind `firebase.reports.json`. Full SDK discovery proves exactly
+  the preference Firestore trigger and five-minute delivery scheduler, nine
+  relevant parameters, only `RESEND_API_KEY`/`OPENAI_API_KEY` on the scheduled
+  endpoint, one Scheduler requirement, zero task queues, and no custom role.
+- The 429,711-byte isolated bundle has SHA-256 `498b1104...` and contains no AI
+  HTTP endpoint, MCP/reminder/Twilio/Cloud Tasks symbol, Secure AI capability or
+  origin parameter, unused chat model/reasoning parameter, credential shape, or
+  external workspace import. The default codebase is reduced to AI + MCP and
+  has zero required APIs.
+- Refreshed staging metadata read-only: the one Goal 1 AI Function is unchanged;
+  Cloud Scheduler/Tasks are disabled; Eventarc/Pub/Sub resource counts are zero;
+  all three first-Eventarc managed bindings remain absent; OpenAI secret enabled
+  versions 1/2 exist; `RESEND_API_KEY` does not. No value or user document was
+  read and no cloud state changed.
+- Scheduler job count remains honestly not verified because both Scheduler and
+  Cloud Asset APIs are disabled. The corrected runbook requires a staged future
+  approval: enable Scheduler only, enumerate jobs, then proceed. It never infers
+  zero jobs from a disabled API.
+- Corrected the report metadata authority. After R3's four-composite/fifteen-
+  override manifest, R4 needs both report composites plus the large-report field
+  override. Exact historical manifest `43efb669...` ends at six composites and
+  sixteen overrides; current canonical metadata is excluded because it also
+  contains five MCP TTL policies.
+- Focused regression passed 4 files / 26 tests; broad Functions passed 49 files
+  / 471 tests with 11 emulator files / 97 tests explicitly skipped; default and
+  isolated builds, both production audits, security scans, and diff hygiene are
+  green.
+
 ## Evidence
 
 | Check | Result |
@@ -1241,6 +1273,12 @@ slice changes one of those trust boundaries.
 | Firestore Rules after report manifests | PASS; 66/66, including client denial of owner-nested and root schedule-manifest state |
 | Functions regression after report runtime | PASS; 37 files / 393 unit tests; 9 emulator files / 88 tests correctly skipped outside their explicit gates |
 | Report runtime build/security | PASS; strict typecheck and 801.2 kB reachable Functions bundle, production dependency audit 0 vulnerabilities, valid index JSON, static/Desktop security, generated-bundle and staged high-confidence credential scans, worktree/cached diff checks |
+| Isolated report deployment surface | PASS at exact `169dfad`; two endpoints, nine params, two scheduled secrets, one Scheduler API, zero task queues/custom roles; bundle SHA-256 `498b1104...` |
+| Default deployment after report isolation | PASS; AI + MCP only, no report/reminder endpoint, zero required APIs; source fingerprint `sha256:82c54168...` |
+| Report isolation focused/broad regression | PASS; focused 4 files / 26 tests; broad 49 files / 471 tests with 97 emulator-only skips |
+| Report isolation dependency/build/security | PASS; both production audits 0 vulnerabilities, strict builds, bundle/source scans, static/Desktop security, and staged diff hygiene |
+| Report staging read-only inventory | PASS; Scheduler/Tasks disabled, zero Eventarc/PubSub, Resend secret absent, OpenAI versions 1/2 metadata only, three R3 IAM bindings absent |
+| Scheduler pre-existing job count | NOT VERIFIED without enabling disabled Scheduler or Cloud Asset API; future approved staged inventory required |
 | AI routing focused regression | PASS; 7 files / 64 tests across exact-off legacy behavior, strict manifests/ceilings, cheapest-first evidence, receipt construction, route-only dispatch, no expensive fallback, response metadata, runtime attestation, application, and HTTP boundaries |
 | Functions regression after AI routing | PASS; 40 files / 410 unit tests; 9 emulator files / 88 tests correctly skipped outside their explicit gates |
 | AI routing type/build/security | PASS; strict Functions typecheck, 816.8 kB bundle, evaluation corpus absent from bundle, production dependency audit 0 vulnerabilities, static/Desktop security, staged high-confidence credential scan, and diff hygiene |
@@ -1295,7 +1333,7 @@ slice changes one of those trust boundaries.
 - R1 Desktop Beta using verified staging: IN PROGRESS — current-source x64 NSIS artifact and exact minimal Function-only deployment/rollback receipt are green; staging CORS deployment, install, and visible acceptance remain pending
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, authenticated native coordinator/policy, server-side cloud-channel gate, and an exact isolated four-endpoint native staging codebase are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, isolated exact two-endpoint deploy codebase, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, Scheduler staging gate, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: IN PROGRESS — the authenticated, owner-scoped, bounded, zero-write MCP/OAuth server is green locally and in the Firestore/Rules emulators; deployment and a real ChatGPT Developer Mode connection remain pending
 - R7 Pages removal and repository privacy conversion: PREPARED — live state refreshed, recovery/conversion runbook and Desktop runtime-independence guard are green; workflow replacement, explicit unpublish, private conversion, and post-change acceptance remain gated
@@ -1321,14 +1359,15 @@ Request that separate approval only after the immediate R1 gate. No staging or
 production resource changed in this slice.
 
 Scientific report deployment is another separately reviewed staging gate.
-`docs/REPORT_RUNTIME_PREDEPLOY.md` records the exact two Functions, one index,
-Rules denial, the scheduled endpoint's Resend/existing-OpenAI secret bindings,
-API/service inventory, cost envelope, separate default-off switches, and
-rollback sequence. A future Resend credential/sender/domain action must be
-performed by Francesco through a trusted provider/Secret Manager surface and
-must never be pasted into chat. No such action is yet requested because model
-routing activation/evaluation, MCP, privacy preparation, and other independent
-implementation remain.
+`docs/REPORT_RUNTIME_PREDEPLOY.md` now records codebase `reports`, the exact two
+Functions, two report indexes/one field override, already-reviewed Rules hash,
+scheduled endpoint secret bindings, refreshed API/resource/IAM/secret metadata,
+cost envelope, staged Scheduler inventory, separate default-off switches, and
+rollback. `RESEND_API_KEY` is confirmed absent. A future Resend
+credential/sender/domain action must be performed by Francesco through a
+trusted provider/Secret Manager surface and must never be pasted into chat. No
+such action is requested before R1 and the complete native/cloud R3 staging
+gates are green.
 
 Economical routing has a separate paid-evaluation/activation gate documented in
 `docs/AI_MODEL_ROUTING_EVALUATION.md`. The technically green parser, bounds,

@@ -10,10 +10,38 @@ not deployment approval.
 
 No staging or production resource, API, billing setting, IAM policy, runtime
 parameter, Secret Manager value, provider account, domain, message, or real
-user document was read or changed while implementing this slice. Tests used
-only local deterministic fakes and the local Firestore/Rules emulators. No
-Resend/OpenAI credential was read, no OpenAI request was made, and no email was
-sent.
+user document was changed while implementing this slice. Staging Functions,
+API/resource counts, three named managed IAM bindings, and Secret Manager
+existence/version numbers were refreshed read-only; no secret value, mailbox,
+fixed UID, or user document was read. Tests used only local deterministic fakes
+and the local Firestore/Rules emulators. No Resend/OpenAI credential was read,
+no OpenAI request was made, and no email was sent.
+
+## Exact source and deploy authority
+
+- Application branch: `codex/life-tracker-os`
+- Isolated report implementation checkpoint:
+  `169dfadae60b2e830b291fef5544db77f6768a3a`
+- Firebase config Git blob:
+  `31df469063ae94e6b6e931e9584710de4286b64f`
+- Isolated lockfile Git blob:
+  `c859defa0488189714dc0118336b1b8ec5002db8`
+- Report runtime wiring Git blob:
+  `f4c3acecaabd0023408b0048355080fa3d0fd646`
+- Isolated deploy bundle: 429,711 bytes; SHA-256
+  `498b110426e80f0843a6bd0001b3917d50358e3ae03e834d025efb536a86cf9c`
+- Default Functions source fingerprint after separation:
+  `sha256:82c541689189779ae8742a9dd98dabf198611609a5ee5c769d40a16a24338aeb`
+- Runtime/toolchain: Node 22; Firebase CLI `15.28.1`
+
+`firebase.reports.json` contains one Functions source, codebase `reports`, and
+no Firestore, Hosting, Auth, Storage, or emulator target. Its predeploy step
+builds the checked-in isolated package from its exact lockfile. Full Firebase
+SDK discovery returns exactly the two report endpoints below, nine reviewed
+parameters, the two scheduled-delivery secret names, zero task queues, one
+Scheduler trigger, one required API (`cloudscheduler.googleapis.com`), and no
+custom role. The default codebase now discovers only `lifeTrackerAiApi` and
+`lifeTrackerMcp`, zero report/reminder endpoints, and zero required APIs.
 
 The runtime is fail-closed and single-owner:
 
@@ -52,7 +80,7 @@ The runtime is fail-closed and single-owner:
 
 ## Exact resource diff
 
-The local Functions entry now exports these two new second-generation
+The isolated `reports` codebase exports these two new second-generation
 Functions in `europe-west1`:
 
 | Export | Trigger | Runtime limits | Secret binding |
@@ -60,20 +88,60 @@ Functions in `europe-west1`:
 | `reconcileScientificReportSchedules` | Internal-only Firestore write on `users/{uid}/notificationPreferences/default` | 60 s, 256 MiB, min 0, max 1, concurrency 1 | None |
 | `deliverScheduledScientificReports` | Cloud Scheduler every five minutes in UTC | 540 s, 1 GiB, min 0, max 1, concurrency 1, 3 platform retries within 15 minutes | `RESEND_API_KEY`, `OPENAI_API_KEY` |
 
+The exact parameter surface is:
+
+- `REPORT_EMAIL_RUNTIME_ENABLED`
+- `REPORT_EMAIL_OWNER_UID`
+- `REPORT_EMAIL_FROM_ADDRESS`
+- `REPORT_EMAIL_FROM_NAME`
+- `RESEND_API_KEY`
+- `AI_MODEL_ROUTING_ENABLED`
+- `AI_MODEL_ROUTING_CONFIG`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+
+The bundle contains no AI HTTP endpoint, MCP endpoint/configuration, reminder
+endpoint/configuration, Cloud Tasks dependency, Twilio symbol/secret, Secure AI
+origin/capability secret, or unused chat model/reasoning parameter. Deployment
+must use `firebase.reports.json`; `--only` filtering of the ordinary config is
+not an equivalent boundary because Firebase checks prerequisites against its
+whole discovered backend before endpoint filtering.
+
 The scheduled handler first reconciles the one configured owner, then selects
 at most 10 due manifests. The repository itself accepts no more than 20 and
 queries only documents whose embedded `userId` equals that fixed owner. There
 is no all-user scan.
 
-The Firestore metadata diff adds:
+Starting from the exact R3 reminder manifest (four composites/fifteen field
+overrides), the report metadata diff adds:
 
+- owner report-history composite index `reportArchives`: `userId ASC`,
+  `generatedAt DESC`;
 - collection-group composite index `reportScheduleManifests`: `userId ASC`,
   `state ASC`, `availableAt ASC`, `reportType ASC`;
+- a single-field override that disables indexing of the large immutable
+  `reportArchives.report` object;
 - explicit browser denial for both owner-nested and root
   `reportScheduleManifests` namespaces;
 - explicit browser denial for both owner-nested and root
   `reportInterpretations` namespaces;
 - no new TTL policy in this slice.
+
+Use the exact reminder-plus-report manifest from
+`43efb669c875f6977e439b16baa7b8dad2c9ff49`—not current canonical metadata,
+which also contains MCP TTLs:
+
+- Git blob: `c5d7abae7130a891b5191a522e6a29b0d44666f4`
+- SHA-256:
+  `088031e706253ced325761007b97345075037c01488444d8e75f8d09bd671f84`
+- 3,603 bytes; 151 lines
+- expected final state: six composite indexes and sixteen field overrides
+
+The current Rules source is unchanged at SHA-256
+`2b4a86baea34655cb268d885e11edc76c843691321fd75508094338a9bc72514`.
+R3 deploys those additive owner/report-read and server-namespace-denial Rules
+first. R4 must verify that hash is already live and make no Rules change. If R3
+is not green, do not deploy reports out of release order.
 
 Schedule-manifest state is limited to two stable paths per owner:
 
@@ -95,13 +163,34 @@ authority and is never rewritten by interpretation.
 
 ## Expected service/API surface
 
-An approved Firebase deployment may need Cloud Functions/Cloud Run, Cloud
-Build, Artifact Registry, Eventarc, Cloud Scheduler, Firestore, Firebase Rules,
-and Secret Manager support. Firebase may also provision service agents or
-Pub/Sub plumbing as part of the managed triggers. The exact target-project
-service state, generated deployment plan, service-agent/IAM delta, and existing
-Scheduler job count are **NOT VERIFIED** and must be inventoried read-only
-immediately before deployment.
+Fresh explicit-target staging inventory proved:
+
+- billing is already linked; no billing change is required or authorized;
+- Artifact Registry, Cloud Billing, Cloud Build, Cloud Functions, Cloud Run,
+  Eventarc, Firestore, Pub/Sub, and Secret Manager APIs are enabled;
+- Cloud Scheduler and Cloud Tasks APIs are disabled;
+- exactly one active Function exists: verified Goal 1 `lifeTrackerAiApi`;
+- Eventarc has zero triggers in `europe-west1`; Pub/Sub has zero topics;
+- `OPENAI_API_KEY` exists with enabled versions 1 and 2; the live AI Function
+  binds version 2. Only names/version numbers were read;
+- `RESEND_API_KEY` does not exist;
+- the Pub/Sub service-agent token-creator binding and the default-compute Run
+  invoker/Eventarc receiver bindings are all absent, matching the native R3
+  preflight.
+
+Cloud Scheduler job count remains honestly `NOT VERIFIED`: its API is disabled
+and Cloud Asset API is also disabled, so there is no mutation-free enumeration
+path in the current project. Do not infer a zero count from the disabled API.
+After an exact future approval, enable only Cloud Scheduler first, enumerate
+jobs before deploying a Function, and abort on any unexpected pre-existing job.
+This staged protocol prevents a first broad Firebase deploy from combining
+service enablement, unknown-job reconciliation, and report creation.
+
+R4 follows R3. The three managed Eventarc IAM grants should already have been
+reviewed and created by the native-reminder deployment. Reconfirm them; the
+report approval must not add a different principal or project-wide role. If R3
+has not established the reviewed Eventarc transport, stop and complete R3
+instead of silently broadening R4.
 
 The explicit project must be supplied on every command. Never rely only on the
 `.firebaserc` default. Staging is `life-tracker-staging`; production is
@@ -109,23 +198,54 @@ The explicit project must be supplied on every command. Never rely only on the
 the required backend APIs were disabled in the last read-only audit. Enabling
 billing, an API, or a paid service is a separate human cost gate.
 
-Deployment must be scoped to the two named Functions plus the separately
-reviewed Rules/index changes. It must not implicitly deploy Hosting, remove an
-existing Function, alter Goal 1 secrets/parameters, enable the report switch,
-or configure a provider/domain. Before approval, capture and review:
+Deployment must be scoped to codebase `reports` plus the exact historical
+report metadata manifest. It must not deploy Rules again, Hosting, the default
+AI/MCP codebase, remove an existing Function, alter Goal 1 secrets/parameters,
+enable the report switch, or configure a provider/domain. Before approval,
+capture and review:
 
 1. exact project identity, authenticated principal, billing link, and enabled
    API inventory;
-2. existing Functions, Scheduler jobs, Eventarc triggers, indexes, Rules
-   release, service agents, and relevant IAM bindings;
-3. the Firebase CLI endpoint/resource deletion warning set;
+2. existing Functions, then—after the separately approved Scheduler API
+   enablement—Scheduler jobs, Eventarc triggers, indexes, Rules release, service
+   agents, and relevant IAM bindings;
+3. isolated SDK discovery and the Firebase CLI endpoint/resource deletion
+   warning set; do not run dry-run against a broader config because API checks
+   can precede dry-run exit;
 4. Secret Manager **metadata only** for `RESEND_API_KEY` and the existing
    `OPENAI_API_KEY` binding (existence, versions, replication, IAM), never
    either value;
-5. the ignored target-specific non-secret parameter file and its file mode,
+5. the ignored `functions-reports/.env.life-tracker-staging` non-secret
+   parameter file and its file mode,
    without printing the fixed UID or sender address into logs;
-6. a rollback record containing pre-change Rules, indexes, Function revisions,
+6. a rollback record containing pre-change indexes, Function revisions,
    runtime parameter metadata, and the application SHA.
+
+## Local and read-only evidence
+
+| Gate | Result |
+| --- | --- |
+| Focused report/deploy regression | PASS; 4 files / 26 tests |
+| Full Functions regression | PASS; 49 files / 471 tests; 11 emulator files / 97 tests explicitly skipped outside emulator gates |
+| Isolated report typecheck/build | PASS; 429,711-byte bundle, SHA-256 `498b1104...` |
+| Isolated SDK discovery | PASS; exact two endpoints/nine params/two scheduled secrets/one Scheduler/zero task queues |
+| Default SDK discovery | PASS; exact AI + MCP endpoints, no report/reminder endpoint, zero required APIs |
+| Default strict build | PASS; 636.8 kB bundle, source fingerprint `sha256:82c54168...` |
+| Production dependency audits | PASS; default and isolated packages each report 0 vulnerabilities |
+| Security/hygiene | PASS; static/Desktop security, isolated bundle credential scan, `git diff --check`, staged diff check |
+| Live staging Function inventory | PASS read-only; one unchanged Goal 1 AI Function |
+| Live staging API/resource inventory | PASS read-only; Scheduler/Tasks disabled, zero Eventarc triggers/Pub/Sub topics |
+| Live secret metadata | PASS read-only; OpenAI enabled versions 1/2, Resend absent; no value accessed |
+| Live managed-IAM inventory | PASS read-only; exact three R3/Eventarc bindings absent |
+| Scheduler job inventory | NOT VERIFIED while Scheduler and Cloud Asset APIs are disabled; staged verification required after approved API enablement |
+
+The report runtime parameter refactor duplicates only parameter declarations
+inside the isolated codebase; names, validation, default-off behavior, secret
+bindings, provider construction, and report domain logic are unchanged. The
+report-emulator persistence suite was not rerun for this export-only wiring
+change; its prior explicit results remain authoritative, while all 471 local
+Functions tests including report runtime/interpretation passed on the new
+source.
 
 ## Workload and cost envelope
 
@@ -217,25 +337,50 @@ change, auto-reload, or billing action is authorized.
 
 After a separately granted exact approval:
 
-1. Reconfirm the explicit Firebase project and all read-only inventory above.
-2. Create/update `RESEND_API_KEY` through Firebase's secure interactive Secret
+1. Require R1 and the complete native/cloud R3 staging gates to be green. Then
+   reconfirm the explicit Firebase project and all read-only inventory above.
+2. Enable only `cloudscheduler.googleapis.com`, enumerate every existing
+   Scheduler job immediately, and stop for review if the result differs from
+   the R3 receipt. Do not enable Cloud Tasks or another API in this step.
+3. Create `RESEND_API_KEY` version 1 through Firebase's secure interactive Secret
    Manager flow. Francesco enters the value directly into the trusted CLI or
    provider console; it is never pasted into chat, a command argument, an env
    dump, Git, or a log.
-3. Store non-secret runtime values only in the ignored target-specific Functions
-   parameter file. Verify names and hashes/metadata without printing the fixed
-   UID or mailbox.
-4. Keep both `REPORT_EMAIL_RUNTIME_ENABLED=false` and
-   `AI_MODEL_ROUTING_ENABLED=false` while deploying the named Functions,
-   reviewed Rules, and index.
-5. Verify the deployed Functions' secret bindings, ingress/invoker policy,
+4. Store the nine reviewed non-secret/secret parameter names only in the
+   isolated codebase. Put non-secret values in ignored
+   `functions-reports/.env.life-tracker-staging`; verify hashes/metadata without
+   printing the fixed UID or mailbox. Bind existing `OPENAI_API_KEY` version 2
+   by metadata only; never read its value.
+5. Keep both `REPORT_EMAIL_RUNTIME_ENABLED=false` and
+   `AI_MODEL_ROUTING_ENABLED=false` while deploying the named Functions
+   and keep the evaluated-route manifest at `not-configured`.
+6. From exact manifest commit `43efb669...`, deploy Firestore indexes only.
+   Verify six composites/sixteen field overrides and no deletion. Do not deploy
+   current canonical MCP TTL metadata or Rules.
+7. From exact implementation `169dfad...`, rerun both production audits,
+   typecheck/build/discovery/scans, then deploy the whole isolated codebase:
+
+```text
+node <reviewed-firebase-cli> deploy \
+  --config firebase.reports.json \
+  --project life-tracker-staging \
+  --only functions
+```
+
+8. Abort if discovery or the cloud delta includes anything other than the two
+   report endpoints, one new report Scheduler job, the two exact
+   scheduled-endpoint secret bindings, and no Function deletion. In particular,
+   reject AI HTTP, MCP, reminders, Cloud Tasks, Hosting, Rules, production, or
+   provider/billing changes.
+9. Verify the deployed Functions' secret bindings, ingress/invoker policy,
    Scheduler cadence, max/min instances, retry policy, source SHA, Rules, and
    index readiness. Confirm no Hosting or unrelated Function changed.
-6. Exercise default-off behavior and confirm zero Firestore/provider activity.
-7. Use a single isolated owner-authorized staging schedule, enable the switch
+10. Exercise default-off behavior and confirm zero Firestore/provider activity.
+11. Under a separate bounded runtime-enable approval, use one isolated
+   owner-authorized staging schedule, enable the email switch
    only after sender/domain readiness, and observe one deterministic Daily
    delivery plus its archive/attempt/provider ID. Do not loop provider tests.
-8. Disable immediately on unexpected sends, read amplification, malformed
+12. Disable immediately on unexpected sends, read amplification, malformed
    state, cost anomaly, or ambiguous ownership. Preserve archives and attempts
    for diagnosis; do not delete real user data.
 
@@ -253,10 +398,17 @@ decision. A staging approval does not authorize production.
 
 The first-line email stop is setting the report runtime switch back to exact
 `false`; both handlers then stop before owner/Firestore/provider access. If a
-code rollback is needed, redeploy the recorded prior Function revision/source
-and restore the recorded Rules/index metadata. Do not delete report archives,
-email delivery attempts, run documents, or real user data as part of rollback.
-Queued Scheduler invocations remain harmless while the switch is false.
+code rollback is needed, deploy a reviewed fix or explicitly delete only the
+two new Functions in codebase `reports` with `firebase.reports.json`; they have
+no prior cloud revision. Never delete/update `lifeTrackerAiApi`, `lifeTrackerMcp`,
+or a reminder Function. Do not delete report archives, email delivery attempts,
+run documents, or real user data as part of rollback. Queued Scheduler
+invocations remain harmless while the switch is false.
+
+The additive report indexes/field override and already-reviewed Rules may stay
+in place while Functions are stopped. Removing either is a distinct metadata
+mutation and is not the first response. Cloud Scheduler API may also remain
+enabled; disabling an API is not evidence that its resources were removed.
 
 Recovery itself is a managed cloud mutation and requires the same explicit
 target confirmation and authorization as deployment, except in an active
