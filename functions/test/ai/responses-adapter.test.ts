@@ -259,6 +259,39 @@ describe('bounded OpenAI Responses orchestration', () => {
     })).rejects.toMatchObject({ code: 'UNKNOWN_TOOL' });
   });
 
+  it('attests an evaluated route in provider and normalized metadata only as a complete set', async () => {
+    const routingConfigId = `sha256:${'a'.repeat(64)}`;
+    const evaluationReceiptId = `model_eval_${'b'.repeat(64)}`;
+    const { adapter, requests } = setup([{
+      id: 'response-routed',
+      output: [],
+      output_text: 'Grounded answer.',
+    }], {
+      workload: 'ask',
+      routingConfigId,
+      evaluationReceiptId,
+    });
+
+    const result = await adapter.run({
+      auth: AUTH,
+      message: 'Read',
+      mode: 'ask',
+      authenticatedContext: CONTEXT,
+    });
+
+    expect(requests[0]?.metadata).toEqual(expect.objectContaining({
+      ai_workload: 'ask',
+      routing_config_id: routingConfigId,
+      evaluation_receipt_id: evaluationReceiptId,
+    }));
+    expect(result.metadata).toMatchObject({
+      workload: 'ask',
+      routingConfigId,
+      evaluationReceiptId,
+    });
+    expect(() => setup([], { workload: 'ask' })).toThrow('routing metadata');
+  });
+
   it('refuses the generic proposal path as a bypass around deterministic TimeBlock scheduling', async () => {
     const { adapter } = setup([{
       id: 'response-timeblock-bypass',

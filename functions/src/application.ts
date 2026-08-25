@@ -1,4 +1,4 @@
-import type { OpenAIResponsesAdapter } from './ai/responses-adapter';
+import type { ResponsesRunner } from './ai/responses-adapter';
 import type { LifeTrackerDomain } from './domain/factory';
 import type { AuthContext } from './domain/types';
 import type {
@@ -12,7 +12,7 @@ import type {
 export class LifeTrackerApiApplication implements ApiApplication {
   constructor(
     private readonly domain: LifeTrackerDomain,
-    private readonly responses: OpenAIResponsesAdapter | (() => OpenAIResponsesAdapter),
+    private readonly responses: ResponsesRunner | (() => ResponsesRunner),
   ) {}
 
   async chat(context: AuthContext, request: ChatRequest): Promise<Readonly<Record<string, unknown>>> {
@@ -78,7 +78,7 @@ export class LifeTrackerApiApplication implements ApiApplication {
     };
   }
 
-  private responsesAdapter(): OpenAIResponsesAdapter {
+  private responsesAdapter(): ResponsesRunner {
     return typeof this.responses === 'function' ? this.responses() : this.responses;
   }
 }

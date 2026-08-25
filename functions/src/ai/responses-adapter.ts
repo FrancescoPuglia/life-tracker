@@ -74,6 +74,9 @@ export interface NormalizedAiResponse {
     readonly reasoningTokens: number;
     readonly totalTokens: number;
     readonly orchestrationLatencyMs: number;
+    readonly workload?: 'ask' | 'coach' | 'analyze' | 'plan';
+    readonly routingConfigId?: string;
+    readonly evaluationReceiptId?: string;
   }>;
 }
 
@@ -88,8 +91,16 @@ export interface ResponsesAdapterOptions {
   readonly reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   readonly promptVersion: string;
   readonly schemaVersion: string;
+  readonly workload?: 'ask' | 'coach' | 'analyze' | 'plan';
+  readonly routingConfigId?: string;
+  readonly evaluationReceiptId?: string;
   readonly onProviderError?: (metadata: SafeProviderErrorMetadata) => void;
   readonly onOrchestrationError?: (metadata: SafeOrchestrationErrorMetadata) => void;
+}
+
+/** Transport-neutral runner implemented by both one-model and routed adapters. */
+export interface ResponsesRunner {
+  run(input: ResponsesRunInput): Promise<NormalizedAiResponse>;
 }
 
 export interface SafeProviderErrorMetadata {
@@ -112,12 +123,17 @@ export interface SafeOrchestrationErrorMetadata {
   readonly providerResponseStatus?: 'missing' | 'failed' | 'in_progress' | 'cancelled' | 'queued' | 'incomplete';
 }
 
-export class OpenAIResponsesAdapter {
+export class OpenAIResponsesAdapter implements ResponsesRunner {
   private readonly timeoutMs: number;
   private readonly maxTurns: number;
   private readonly maxToolCalls: number;
   private readonly maxOutputTokens: number;
   private readonly maxTotalToolOutputBytes: number;
+  private readonly routingMetadata: Readonly<{
+    workload: 'ask' | 'coach' | 'analyze' | 'plan';
+    routingConfigId: string;
+    evaluationReceiptId: string;
+  }> | null;
 
   constructor(
     private readonly client: ResponsesClientLike,
@@ -130,6 +146,7 @@ export class OpenAIResponsesAdapter {
     this.maxToolCalls = options.maxToolCalls ?? 12;
     this.maxOutputTokens = options.maxOutputTokens ?? 1_500;
     this.maxTotalToolOutputBytes = options.maxTotalToolOutputBytes ?? 512_000;
+    this.routingMetadata = validateRoutingMetadata(options);
   }
 
   async run(input: ResponsesRunInput): Promise<NormalizedAiResponse> {
@@ -202,6 +219,11 @@ export class OpenAIResponsesAdapter {
               request_id: input.auth.requestId,
               prompt_version: this.options.promptVersion,
               schema_version: this.options.schemaVersion,
+              ...(this.routingMetadata ? {
+                ai_workload: this.routingMetadata.workload,
+                routing_config_id: this.routingMetadata.routingConfigId,
+                evaluation_receipt_id: this.routingMetadata.evaluationReceiptId,
+              } : {}),
             },
             ...(this.options.reasoningEffort
               ? { reasoning: { effort: this.options.reasoningEffort } }
@@ -257,6 +279,7 @@ export class OpenAIResponsesAdapter {
             toolNames: [...toolNames].sort(),
             ...usage,
             orchestrationLatencyMs: Math.max(0, Date.now() - startedAt),
+            ...(this.routingMetadata ?? {}),
           };
           const normalized: NormalizedAiResponse = lastPlan
             ? { message: finalText, plan: lastPlan, metadata }
@@ -318,6 +341,34 @@ export class OpenAIResponsesAdapter {
       controller.abort();
     }
   }
+}
+
+function validateRoutingMetadata(
+  options: ResponsesAdapterOptions,
+): Readonly<{
+  workload: 'ask' | 'coach' | 'analyze' | 'plan';
+  routingConfigId: string;
+  evaluationReceiptId: string;
+}> | null {
+  const values = [options.workload, options.routingConfigId, options.evaluationReceiptId];
+  if (values.every((value) => value === undefined)) return null;
+  if (
+    (options.workload !== 'ask'
+      && options.workload !== 'coach'
+      && options.workload !== 'analyze'
+      && options.workload !== 'plan')
+    || typeof options.routingConfigId !== 'string'
+    || !/^sha256:[0-9a-f]{64}$/u.test(options.routingConfigId)
+    || typeof options.evaluationReceiptId !== 'string'
+    || !/^model_eval_[0-9a-f]{64}$/u.test(options.evaluationReceiptId)
+  ) {
+    throw new Error('Responses routing metadata is invalid.');
+  }
+  return Object.freeze({
+    workload: options.workload,
+    routingConfigId: options.routingConfigId,
+    evaluationReceiptId: options.evaluationReceiptId,
+  });
 }
 
 function requireExpectedProviderModel(value: unknown, configuredModel: string): string {

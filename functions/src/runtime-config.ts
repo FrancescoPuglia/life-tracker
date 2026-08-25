@@ -1,6 +1,26 @@
 import { createHash } from 'node:crypto';
 
 export type RuntimeReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type RuntimeAiWorkload =
+  | 'ask'
+  | 'coach'
+  | 'analyze'
+  | 'plan'
+  | 'weekly_strategic_review';
+
+export interface RuntimeModelRouteMetadata {
+  readonly workload: RuntimeAiWorkload;
+  readonly model: string;
+  readonly reasoningEffort: RuntimeReasoningEffort;
+}
+
+export interface RuntimeModelRoutingMetadata {
+  readonly configId: string;
+  readonly evaluationReceiptId: string;
+  readonly evaluatedAt: string;
+  readonly priceCatalogVersion: string;
+  readonly routes: readonly RuntimeModelRouteMetadata[];
+}
 
 export interface RuntimeConfigInput {
   readonly model: string;
@@ -13,6 +33,7 @@ export interface RuntimeConfigInput {
   readonly maxTurns: number;
   readonly maxToolCalls: number;
   readonly maxOutputTokens: number;
+  readonly routing?: RuntimeModelRoutingMetadata;
 }
 
 /** Safe metadata exposed by health checks and receipts; sensitive values never enter it. */
@@ -22,6 +43,7 @@ export interface RuntimeConfigMetadata {
   readonly reasoningEffort: RuntimeReasoningEffort;
   readonly promptVersion: string;
   readonly schemaVersion: string;
+  readonly routing?: RuntimeModelRoutingMetadata;
 }
 
 /**
@@ -39,9 +61,9 @@ export function createRuntimeConfigMetadata(input: RuntimeConfigInput): RuntimeC
     .map((origin) => safeBoundedText(origin, 'allowed origin', 512))
     .sort();
   if (allowedOrigins.length === 0) throw new Error('At least one allowed origin is required.');
+  const routing = input.routing ? safeRoutingMetadata(input.routing) : undefined;
 
-  const canonicalManifest = {
-    version: 1,
+  const commonManifest = {
     model,
     reasoningEffort,
     providerBaseUrl,
@@ -53,6 +75,9 @@ export function createRuntimeConfigMetadata(input: RuntimeConfigInput): RuntimeC
     maxToolCalls: positiveInteger(input.maxToolCalls, 'maximum tool calls'),
     maxOutputTokens: positiveInteger(input.maxOutputTokens, 'maximum output tokens'),
   } as const;
+  const canonicalManifest = routing
+    ? { version: 2, ...commonManifest, routing }
+    : { version: 1, ...commonManifest };
   const configId = `sha256:${createHash('sha256')
     .update(JSON.stringify(canonicalManifest))
     .digest('hex')}`;
@@ -63,6 +88,47 @@ export function createRuntimeConfigMetadata(input: RuntimeConfigInput): RuntimeC
     reasoningEffort,
     promptVersion,
     schemaVersion,
+    ...(routing ? { routing } : {}),
+  });
+}
+
+function safeRoutingMetadata(input: RuntimeModelRoutingMetadata): RuntimeModelRoutingMetadata {
+  if (!/^sha256:[0-9a-f]{64}$/.test(input.configId)) {
+    throw new Error('Runtime routing configuration ID is invalid.');
+  }
+  if (!/^model_eval_[0-9a-f]{64}$/.test(input.evaluationReceiptId)) {
+    throw new Error('Runtime routing evaluation receipt is invalid.');
+  }
+  const evaluatedAt = normalizedInstant(input.evaluatedAt, 'routing evaluation time');
+  const priceCatalogVersion = safeIdentifier(
+    input.priceCatalogVersion,
+    'routing price catalog version',
+  );
+  if (!Array.isArray(input.routes) || input.routes.length !== 5) {
+    throw new Error('Runtime routing routes are invalid.');
+  }
+  const workloads: readonly RuntimeAiWorkload[] = [
+    'ask', 'coach', 'analyze', 'plan', 'weekly_strategic_review',
+  ];
+  const routes = input.routes.map((route) => {
+    if (!workloads.includes(route.workload)) {
+      throw new Error('Runtime routing workload is invalid.');
+    }
+    return Object.freeze({
+      workload: route.workload,
+      model: safeIdentifier(route.model, 'routing model'),
+      reasoningEffort: safeReasoningEffort(route.reasoningEffort),
+    });
+  }).sort((left, right) => left.workload.localeCompare(right.workload));
+  if (new Set(routes.map((route) => route.workload)).size !== workloads.length) {
+    throw new Error('Runtime routing workloads are incomplete.');
+  }
+  return Object.freeze({
+    configId: input.configId,
+    evaluationReceiptId: input.evaluationReceiptId,
+    evaluatedAt,
+    priceCatalogVersion,
+    routes: Object.freeze(routes),
   });
 }
 
@@ -82,6 +148,14 @@ function safeIdentifier(value: string, label: string): string {
 
 function safeBoundedText(value: string, label: string, maximumLength: number): string {
   if (!value || value.length > maximumLength || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`Runtime ${label} is invalid.`);
+  }
+  return value;
+}
+
+function normalizedInstant(value: string, label: string): string {
+  const epoch = Date.parse(value);
+  if (!Number.isFinite(epoch) || new Date(epoch).toISOString() !== value) {
     throw new Error(`Runtime ${label} is invalid.`);
   }
   return value;

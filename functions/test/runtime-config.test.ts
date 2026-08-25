@@ -60,4 +60,39 @@ describe('runtime configuration attestation', () => {
     expect(() => createRuntimeConfigMetadata({ ...BASE, allowedOrigins: new Set() })).toThrow();
     expect(() => createRuntimeConfigMetadata({ ...BASE, maxTurns: 0 })).toThrow();
   });
+
+  it('attests evaluated routing only when present and keeps legacy metadata unchanged', () => {
+    const routing = {
+      configId: `sha256:${'a'.repeat(64)}`,
+      evaluationReceiptId: `model_eval_${'b'.repeat(64)}`,
+      evaluatedAt: '2026-08-25T12:00:00.000Z',
+      priceCatalogVersion: 'openai-pricing-2026-08-25',
+      routes: [
+        { workload: 'plan', model: 'gpt-5.6-sol', reasoningEffort: 'medium' },
+        { workload: 'ask', model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+        { workload: 'coach', model: 'gpt-5.6-luna', reasoningEffort: 'low' },
+        { workload: 'analyze', model: 'gpt-5.6-terra', reasoningEffort: 'medium' },
+        { workload: 'weekly_strategic_review', model: 'gpt-5.6-sol', reasoningEffort: 'medium' },
+      ],
+    } as const;
+    const routed = createRuntimeConfigMetadata({ ...BASE, routing });
+
+    expect(createRuntimeConfigMetadata(BASE).configId)
+      .toBe('sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f');
+    expect(routed.configId).not.toBe(createRuntimeConfigMetadata(BASE).configId);
+    expect(routed.routing?.routes.map((item) => item.workload)).toEqual([
+      'analyze', 'ask', 'coach', 'plan', 'weekly_strategic_review',
+    ]);
+    expect(routed).not.toHaveProperty('providerBaseUrl');
+    expect(routed).not.toHaveProperty('allowedOrigins');
+
+    expect(() => createRuntimeConfigMetadata({
+      ...BASE,
+      routing: { ...routing, routes: routing.routes.slice(0, 4) },
+    })).toThrow('routes');
+    expect(() => createRuntimeConfigMetadata({
+      ...BASE,
+      routing: { ...routing, routes: routing.routes.map(() => routing.routes[0]!) },
+    })).toThrow('incomplete');
+  });
 });

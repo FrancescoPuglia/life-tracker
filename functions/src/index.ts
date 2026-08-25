@@ -6,7 +6,18 @@ import * as logger from 'firebase-functions/logger';
 import { onRequest } from 'firebase-functions/v2/https';
 import { LifeTrackerApiApplication } from './application';
 import { createProductionResponsesClient, validateProviderBaseUrl } from './ai/production-client';
-import { OpenAIResponsesAdapter } from './ai/responses-adapter';
+import {
+  OpenAIResponsesAdapter,
+  type ResponsesClientLike,
+  type ResponsesRunner,
+} from './ai/responses-adapter';
+import {
+  resolveAiRoutingRuntimePolicy,
+  routingRuntimeMetadata,
+  type LifeTrackerAiExecutionProfile,
+  type LifeTrackerAiRoutingPolicy,
+} from './ai/model-routing';
+import { WorkloadRoutedResponsesAdapter } from './ai/routed-responses-adapter';
 import { CapabilityIssuer } from './domain/capabilities';
 import { DomainError } from './domain/errors';
 import { createLifeTrackerDomain } from './domain/factory';
@@ -37,6 +48,14 @@ const OPENAI_REASONING_EFFORT = defineString('OPENAI_REASONING_EFFORT', {
   default: 'low',
   description: 'Responses reasoning effort: none, low, medium, high, xhigh, or max.',
 });
+const AI_MODEL_ROUTING_ENABLED = defineString('AI_MODEL_ROUTING_ENABLED', {
+  default: 'false',
+  description: 'Exact opt-in switch for evaluated per-workload model routing.',
+});
+const AI_MODEL_ROUTING_CONFIG = defineString('AI_MODEL_ROUTING_CONFIG', {
+  default: 'not-configured',
+  description: 'Versioned non-secret evaluated model-route manifest. Ignored while routing is false.',
+});
 const OPENAI_BASE_URL = defineString('OPENAI_BASE_URL', {
   default: 'https://api.openai.com/v1',
   description: 'Backend-only official OpenAI base URL. Loopback is accepted only by the Functions emulator.',
@@ -66,7 +85,7 @@ const firestore = getFirestore(firebaseApp);
 const tokenVerifier = new FirebaseTokenVerifier(getAuth(firebaseApp));
 const rateLimiter = new FirestoreRateLimiter(firestore);
 let cachedApplication: ApiApplication | undefined;
-let cachedResponses: OpenAIResponsesAdapter | undefined;
+let cachedResponses: ResponsesRunner | undefined;
 let cachedRuntimeSettings: RuntimeSettings | undefined;
 
 export const lifeTrackerAiApi = onRequest({
@@ -118,16 +137,24 @@ function productionApplication(): ApiApplication {
   return cachedApplication;
 }
 
-function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>): OpenAIResponsesAdapter {
+function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>): ResponsesRunner {
   if (cachedResponses) return cachedResponses;
   const apiKey = OPENAI_API_KEY.value();
   if (!apiKey) throw new DomainError('INTERNAL', 'OpenAI secret is unavailable.');
   const runtime = runtimeSettings();
+  const client = createProductionResponsesClient(apiKey, {
+    baseURL: runtime.providerBaseUrl,
+    allowLoopback: runtime.allowLoopback,
+  });
+  if (runtime.routingPolicy) {
+    cachedResponses = new WorkloadRoutedResponsesAdapter(
+      runtime.routingPolicy,
+      (profile) => responsesAdapter(client, domain, profile),
+    );
+    return cachedResponses;
+  }
   cachedResponses = new OpenAIResponsesAdapter(
-    createProductionResponsesClient(apiKey, {
-      baseURL: runtime.providerBaseUrl,
-      allowLoopback: runtime.allowLoopback,
-    }),
+    client,
     domain.registry,
     domain.executor,
     {
@@ -151,6 +178,41 @@ function productionResponses(domain: ReturnType<typeof createLifeTrackerDomain>)
   return cachedResponses;
 }
 
+function responsesAdapter(
+  client: ResponsesClientLike,
+  domain: ReturnType<typeof createLifeTrackerDomain>,
+  profile: LifeTrackerAiExecutionProfile,
+): OpenAIResponsesAdapter {
+  if (
+    profile.workload === 'weekly_strategic_review'
+    || !profile.routingConfigId
+    || !profile.evaluationReceiptId
+  ) {
+    throw new DomainError('INTERNAL', 'Evaluated chat route metadata is invalid.');
+  }
+  return new OpenAIResponsesAdapter(client, domain.registry, domain.executor, {
+    model: profile.model,
+    instructions: SYSTEM_INSTRUCTIONS,
+    reasoningEffort: profile.reasoningEffort,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    timeoutMs: profile.timeoutMs,
+    maxTurns: profile.maxTurns,
+    maxToolCalls: profile.maxToolCalls,
+    maxOutputTokens: profile.maxOutputTokens,
+    maxTotalToolOutputBytes: profile.maxTotalToolOutputBytes,
+    workload: profile.workload,
+    routingConfigId: profile.routingConfigId,
+    evaluationReceiptId: profile.evaluationReceiptId,
+    onProviderError: (metadata) => {
+      logger.error('OpenAI Responses provider request failed safely.', metadata);
+    },
+    onOrchestrationError: (metadata) => {
+      logger.error('OpenAI Responses orchestration failed safely.', metadata);
+    },
+  });
+}
+
 interface RuntimeSettings {
   readonly model: string;
   readonly reasoningEffort: RuntimeReasoningEffort;
@@ -158,6 +220,7 @@ interface RuntimeSettings {
   readonly allowLoopback: boolean;
   readonly allowedOrigins: ReadonlySet<string>;
   readonly metadata: RuntimeConfigMetadata;
+  readonly routingPolicy: LifeTrackerAiRoutingPolicy | null;
 }
 
 function runtimeSettings(): RuntimeSettings {
@@ -167,6 +230,10 @@ function runtimeSettings(): RuntimeSettings {
   const reasoningEffort = parseReasoningEffort(OPENAI_REASONING_EFFORT.value());
   const providerBaseUrl = validateProviderBaseUrl(OPENAI_BASE_URL.value(), allowLoopback);
   const allowedOrigins = parseAllowedOrigins(AI_ALLOWED_ORIGINS.value());
+  const routingPolicy = resolveAiRoutingRuntimePolicy({
+    enabled: AI_MODEL_ROUTING_ENABLED,
+    config: AI_MODEL_ROUTING_CONFIG,
+  });
   const metadata = createRuntimeConfigMetadata({
     model,
     reasoningEffort,
@@ -178,6 +245,7 @@ function runtimeSettings(): RuntimeSettings {
     maxTurns: RESPONSES_MAX_TURNS,
     maxToolCalls: RESPONSES_MAX_TOOL_CALLS,
     maxOutputTokens: RESPONSES_MAX_OUTPUT_TOKENS,
+    ...(routingPolicy ? { routing: routingRuntimeMetadata(routingPolicy) } : {}),
   });
   cachedRuntimeSettings = Object.freeze({
     model,
@@ -186,6 +254,7 @@ function runtimeSettings(): RuntimeSettings {
     allowLoopback,
     allowedOrigins,
     metadata,
+    routingPolicy,
   });
   return cachedRuntimeSettings;
 }
@@ -202,6 +271,8 @@ function parseReasoningEffort(
 export * from './application';
 export * from './ai/production-client';
 export * from './ai/responses-adapter';
+export * from './ai/model-routing';
+export * from './ai/routed-responses-adapter';
 export * from './domain/ai-context';
 export * from './domain/capabilities';
 export * from './domain/errors';
