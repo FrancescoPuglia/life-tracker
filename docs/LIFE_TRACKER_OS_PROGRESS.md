@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `f1c78ba8d016a9af738b3cfd7ff189ccf77e4f56`
+- Current implementation checkpoint SHA: `e4db3389b903f07844b6d20c463516b90c5f3ca6`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -752,6 +752,45 @@ slice changes one of those trust boundaries.
   Functions entry bundle contains no schedule-candidate or `report_run_`
   runtime symbol.
 
+### R4 durable report-run orchestration
+
+- Green implementation commit: `e4db3389b903f07844b6d20c463516b90c5f3ca6`.
+- Added a provider-neutral `scientific-report-run-v1` state machine at the
+  owner-derived `users/{uid}/reportRuns/{runId}` path. A run stores only stable
+  UID/type/period/schedule identities, one-way recipient authority, bounded
+  generation/delivery claims, archive hashes, non-secret outcomes, and
+  timestamps. It never stores the recipient mailbox, provider body, provider
+  credential, source records, or arbitrary Firestore path.
+- Generation claims are transactional, limited to three attempts, recover an
+  expired lease with the original deterministic generation instant, reject
+  early/out-of-window work, and serialize concurrent invocations to one
+  generator. Persisted transitions reject backward clocks, expired-at-write
+  claims, and expired-at-write retry times before mutation.
+- The service performs the exact sequence `claim -> bounded owner-scoped source
+  load -> deterministic build -> atomic archive + idempotency marker + run
+  commit -> current recipient/schedule reauthorization -> durable email
+  handoff -> run finalization`. An existing immutable archive is reused without
+  rereading mutable source state.
+- Generation commit and delivery authorization each reread the current user and
+  exact notification preference documents in the same transaction. Disabled
+  email/schedule, changed recipient/schedule, legacy recipient-less v1
+  preferences, or an expired catch-up window safely suppress work. Stale
+  authority creates no archive and makes no provider call.
+- Delivery claims are bounded to five orchestration attempts and wrap the
+  existing three-attempt claim-before-send email repository. A simulated crash
+  after provider acceptance recovered as `already_sent` with one source load
+  and one provider invocation; an abandoned/ambiguous provider claim remains
+  terminal no-resend. Exact replays return the stored result, while changed
+  content or finalization conflicts fail closed.
+- Archive creation and its idempotency marker now share their previously proven
+  exact codec with the run transaction, so archive, marker, and run hashes
+  commit atomically. Browser Rules explicitly deny both nested and root
+  `reportRuns` access.
+- No runtime scheduler, Function export, Resend client instance, provider
+  secret access, cloud action, API/billing change, Firebase mutation, or real
+  message send was added. The production Functions entry bundle remains free
+  of report-run and Resend runtime symbols.
+
 ## Evidence
 
 | Check | Result |
@@ -887,13 +926,18 @@ slice changes one of those trust boundaries.
 | Report schedule type/build gate | PASS; frontend and Functions typechecks, Next.js 15.5.23 static build (4 pages; root 231 kB / 333 kB first load), and Functions production bundle; only established unrelated lint warnings |
 | Report schedule Desktop export | PASS from clean exact `f1c78ba`; reviewed `life-tracker-staging` public Web manifest, distinguishable Beta profile, 4 static pages, Desktop scan, output-inclusive static scan, and exact SHA attestation. The generic no-profile command correctly exited 1; the first sandboxed manifest lookup exited before build, and its approved read-only retry passed |
 | Report schedule security/hygiene | PASS; Desktop/static output security, changed and staged high-confidence credential scans, no scheduler symbols in the Functions entry bundle, `git diff --check`, and cached diff check |
+| Report-run focused coverage | PASS; 18/18 schedule authorization, orchestration ordering, archive reuse, source failure, stale authority, delivery failure, and archive contract tests |
+| Coupled report Firestore emulator | PASS; 18/18 archive, email-delivery, and report-run transaction tests, including concurrent claims, stable lease recovery, early/catch-up bounds, v1 fail-closed behavior, atomic stale suppression, exact replay/conflict, backward-time rollback, bounded failures, and provider-acceptance crash recovery |
+| Firestore Rules after report runs | PASS; 65/65, including denial of owner-nested and root server-only `reportRuns` state |
+| Functions regression after report runs | PASS; 34 files / 374 unit tests; 8 emulator files / 81 tests correctly skipped outside their explicit emulator gates |
+| Report-run type/build/security | PASS; strict Functions typecheck/build (512.3 kB entry), no report-run/scheduler/Resend runtime symbols, static and Desktop security checks, changed/staged high-confidence credential scans, `git diff --check`, and cached diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, and DST-safe due-period planning are green; durable run orchestration, runtime scheduling, secret/domain configuration, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, and durable claim/generate/archive/reauthorize/deliver orchestration are green; runtime scheduling, secret/domain configuration, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -921,30 +965,29 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with a server-only durable report-run
-repository and orchestration service. Persist the already-derived
-user/type/local-period candidate at an owner-derived
-`users/{uid}/reportRuns/{runId}` path before bounded source loading, with a
-stable first-claim generation instant, exact schedule/recipient authority
-hashes, bounded recoverable generation claims, and non-secret terminal state.
-Concurrent scheduler invocations must yield one generator. A retry may safely
-resume local deterministic generation, reuse an existing immutable archive,
-and then hand only that archive identity plus the current in-memory envelope to
-the existing durable email-delivery service.
+Continue independent local R4 work with the disabled-by-default runtime
+scheduling boundary. First inspect the established notification runtime-binding
+pattern and produce a bounded report schedule-manifest/reconciliation design:
+preference writes should materialize only owner/run timing authority (never a
+mailbox), and one Firebase scheduled Function should query only due manifests
+with an explicit per-invocation cap instead of scanning all users every minute.
+The scheduler must recompute candidates from the current exact preference
+document, pass them through `ScientificReportRunService`, advance/reconcile the
+next occurrence on every terminal/safe outcome, and leave recoverable work
+durable on retryable infrastructure failures. Prove preference enable/change/
+disable, Daily/Weekly coexistence, concurrency, cursor/cap fairness, DST,
+stale manifest suppression, malformed owner state, and retry behavior locally
+and in the Firestore emulator.
 
-Reread and normalize authoritative preferences immediately before generation
-and again before delivery. Disabled email/schedule, a changed schedule or
-recipient authority, malformed/missing preferences, unavailable required
-sources, archive conflict, generation failure, and chart isolation must produce
-an explicit safe outcome without sending. An expired generation claim may be
-recovered because no external call precedes the durable archive; ambiguous
-provider delivery remains governed by the existing terminal no-resend email
-control. Explicitly deny browser access to report-run state and prove owner
-isolation, claim concurrency, crash recovery, stale authority, replay,
-archive reuse/conflict, missing data, and no-mailbox persistence in the local
-Firestore emulator before exporting any runtime scheduler. Do not read secret
-values, instantiate the Resend client, register/deploy a Function, enable
-APIs/billing, send a message, or mutate any Firebase project in this slice.
+Register named Functions only after the runtime is dependency-injected and
+green. Keep report delivery behind a reviewed default-off kill switch; bind
+`RESEND_API_KEY` only to the delivery-capable scheduled endpoint and construct
+the Resend provider lazily after that switch and validated non-secret sender
+configuration. Do not read a secret value, deploy a Function/Rules/index,
+enable an API or billing, configure a provider/domain, send a message, or
+mutate staging/production while implementing this local slice. End with an
+exact endpoint/index/API/cost pre-deploy diff; deployment remains a separate
+human approval gate.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
