@@ -129,6 +129,36 @@ The affected trust boundary is CORS only, and its focused tests plus post-deploy
 allow/deny probes are the required regression. Installed Ask AI acceptance may
 make one intentional real user request later; it is not part of deployment.
 
+## Automated read-only acceptance verifier
+
+Master checkpoint `f1070cc69b80aa2cd6724c4e297c99ec110db5fd` adds a
+provider-free verifier for the exact public boundary:
+
+```text
+npm run verify:r1-staging:baseline
+npm run verify:r1-staging:desktop
+```
+
+Each profile makes exactly 16 bounded HTTPS requests to `/v1/health`: GET plus
+an authenticated-POST-shaped OPTIONS preflight for every exact allowed and
+denied origin. It sends no bearer token, request body, Firebase data, provider
+request, or mutation. It caps a health body at 8 KiB, retries only one transport
+exception, never logs a response body or request ID, and validates:
+
+- exact status and `Access-Control-Allow-Origin` behavior;
+- absence of credentialed CORS;
+- POST/Authorization/Content-Type/X-Request-Id preflight support;
+- exact release/runtime fingerprints and Sol/medium/prompt/schema authority;
+- denial of HTTP/subdomain/explicit-port Tauri, Pages, and attacker origins.
+
+The live `baseline` profile passed 16/16 probes on 2026-08-25 with the original
+two origins and Goal 1 fingerprints. The `desktop` profile exited 1 as required
+before deployment because the current release/runtime fingerprints remain the
+baseline values; the baseline profile independently proved exact Desktop GET
+and preflight denial. The first sandboxed live command failed with a normalized
+transport error because network access was unavailable; its explicitly
+approved read-only retry passed. No cloud state changed.
+
 ## Current Beta artifact
 
 A clean reviewed-staging export and Windows x64 Tauri/NSIS build completed from
@@ -205,18 +235,21 @@ setting may be changed as part of the approval.
 
 Before installing the new Beta:
 
-1. `functions:list --project life-tracker-staging --json` still returns only the
+1. Run `npm run verify:r1-staging:desktop`; it must return `PASS` with three
+   allowed origins, five denied origins, 16 requests, and the full expected
+   release/runtime fingerprints.
+2. `functions:list --project life-tracker-staging --json` still returns only the
    intended Function for this source and shows the same resource bounds and
    secret version metadata.
-2. Approved Hosting and local-verification origins return HTTP 200.
-3. Exact `https://tauri.localhost` returns HTTP 200 with the exact
+3. Approved Hosting and local-verification origins return HTTP 200.
+4. Exact `https://tauri.localhost` returns HTTP 200 with the exact
    `Access-Control-Allow-Origin` value.
-4. HTTP Tauri, subdomain Tauri, explicit-port Tauri, Pages, and attacker origins
+5. HTTP Tauri, subdomain Tauri, explicit-port Tauri, Pages, and attacker origins
    return HTTP 403 without an allow-origin header.
-5. Health reports backend fingerprint `sha256:8bec8a4c...` in full as recorded
+6. Health reports backend fingerprint `sha256:8bec8a4c...` in full as recorded
    above and runtime fingerprint `sha256:6ef03a91...` in full as recorded above.
-6. Model/reasoning/prompt/schema remain Sol/medium/secure-v1/life-plan-v1.
-7. No other endpoint, Rule, index, task, scheduler, secret version, provider,
+7. Model/reasoning/prompt/schema remain Sol/medium/secure-v1/life-plan-v1.
+8. No other endpoint, Rule, index, task, scheduler, secret version, provider,
    or production resource changed.
 
 If any assertion fails, do not install or invoke Ask AI.

@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `eb34cd1fdbbbe9eced03bf1ed96905fa6ccf745d`
+- Current implementation checkpoint SHA: `f1070cc69b80aa2cd6724c4e297c99ec110db5fd`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -1074,6 +1074,27 @@ slice changes one of those trust boundaries.
   document, billing setting, production resource, or Desktop installation was
   changed.
 
+### R1 automated live CORS/preflight acceptance
+
+- Green verifier commit: `f1070cc69b80aa2cd6724c4e297c99ec110db5fd`.
+- Added two fixed profiles for the explicit public staging health endpoint:
+  `baseline` binds the existing Goal 1 fingerprints/two origins, while
+  `desktop` binds the reviewed post-deploy fingerprints/three origins. Neither
+  accepts a caller-selected endpoint, fingerprint, model, or origin set.
+- Each run performs exactly 16 bounded unauthenticated requests: GET plus an
+  authenticated-POST-shaped OPTIONS preflight across every exact allow/deny
+  origin. It sends no token/body, caps response data at 8 KiB, retries only one
+  transport exception, returns only allowlisted evidence, and cannot touch
+  Firestore or OpenAI.
+- Eight script suites passed. The real `baseline` run passed all 16 probes with
+  release `sha256:5bfec76c...`, runtime `sha256:16636fe0...`, Sol/medium, the
+  exact original two origins, and six denials including exact Desktop. The
+  `desktop` command exited 1 as required before deployment because live staging
+  still reports the baseline fingerprints.
+- The first sandboxed live command failed with the verifier's fixed transport
+  error because network was restricted. Its explicitly approved read-only
+  retry passed; no cloud or provider state changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1251,6 +1272,8 @@ slice changes one of those trust boundaries.
 | Minimal R1 Function proof | PASS at exact `3100c42`; 3 files / 32 affected tests, strict typecheck/build, one deployable endpoint, production dependency audit 0 vulnerabilities, source/bundle credential scans, and diff hygiene |
 | Minimal R1 expected fingerprints | Backend `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`; exact three-origin Sol/medium runtime `sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f` |
 | R1 staging deploy/install | NOT RUN; exact Function-only approval and post-deploy CORS/attestation checks are required before installer use |
+| R1 automated baseline verifier | PASS; 16/16 public GET/POST-preflight probes, two exact allows, six exact denies, and full Goal 1 fingerprints |
+| R1 post-deploy verifier | Expected pre-deploy exit 1; live release/runtime remain baseline, so Desktop acceptance correctly cannot pass yet |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
 | Native server channel gate | PASS at exact `3f0d441`; default/malformed/unavailable WhatsApp switch creates no cloud job or enqueue and preserves Desktop reconciliation |
 | Native reminder focused regression | PASS; 6 files / 71 tests, including the final 8/8 runtime-binding gate |
@@ -1340,7 +1363,8 @@ Sol/medium, both Goal 1 origins, both existing secret versions, and adding only
 `https://tauri.localhost`. It creates one new build/revision and can incur the
 staging project's existing cloud costs, but enables no API/billing/provider
 loop. The current artifact must not be installed or used for Ask AI until the
-post-deploy fingerprint and exact CORS matrix pass.
+post-deploy `npm run verify:r1-staging:desktop` fingerprint, GET, and
+authenticated-POST preflight matrix pass.
 
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
@@ -1360,7 +1384,9 @@ repeat project/source/endpoint/secret-metadata checks, and deploy with exact
 scope `--project life-tracker-staging --only functions:lifeTrackerAiApi`.
 Immediately prove the new full backend/runtime fingerprints, original-origin
 continuity, exact Desktop-origin allow, near-match/Pages denies, unchanged
-resource bounds/secret versions, one endpoint, and production isolation.
+resource bounds/secret versions, one endpoint, and production isolation. The
+first public gate is `npm run verify:r1-staging:desktop`; any nonzero exit aborts
+installation and provider use.
 
 Only after those checks pass, install the freshly hashed Beta and complete the
 visible authentication, Goal/Project/Task/TimeBlock/Session/Habit/Analytics,
