@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `4219f576c36ca3578f4f331690aff45fc2316c04`
+- Current implementation checkpoint SHA: `7a1204b91e9bb46b6c54e8bd24f63fd0fbc0cd53`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -950,6 +950,36 @@ slice changes one of those trust boundaries.
   no Firebase project, ChatGPT account, Developer Mode setting, provider,
   credential, billing state, user document, or external network client changed.
 
+### R7 repository privacy and Pages-retirement preflight
+
+- Green implementation commit: `7a1204b91e9bb46b6c54e8bd24f63fd0fbc0cd53`.
+- Refreshed live state through anonymous GitHub API/HTTP only. The exact
+  repository remains public, `main` remains `5ea3280`, the Pages URL returns
+  HTTP 200, and the latest Pages workflow deployment remains the successful
+  `main@5ea3280` run. There are no releases, Git tags, forks, stars, or
+  subscribers; all 30 listed historical Pages artifacts are expired.
+- Proved the Tauri runtime has no GitHub Pages, raw-content, repository API,
+  release, archive/content, or GitHub-hosted object URL. A new deterministic
+  Desktop-security guard scans runtime/config/build material, rejects those
+  surfaces without logging matched URL/query content, and also denies any
+  JavaScript/Rust updater dependency or initialization while the updater is
+  intentionally absent.
+- Negative tests cover Pages, raw content, repository content/archive, API,
+  release, and hosted object URLs, plus safe Firebase/local sources, bounded
+  findings, and malformed scanner input. Static security now scans every
+  repository workflow for provider-secret injection instead of assuming one
+  fixed workflow filename.
+- Added `docs/REPOSITORY_PRIVACY_PREDEPLOY.md` with current state, official
+  GitHub behavior, production prerequisites, recovery-ref and installer
+  evidence, custom-domain/DNS pause, Pages redeployment prevention, private CI
+  cost controls, exact unpublish/private/verification sequence, failure matrix,
+  and rollback/acceptance evidence.
+- The active `.github/workflows/deploy.yml`, live Pages deployment, repository
+  visibility, Actions settings, DNS, tags, releases, branches, and billing were
+  deliberately unchanged. GitHub CLI admin authentication is expired; any
+  future admin action requires trusted interactive reauthentication and exact
+  approval, never a credential in chat.
+
 ## Evidence
 
 | Check | Result |
@@ -1114,6 +1144,11 @@ slice changes one of those trust boundaries.
 | MCP type/build/endpoint gate | PASS; strict Functions typecheck and Node 22 production build; source fingerprint `sha256:06b87ff4e25edfd8931533d5cc351f0ed85d07b71db9320dea6386ca8f5f9167`; one public HTTPS OAuth-protected endpoint, region `europe-west1`, 60-second timeout, 512 MiB, concurrency 20, max instances 2, no secret bindings |
 | MCP dependency/security/hygiene | PASS; production dependency audit 0 vulnerabilities, static/Desktop security, valid Rules/index JSON, changed/staged and generated-bundle high-confidence credential scans, `git diff --check`, staged diff check, and no unstaged overlap |
 | MCP deployment and real ChatGPT acceptance | NOT RUN; runtime remains default-off, no endpoint/account setting changed, and real Developer Mode questions remain an explicit later human/cloud gate |
+| Live GitHub/Pages privacy snapshot | PASS read-only; repository public, `has_pages: true`, Pages HTTP 200, one active custom deployment workflow plus the GitHub Pages system workflow, latest deployment successful at `main@5ea3280`, zero releases/tags/forks/stars/subscribers, and 30/30 listed artifacts expired |
+| Desktop repository-independence tests | PASS; 7/7 Desktop config test files, including negative Pages/raw/content/archive/API/release/object URL assertions and safe local/Firebase controls |
+| Desktop repository-independence enforcement | PASS; runtime/config/source scan, updater dependency/init denial, Desktop security, expanded all-workflow static security, syntax/JSON parsing, changed/staged credential scans, and diff hygiene |
+| Pages workflow and GitHub mutations during preflight | PASS unchanged; `.github/workflows/deploy.yml` is outside the diff and no Pages, visibility, DNS, Actions setting, tag, release, branch, or billing mutation occurred |
+| R7 live privacy conversion | NOT RUN; production prerequisites, authenticated admin/custom-domain verification, workflow replacement, exact human approval, unpublish evidence, and private-access checks remain required |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
 
 ## Release status
@@ -1124,7 +1159,7 @@ slice changes one of those trust boundaries.
 - R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: IN PROGRESS — the authenticated, owner-scoped, bounded, zero-write MCP/OAuth server is green locally and in the Firestore/Rules emulators; deployment and a real ChatGPT Developer Mode connection remain pending
-- R7 Pages removal and repository privacy conversion: NOT STARTED
+- R7 Pages removal and repository privacy conversion: PREPARED — live state refreshed, recovery/conversion runbook and Desktop runtime-independence guard are green; workflow replacement, explicit unpublish, private conversion, and post-change acceptance remain gated
 
 ## External blockers
 
@@ -1169,6 +1204,15 @@ Do not deploy it, enable the runtime, change a ChatGPT account setting, or claim
 real-client verification until the production/staging target and cost diff are
 approved. This does not block privacy/release dependency preparation.
 
+R7 account mutations remain a late release gate. The repository and Pages site
+are still public by design, and the active deployment workflow is unchanged.
+`docs/REPOSITORY_PRIVACY_PREDEPLOY.md` requires production Desktop/backend
+acceptance, a recovery tag, authenticated custom-domain/DNS inspection, a
+reviewed non-Pages CI replacement, and one exact approval before unpublish or
+visibility changes. The local GitHub CLI admin session is expired; future
+reauthentication must use GitHub's trusted interactive surface without exposing
+a token. No such action is requested yet.
+
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
 billing, APIs, or paid services without explicit human approval. This does not
@@ -1176,24 +1220,25 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent R7 preparation with a read-only dependency and recovery
-audit. Inventory the current Pages workflow/configuration, Hosting/custom-domain
-state already recorded locally, Actions and release dependencies, Tauri runtime
-and updater assumptions, anonymous public-repository asset references, clone/
-push prerequisites, and the exact known-good tag/recovery-ref plan. Add a
-bounded runbook that separates unpublishing Pages, verifying public
-unavailability, and changing repository visibility, with explicit rollback and
-post-change checks.
+Return to the early-use R1 path. From the next clean committed checkpoint, build
+a fresh reviewed-staging static export and Windows x64 NSIS Beta so the artifact
+attests all current client changes rather than the superseded `318d7a6` source.
+Run the Desktop/static security checks, exact environment/backend attestations,
+binary and installer credential-signature scans, and record sizes/SHA-256. Do
+not deploy a Function, enable a service, install/overwrite an application, or
+contact a provider merely to produce the artifact.
 
-Do not unpublish Pages, change repository visibility, create a remote tag, alter
-DNS/CI/release settings, or make any GitHub account mutation during preparation.
-Those actions remain after the required production Desktop/backend prerequisites
-and one exact human approval. Preserve the public runtime until then and record
-that historic public exposure cannot be retroactively erased.
+In parallel with that local build, consolidate one bounded
+`lifeTrackerAiApi`-only staging pre-deploy receipt: exact project
+`life-tracker-staging`, current Goal 1 revision/source, proposed source SHA,
+Desktop-origin CORS delta, endpoint/resource diff, affected tests, rollback
+command, and proof that no reminder/report/MCP endpoint, Rule, index, secret,
+parameter, API, billing setting, or provider is in scope. Checkpoint and push
+the artifact receipt before requesting the one exact staging deployment action.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
 CORS allow/deny behavior, and then prepare a separately reviewed staging
-reminder deployment diff. Install the `318d7a6` Beta and complete the visible
-auth/domain/AI/native-reminder/offline/restart acceptance matrix only after its
-required backend surface is available.
+reminder deployment diff. Install the freshly hashed Beta and complete the
+visible auth/domain/AI/native-reminder/offline/restart acceptance matrix only
+after its required backend surface is available.
