@@ -7,6 +7,7 @@ import type {
 } from '../../src/notifications/delivery';
 import {
   createLazyTwilioReminderDeliveryExecutor,
+  createRuntimeReminderReconciliationExecutor,
   desktopReminderApi,
   deliverReminderTask,
   reconcileNotificationPreferenceReminders,
@@ -16,6 +17,12 @@ import {
   twilioWhatsAppStatusCallback,
   type TwilioReminderRuntimeParameters,
 } from '../../src/notifications/runtime-bindings';
+import { InMemoryReminderRepository } from '../../src/notifications/in-memory-repository';
+import type {
+  ReminderQueueCancellationOutcome,
+  ReminderTaskQueue,
+} from '../../src/notifications/repository';
+import type { ReminderTaskPayload } from '../../src/notifications/domain';
 import type {
   TwilioMessageCreateOptions,
   TwilioMessageCreator,
@@ -175,6 +182,88 @@ describe('notification runtime bindings', () => {
       result: { outcome: 'accepted', providerMessageId: PROVIDER_MESSAGE_ID },
     })]);
   });
+
+  it('keeps native reconciliation useful while the server WhatsApp switch prevents Cloud Tasks', async () => {
+    const parameters = fakeParameters({ enabled: 'false' });
+    const repository = new InMemoryReminderRepository();
+    const queueFactory = vi.fn(() => new FakeReminderTaskQueue());
+    const reconciliation = createRuntimeReminderReconciliationExecutor(
+      repository,
+      parameters.values.enabled,
+      queueFactory,
+    );
+
+    await expect(reconciliation.reconcile(reconciliationInput())).resolves.toMatchObject({
+      desiredJobCount: 1,
+      clientPendingCount: 1,
+      enqueuedCount: 0,
+      deferredCount: 0,
+    });
+    await expect(reconciliation.reconcile(reconciliationInput())).resolves.toMatchObject({
+      desiredJobCount: 1,
+      enqueuedCount: 0,
+    });
+
+    expect(parameters.reads.enabled).toBe(1);
+    expect(queueFactory).not.toHaveBeenCalled();
+    expect(repository.listJobsForTest(UID).filter((job) => job.state !== 'superseded'))
+      .toEqual([expect.objectContaining({ channel: 'desktop', state: 'client_pending' })]);
+  });
+
+  it('fails the cloud channel closed without breaking Desktop when the switch cannot be read', async () => {
+    const repository = new InMemoryReminderRepository();
+    const queueFactory = vi.fn(() => new FakeReminderTaskQueue());
+    const reconciliation = createRuntimeReminderReconciliationExecutor(
+      repository,
+      { value: () => { throw new Error('parameter unavailable'); } },
+      queueFactory,
+    );
+
+    await expect(reconciliation.reconcile(reconciliationInput())).resolves.toMatchObject({
+      desiredJobCount: 1,
+      clientPendingCount: 1,
+      enqueuedCount: 0,
+    });
+    expect(queueFactory).not.toHaveBeenCalled();
+    expect(repository.listJobsForTest(UID).filter((job) => job.state !== 'superseded'))
+      .toEqual([expect.objectContaining({ channel: 'desktop' })]);
+  });
+
+  it('supersedes and best-effort cancels prior cloud work after the switch turns off', async () => {
+    const repository = new InMemoryReminderRepository();
+    const enabledQueue = new FakeReminderTaskQueue();
+    const enabled = createRuntimeReminderReconciliationExecutor(
+      repository,
+      new RuntimeReader('true'),
+      () => enabledQueue,
+    );
+    await expect(enabled.reconcile(reconciliationInput())).resolves.toMatchObject({
+      desiredJobCount: 2,
+      enqueuedCount: 1,
+    });
+    expect(enabledQueue.enqueueCalls).toHaveLength(1);
+
+    const disabledQueue = new FakeReminderTaskQueue();
+    const disabledQueueFactory = vi.fn(() => disabledQueue);
+    const disabled = createRuntimeReminderReconciliationExecutor(
+      repository,
+      new RuntimeReader('invalid'),
+      disabledQueueFactory,
+    );
+    await expect(disabled.reconcile(reconciliationInput())).resolves.toMatchObject({
+      desiredJobCount: 1,
+      enqueuedCount: 0,
+      supersededCount: 2,
+      cancellationResolvedCount: 1,
+    });
+
+    expect(disabledQueueFactory).toHaveBeenCalledTimes(1);
+    expect(disabledQueue.cancelCalls).toHaveLength(1);
+    expect(disabledQueue.enqueueCalls).toEqual([]);
+    expect(repository.listJobsForTest(UID).filter((job) => (
+      job.channel === 'whatsapp' && job.state !== 'superseded'
+    ))).toEqual([]);
+  });
 });
 
 class RuntimeReader {
@@ -228,6 +317,29 @@ class FakeMessageCreator implements TwilioMessageCreator {
   async create(options: TwilioMessageCreateOptions) {
     this.requests.push(structuredClone(options));
     return { sid: PROVIDER_MESSAGE_ID, status: 'queued' };
+  }
+}
+
+class FakeReminderTaskQueue implements ReminderTaskQueue {
+  readonly maximumScheduleHorizonMs = 29 * 24 * 60 * 60 * 1_000;
+  readonly enqueueCalls: Array<Readonly<{
+    taskId: string;
+    payload: ReminderTaskPayload;
+    scheduledFor: string;
+  }>> = [];
+  readonly cancelCalls: string[] = [];
+
+  async enqueue(
+    taskId: string,
+    payload: ReminderTaskPayload,
+    scheduledFor: string,
+  ): Promise<void> {
+    this.enqueueCalls.push(structuredClone({ taskId, payload, scheduledFor }));
+  }
+
+  async cancel(taskId: string): Promise<ReminderQueueCancellationOutcome> {
+    this.cancelCalls.push(taskId);
+    return 'resolved';
   }
 }
 
@@ -285,6 +397,33 @@ function deliveryInput() {
     jobId: JOB_ID,
     taskId: JOB_ID,
     now: '2026-08-25T09:45:00.000Z',
+  };
+}
+
+function reconciliationInput() {
+  return {
+    uid: UID,
+    timeBlockId: 'block-1',
+    timeBlockValue: {
+      userId: UID,
+      startTime: '2026-08-25T10:00:00.000Z',
+      endTime: '2026-08-25T11:00:00.000Z',
+      status: 'planned',
+      reminderEnabled: true,
+    },
+    notificationPreferencesValue: {
+      schemaVersion: 'notification-preferences-v2',
+      userId: UID,
+      timezone: 'Europe/Rome',
+      desktopEnabled: true,
+      whatsappEnabled: true,
+      reminderOffsetsMinutes: [15],
+      atStartEnabled: false,
+      missedStart: { enabled: false, afterMinutes: 10 },
+      maxRemindersPerBlock: 3,
+    },
+    persistedTimezone: 'Europe/Rome',
+    now: '2026-08-25T08:00:00.000Z',
   };
 }
 

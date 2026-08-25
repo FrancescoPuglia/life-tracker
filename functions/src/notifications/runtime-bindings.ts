@@ -21,6 +21,10 @@ import {
   createUserProfileReminderReconciliationFunction,
 } from './reconciliation-trigger';
 import type { ReminderReconciliationExecutor } from './reconciliation-trigger';
+import type {
+  ReminderReconciliationRepository,
+  ReminderTaskQueue,
+} from './repository';
 import { createDesktopReminderCallableFunction } from './desktop-reminder-api';
 import { FirestoreDesktopReminderRateLimiter } from './desktop-reminder-rate-limiter';
 import {
@@ -224,17 +228,82 @@ function createLazyReminderReconciliationExecutor(
   app: App,
   repository: FirestoreReminderRepository,
 ): ReminderReconciliationExecutor {
+  return createRuntimeReminderReconciliationExecutor(
+    repository,
+    runtimeParameters.enabled,
+    () => createFirebaseReminderTaskQueue(app),
+  );
+}
+
+/**
+ * Applies the server-owned WhatsApp kill switch before deriving reminder jobs.
+ * When disabled, reconciliation stays fully useful for Desktop reminders but
+ * cannot enqueue Cloud Tasks. The adapter is constructed lazily only if an
+ * existing WhatsApp task needs best-effort cancellation; the independently
+ * gated worker still fails closed if cancellation loses a race.
+ */
+export function createRuntimeReminderReconciliationExecutor(
+  repository: ReminderReconciliationRepository,
+  whatsappEnabledParameter: RuntimeStringValue,
+  createCloudTaskQueue: () => ReminderTaskQueue,
+): ReminderReconciliationExecutor {
   let reconciliation: ReminderReconciliationService | undefined;
+  let whatsappEnabled = false;
   return Object.freeze({
     reconcile: async (input: Parameters<ReminderReconciliationExecutor['reconcile']>[0]) => {
       if (!reconciliation) {
+        whatsappEnabled = runtimeSwitchEnabled(whatsappEnabledParameter);
         reconciliation = new ReminderReconciliationService(
           repository,
-          createFirebaseReminderTaskQueue(app),
+          whatsappEnabled
+            ? createCloudTaskQueue()
+            : createEnqueueDisabledCloudTaskQueue(createCloudTaskQueue),
         );
       }
-      return reconciliation.reconcile(input);
+      return reconciliation.reconcile(
+        whatsappEnabled ? input : withWhatsAppPreferenceDisabled(input),
+      );
     },
+  });
+}
+
+function createEnqueueDisabledCloudTaskQueue(
+  createCloudTaskQueue: () => ReminderTaskQueue,
+): ReminderTaskQueue {
+  let cloudTaskQueue: ReminderTaskQueue | undefined;
+  return Object.freeze({
+    maximumScheduleHorizonMs: CLOUD_TASK_SAFE_SCHEDULE_HORIZON_MS,
+    enqueue: async () => {
+      throw new Error('WhatsApp reminder task scheduling is disabled.');
+    },
+    cancel: async (taskId: string) => {
+      cloudTaskQueue ??= createCloudTaskQueue();
+      return cloudTaskQueue.cancel(taskId);
+    },
+  });
+}
+
+function runtimeSwitchEnabled(parameter: RuntimeStringValue): boolean {
+  try {
+    return parameter.value() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function withWhatsAppPreferenceDisabled(
+  input: Parameters<ReminderReconciliationExecutor['reconcile']>[0],
+): Parameters<ReminderReconciliationExecutor['reconcile']>[0] {
+  const value = input.notificationPreferencesValue;
+  const preferences = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : Object.freeze({});
+  return Object.freeze({
+    ...input,
+    notificationPreferencesValue: Object.freeze({
+      ...preferences,
+      whatsappEnabled: false,
+    }),
   });
 }
 
