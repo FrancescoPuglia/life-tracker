@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `a8762376df685763aa8ce20ec8e734546ff31c60`
+- Current implementation checkpoint SHA: `318d7a6384fe6e313412e4d216ebbeea32d7cbc7`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -456,6 +456,55 @@ slice changes one of those trust boundaries.
   deployed and no runtime parameter, Secret Manager value, API, IAM binding,
   billing state, queue, scheduler, trigger, provider, or message changed.
 
+### R3 authenticated native Desktop reminders and editable policy
+
+- Green implementation commit: `318d7a6384fe6e313412e4d216ebbeea32d7cbc7`.
+- Added one strict, versioned Desktop reminder callable contract shared by the
+  browser bundle and Functions. The request has no owner field: verified
+  Firebase callable authentication is the only UID authority. Unauthenticated,
+  malformed, spoofed, cross-owner, oversized, and unknown-field requests fail
+  closed. Candidate reads are bounded to 64 jobs, a 10-minute lookback, and a
+  24-hour horizon; fixed-window server rate limits allow 30 list and 30 claim
+  calls per authenticated owner/action/minute without storing a raw UID.
+- The claim transaction rereads the owner-scoped ReminderJob, authoritative
+  TimeBlock, current notification preferences/timezone, Session state for a
+  missed-start warning, delivery counters, receipts, attempts, and consumed
+  idempotency identity. Moved, deleted, cancelled, completed, already-started,
+  quiet-hour, disabled, policy-version, schedule-version, cap, and duplicate
+  cases become no-op responses. Concurrent claims produce one dispatch.
+- A permitted claim atomically consumes the server idempotency key and records
+  an accepted Desktop handoff receipt before returning minimal display data.
+  This deliberately chooses at-most-once behavior: a crash or native API
+  failure after the server handoff can miss one toast, but an ambiguous retry
+  cannot duplicate it. The receipt proves backend authorization/handoff, not
+  that Windows rendered the notification.
+- Added the signed-in Tauri-only coordinator, bounded per-owner local restart
+  journal, server-time scheduling, offline/expired-auth/permission-denied
+  fail-closed behavior, and cleanup guards preventing a sign-out race from
+  displaying the prior owner's reminder. It requests permission only through
+  the existing explicit Settings action. A notification click can only
+  unminimize/show/focus Life Tracker; it cannot complete a block or mutate a
+  Task, TimeBlock, Session, plan, or rollback path.
+- Notification Settings now persist the complete owner-bound policy document:
+  timezone, locale, Desktop channel, offsets, at-start/missed-start behavior,
+  maximum reminders, quiet hours, and daily/weekly report preferences. Exact
+  validation rejects unknown fields and invalid bounds without a partial write.
+  WhatsApp and email remain disabled by default.
+- The callable does not bind a provider secret. App Check enforcement remains
+  disabled because no Tauri WebView attestation path is configured; Firebase
+  Authentication, owner-derived paths, strict schemas, bounded reads, server
+  rate limiting, and transactional authority are the current controls.
+- Built a clean reviewed-staging static export and a new Windows x64 NSIS bundle
+  from this exact commit. Installer SHA-256 is
+  `e2a69bdea9ad6b3e93be6e8455f97f619aaefb33ae61329385eeeeb9d640bd3d`
+  (2,380,685 bytes); release executable SHA-256 is
+  `16b11332c3a4426ce1f80a18b71bc03ac9cd9e6d0a4068fd64829d0777f38b2e`
+  (6,473,216 bytes). A bounded binary credential-signature scan passed.
+- The new installer is **not yet installed/accepted**. WSL-to-Windows process
+  interop timed out after the build, so the existing older Beta was not
+  terminated or overwritten. No Function, Rules, index, API, IAM, billing,
+  provider, message, production resource, or Firebase data changed.
+
 ## Evidence
 
 | Check | Result |
@@ -542,12 +591,25 @@ slice changes one of those trust boundaries.
 | Functions regression after named bindings | PASS; 25 files / 296 tests, with 57 emulator-only tests correctly skipped outside their explicit gates |
 | Compiled notification endpoint manifest | PASS; 7/7 named endpoints, exact trigger kinds/region/ingress/timeouts, and `TWILIO_AUTH_TOKEN` bound only to worker/callback |
 | Named binding build/security/hygiene | PASS; Functions typecheck/bundle, static security, six-file changed/staged credential scans, generated-bundle credential scan, `git diff --check`, and staged diff check |
+| Native reminder focused frontend tests | PASS; 8 files / 37 tests covering bridge, callable client, coordinator, local journal, runtime glue, policy validation, and Settings |
+| Frontend regression after native reminders | PASS; 58 files / 664 tests |
+| Functions regression after Desktop callable | PASS; 26 files / 303 unit tests; 5 emulator files / 63 tests intentionally skipped outside explicit emulator gates |
+| Desktop callable transaction emulator | PASS; 6/6 bounded feed, atomic handoff, concurrent single-dispatch, moved/completed/Session/cross-owner/rate-limit cases |
+| Firestore Rules after Desktop callable | PASS; 60/60, including browser denial of server-owned rate-limit state |
+| Desktop reminder type/build/security | PASS; frontend and Functions typechecks/builds, Desktop/static security checks, valid index/capability JSON, `git diff --check`, and high-confidence changed-material scan |
+| Compiled notification endpoint manifest after callable | PASS; 8/8 endpoints; callable public edge has no secret, Twilio secret remains limited to worker/callback |
+| Clean staging export after native reminders | PASS at `318d7a6`; reviewed `life-tracker-staging` Web manifest, 4 static pages, output-inclusive security scan |
+| New Windows Tauri release build | PASS; optimized MSVC build and one x64 NSIS bundle from `318d7a6` |
+| New release executable | 6,473,216 bytes; SHA-256 `16b11332c3a4426ce1f80a18b71bc03ac9cd9e6d0a4068fd64829d0777f38b2e` |
+| New NSIS installer | 2,380,685 bytes; SHA-256 `e2a69bdea9ad6b3e93be6e8455f97f619aaefb33ae61329385eeeeb9d640bd3d` |
+| New binary credential scan | PASS; bounded OpenAI/Resend/private-key signatures absent in executable and installer |
+| New current-user install/notification acceptance | NOT RUN; WSL/Windows interop timed out after build, and the staging backend changes are not deployed |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
-- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, and Twilio adapter/signed callback bindings green; native reminder coordinator, cloud deployment, and installed/live delivery pending
+- R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
 - R4 Daily and weekly reports: NOT STARTED
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
@@ -555,13 +617,19 @@ slice changes one of those trust boundaries.
 
 ## External blockers
 
-The R1 installer is built and installed. The remaining explicit human gate is
-approval to deploy only `lifeTrackerAiApi` to the positively identified
-`life-tracker-staging` project with the reviewed Desktop-origin allowlist. The
-managed gate rejected the first attempt before execution; no staging resource
-changed. Installed UI authentication/notification acceptance will then require
-Francesco to interact with the visible Beta. No production resource, provider
-credential, billing setting, GitHub visibility, or public Pages state changed.
+The original R1 installer is installed, and a superseding installer from
+`318d7a6` is built but not installed. WSL/Windows interop timed out after the
+successful build; installed authentication/domain/native-notification
+acceptance therefore still needs direct interaction on Francesco's Windows
+desktop.
+
+The existing explicit staging gate remains approval to deploy only
+`lifeTrackerAiApi` to the positively identified `life-tracker-staging` project
+with the reviewed Desktop-origin allowlist. A separate future staging approval
+is required for the new reminder callable/triggers/worker/callback/scheduler,
+Rules, and indexes after an exact pre-deploy resource/API/cost diff. Do not
+enable the WhatsApp kill switch or configure/read provider secrets during that
+deployment. No staging or production resource changed in this slice.
 
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
@@ -570,14 +638,18 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue R3 with the native Desktop reminder coordinator over the existing
-server-owned `client_pending` jobs and least-privilege Tauri notification/focus
-bridge. It must reread current owner/TimeBlock/policy state before delivery,
-persist local duplicate protection, handle restart/offline/denied permission,
-and never mark execution complete. Keep cloud/provider configuration disabled;
-do not read secret values, enable Cloud Tasks, billing, APIs, create provider
-secrets, send messages, or deploy any resource. After exact human approval,
-separately deploy only
-`functions:lifeTrackerAiApi` to explicit project `life-tracker-staging`, verify
-health/runtime attestation and exact CORS allow/deny behavior, rebuild/reinstall
-the staging Beta, and complete the installed R1 acceptance matrix.
+Continue independent local/emulator work with R4: implement the deterministic,
+versioned Daily/Weekly scientific metric and report domain first, including
+explicit missing-data semantics, formula/denominator documentation, timezone
+boundaries, data-quality flags, idempotency, and chart data contracts. Do not
+call an LLM, email provider, chart SaaS, scheduler, or Firebase project in that
+slice. Keep cloud/provider configuration disabled; do not read secret values,
+enable APIs/billing, create provider secrets, send messages, or deploy any
+resource.
+
+After exact human approval, separately deploy only `lifeTrackerAiApi` to the
+explicit `life-tracker-staging` project, verify runtime attestation and exact
+CORS allow/deny behavior, and then prepare a separately reviewed staging
+reminder deployment diff. Install the `318d7a6` Beta and complete the visible
+auth/domain/AI/native-reminder/offline/restart acceptance matrix only after its
+required backend surface is available.
