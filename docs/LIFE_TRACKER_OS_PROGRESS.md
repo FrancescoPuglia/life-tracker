@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `e4db3389b903f07844b6d20c463516b90c5f3ca6`
+- Current implementation checkpoint SHA: `43efb669c875f6977e439b16baa7b8dad2c9ff49`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -791,6 +791,49 @@ slice changes one of those trust boundaries.
   message send was added. The production Functions entry bundle remains free
   of report-run and Resend runtime symbols.
 
+### R4 default-off scheduled report runtime
+
+- Green implementation commit: `43efb669c875f6977e439b16baa7b8dad2c9ff49`.
+- Added exactly two owner-nested, server-only schedule manifests: Daily and
+  Weekly. They contain deterministic period/schedule authority, availability,
+  bounded retry state, and timestamps but never a mailbox, title, Note,
+  provider value, or arbitrary path. Current policy normalization is shared
+  with the report-run transactions, and legacy recipient-less v1 preferences
+  remain fail-closed.
+- One fixed-owner collection-group query selects at most ten due manifests per
+  invocation. It uses an additive composite index and validates the exact
+  `users/{uid}/reportScheduleManifests/{daily|weekly}` path and embedded owner;
+  there is no all-user poll. Browser Rules deny both owner-nested and root
+  manifest namespaces.
+- Preference writes transactionally reconcile both manifests from current
+  authority. The five-minute scheduled handler also reconciles the one fixed
+  owner before querying, making first deployment and missed Eventarc delivery
+  self-healing. Enable/change/disable, recipient changes, weekly day changes,
+  Daily/Weekly coexistence, DST, stale manifests, corrupt manifests, backward
+  time, query caps, and concurrent execution are covered.
+- Manifest advancement preserves an unconsumed future period, remaps that
+  period to current wall-clock authority, never regresses to an older week, and
+  skips the duplicate weekly period a schedule-day change can otherwise
+  produce. A changed current recipient/schedule suppresses an older in-flight
+  same-period run atomically; stale generation cannot commit an archive.
+- Unexpected runtime failures back off by 5/10/15/20 minutes, then skip only
+  the exhausted period after the fifth failure. Normal report/service retry
+  state remains durable. Work executes sequentially, platform retries are
+  bounded, and provider acceptance ambiguity retains the existing terminal
+  no-resend behavior.
+- Exported `reconcileScientificReportSchedules` is an internal-only preference
+  trigger with no secret. Exported `deliverScheduledScientificReports` is an
+  internal-only five-minute scheduled Function; only it binds
+  `RESEND_API_KEY`. Both have min instances zero, max instances one, and a
+  default-off exact kill switch. The Resend client is lazy after the switch,
+  fixed owner, and sender validate. The `not-configured` owner sentinel and all
+  malformed static configuration fail closed before Firestore/provider access
+  without Eventarc retry churn.
+- Added `docs/REPORT_RUNTIME_PREDEPLOY.md` with the exact endpoint/index/API,
+  cost, configuration, approval, and recovery boundary. No Function, Rule,
+  index, Scheduler job, API, IAM/billing setting, parameter, secret, provider,
+  domain, user document, or email was changed outside local/emulator state.
+
 ## Evidence
 
 | Check | Result |
@@ -931,13 +974,19 @@ slice changes one of those trust boundaries.
 | Firestore Rules after report runs | PASS; 65/65, including denial of owner-nested and root server-only `reportRuns` state |
 | Functions regression after report runs | PASS; 34 files / 374 unit tests; 8 emulator files / 81 tests correctly skipped outside their explicit emulator gates |
 | Report-run type/build/security | PASS; strict Functions typecheck/build (512.3 kB entry), no report-run/scheduler/Resend runtime symbols, static and Desktop security checks, changed/staged high-confidence credential scans, `git diff --check`, and cached diff check |
+| Report scheduler focused tests | PASS; final 7 files / 46 tests across schedule mapping, manifest orchestration, endpoint metadata, exact default-off/invalid-config behavior, run, archive, and email delivery |
+| Report manifest Firestore emulator | PASS; 6/6 preference enable/change/disable, bounded fixed-owner query, Daily/Weekly advancement, weekly remap/duplicate suppression, backward time, bounded failures, and concurrent full fake-provider execution |
+| Coupled report Firestore emulator after scheduler | PASS; 4 files / 25 tests across archive, email delivery, run, and manifest transactions against one local emulator |
+| Firestore Rules after report manifests | PASS; 66/66, including client denial of owner-nested and root schedule-manifest state |
+| Functions regression after report runtime | PASS; 37 files / 393 unit tests; 9 emulator files / 88 tests correctly skipped outside their explicit gates |
+| Report runtime build/security | PASS; strict typecheck and 801.2 kB reachable Functions bundle, production dependency audit 0 vulnerabilities, valid index JSON, static/Desktop security, generated-bundle and staged high-confidence credential scans, worktree/cached diff checks |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, and durable claim/generate/archive/reauthorize/deliver orchestration are green; runtime scheduling, secret/domain configuration, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, and default-off fixed-owner runtime scheduling are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -958,6 +1007,14 @@ Rules, and indexes after an exact pre-deploy resource/API/cost diff. Do not
 enable the WhatsApp kill switch or configure/read provider secrets during that
 deployment. No staging or production resource changed in this slice.
 
+Scientific report deployment is another separately reviewed staging gate.
+`docs/REPORT_RUNTIME_PREDEPLOY.md` records the exact two Functions, one index,
+Rules denial, API/service inventory, cost envelope, default-off verification,
+and rollback sequence. A future Resend credential/sender/domain action must be
+performed by Francesco through a trusted provider/Secret Manager surface and
+must never be pasted into chat. No such action is yet requested because model
+routing, MCP, privacy preparation, and other independent implementation remain.
+
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
 billing, APIs, or paid services without explicit human approval. This does not
@@ -965,29 +1022,24 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with the disabled-by-default runtime
-scheduling boundary. First inspect the established notification runtime-binding
-pattern and produce a bounded report schedule-manifest/reconciliation design:
-preference writes should materialize only owner/run timing authority (never a
-mailbox), and one Firebase scheduled Function should query only due manifests
-with an explicit per-invocation cap instead of scanning all users every minute.
-The scheduler must recompute candidates from the current exact preference
-document, pass them through `ScientificReportRunService`, advance/reconcile the
-next occurrence on every terminal/safe outcome, and leave recoverable work
-durable on retryable infrastructure failures. Prove preference enable/change/
-disable, Daily/Weekly coexistence, concurrency, cursor/cap fairness, DST,
-stale manifest suppression, malformed owner state, and retry behavior locally
-and in the Firestore emulator.
+Continue independent local R4/cost work with an economical AI workload router
+and representative evaluation contract. Read the current official OpenAI/Codex
+documentation first. Inventory every existing model parameter/call site and do
+not change Goal 1's deployed revision. Define bounded workloads (lightweight
+language, normal Ask AI/planning, difficult strategic review), deterministic
+no-LLM paths, backend-only runtime routes, per-workload token/tool/turn ceilings,
+and a small sanitized evaluation corpus with explicit adequacy criteria. Model
+names and routing must stay backend-configurable; malformed configuration must
+fail closed or fall back deterministically, never select a more expensive model
+implicitly. Weekly narrative may interpret immutable metric facts but cannot
+calculate, replace, or mutate them, and deterministic Daily/Weekly reports must
+remain useful when OpenAI is unavailable/quota-exhausted.
 
-Register named Functions only after the runtime is dependency-injected and
-green. Keep report delivery behind a reviewed default-off kill switch; bind
-`RESEND_API_KEY` only to the delivery-capable scheduled endpoint and construct
-the Resend provider lazily after that switch and validated non-secret sender
-configuration. Do not read a secret value, deploy a Function/Rules/index,
-enable an API or billing, configure a provider/domain, send a message, or
-mutate staging/production while implementing this local slice. End with an
-exact endpoint/index/API/cost pre-deploy diff; deployment remains a separate
-human approval gate.
+Use local fakes/recorded fixtures first. Do not spend provider credit, run a
+live evaluation, read/change OpenAI secrets, deploy, alter budget/billing,
+enable auto-reload, or mutate staging/production without a later exact human
+approval. End with an evaluation/runbook boundary that separates technically
+green routing from live cheapest-adequate selection evidence.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
