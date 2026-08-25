@@ -37,7 +37,10 @@ check(base?.build?.beforeBuildCommand === 'npm run build:desktop', 'Tauri must u
 check(base?.build?.devUrl === 'http://127.0.0.1:3000', 'Tauri dev URL must be exact loopback.');
 check(base?.build?.removeUnusedCommands === true, 'Unused Tauri commands must be removed.');
 check(base?.app?.withGlobalTauri === false, 'Global Tauri injection must remain disabled.');
-check(base?.app?.security?.freezePrototype === true, 'Tauri custom-protocol Object.prototype must be frozen.');
+check(
+  base?.app?.security?.freezePrototype === false,
+  'Tauri Object.prototype freezing must remain disabled because it prevents Firebase runtime initialization.',
+);
 check(
   base?.app?.security?.dangerousDisableAssetCspModification === false,
   'Tauri CSP asset hardening must remain enabled.',

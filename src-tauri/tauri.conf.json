@@ -33,7 +33,7 @@
     ],
     "security": {
       "capabilities": ["main"],
-      "freezePrototype": true,
+      "freezePrototype": false,
       "dangerousDisableAssetCspModification": false,
       "assetProtocol": {
         "enable": false,

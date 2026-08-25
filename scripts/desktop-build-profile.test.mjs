@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   canonicalAiApiBaseUrl,
@@ -9,6 +10,13 @@ import {
 const COMMIT = 'a'.repeat(40);
 
 describe('desktop build profiles', () => {
+  it('keeps prototype freezing disabled for Firebase runtime compatibility', () => {
+    const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+    assert.equal(tauriConfig.app.security.freezePrototype, false);
+    assert.equal(tauriConfig.app.security.dangerousDisableAssetCspModification, false);
+    assert.equal(tauriConfig.app.security.assetProtocol.enable, false);
+  });
+
   it('resolves the exact production manifest and canonical backend', () => {
     const profile = resolveDesktopBuildProfile('production', {});
     assert.equal(profile.projectId, 'life-tracker-12000');
