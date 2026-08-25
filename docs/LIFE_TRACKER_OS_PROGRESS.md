@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `191fa821e1a6078b4a888c0e62de6666b2702963`
+- Current implementation checkpoint SHA: `45614cff81f0560baa591b2c7b0fad9ce77f6bca`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -621,6 +621,49 @@ slice changes one of those trust boundaries.
   scale were readable. No runtime Function, email provider, scheduler, cloud
   action, secret access, API/billing change, or Firebase mutation was added.
 
+### R4 deterministic report email and provider boundary
+
+- Green implementation commit: `45614cff81f0560baa591b2c7b0fad9ce77f6bca`.
+- Added a provider-neutral `EmailProvider` contract with bounded sender/recipient
+  mailboxes, stable accepted/rejected/retry-later/uncertain outcomes, provider
+  delivery IDs, exact content hashes, copied inline attachments, and a privacy-safe
+  report idempotency key. Provider bodies, response headers, thrown details, and
+  credentials never enter the normalized result.
+- Pinned the current Node 22-compatible server packages after checking their
+  official contracts: `@react-email/render@2.1.0`, React/React DOM `19.2.8`, and
+  `resend@6.22.1`. Only React Email's maintained server renderer is installed,
+  not its substantially larger preview/CLI package. The Functions production
+  dependency audit reports zero vulnerabilities.
+- Daily and Weekly email composition revalidates the verified UID against the
+  immutable archive, recomputes the report artifact/metric/chart/SVG/PNG
+  authority, rerenders the exact chart set, and copies every attachment before
+  constructing content. Cross-owner, archive, chart, PNG, content-hash, active
+  HTML, external URL, and CID-reference tampering all fail closed.
+- HTML uses React Email, table-compatible inline styling, a fixed URL-free
+  responsive rule, HTML5 doctype, zero external assets, and one CID reference
+  per verified local PNG. HTML/text/attachment counts and sizes are bounded;
+  sender/recipient and display-name fields reject header/parser injection.
+- The explicit text fallback contains the same Daily execution evidence or all
+  16 Weekly scientific sections. Both surfaces retain OBSERVED/DERIVED/
+  INFERENCE/RECOMMENDATION discipline, N/missing/confidence/formula data,
+  deterministic values, explicit uncertainty, and the rule that missing
+  Sessions are unknown rather than zero. OpenAI is not required or called.
+- The Resend adapter maps local buffers, CID/content type, HTML, text, two
+  low-cardinality tags, and the stable provider idempotency key. Invalid
+  recipients/configuration/messages fail before the client; definitive quota,
+  security, conflict, and validation outcomes are distinct from retryable rate
+  limits and ambiguous transport/5xx outcomes. The SDK client is injected;
+  this slice creates no client, reads no credential, and makes no provider call.
+- A representative weekly email was rendered with real Sharp PNGs and inspected
+  through a local headless browser at 900 px and 390 px. The desktop document and
+  mobile stacked-card layout were readable; headings, evidence labels, charts,
+  methodology, uncertainty, and footer remained intact. This was local synthetic
+  content only, not a sent email or provider/mobile-client acceptance claim.
+- No Function, callable, HTTP route, scheduler, secret binding, Firestore write,
+  Firebase/cloud action, provider account action, domain change, or real email
+  was added. Provider idempotency lasts only 24 hours and is explicitly not yet
+  treated as the durable scheduler duplicate-prevention authority.
+
 ## Evidence
 
 | Check | Result |
@@ -733,13 +776,17 @@ slice changes one of those trust boundaries.
 | Report chart focused tests | PASS; 7/7 accessibility, hash binding, missing data, hostile label, cardinality, real native PNG, active SVG, malformed/oversized output, sequential rendering, and failure-isolation tests |
 | Functions regression after chart renderer | PASS; 30 files / 333 unit tests; 6 emulator files / 69 tests correctly skipped outside their explicit emulator gates |
 | Report chart type/build/security | PASS after final artifact-boundary hardening; strict Functions typecheck/build, 511.3 kB deployed bundle with no chart-renderer symbols, production dependency audit with 0 vulnerabilities, static security, changed/staged credential scans, worktree and cached diff checks |
+| Report email focused tests | PASS; 17/17 deterministic Daily/Weekly HTML/text, all 16 Weekly sections, unavailable Sessions, archive/owner/chart tamper, renderer failure, active/external content, content/PNG hash, real Resend mapping, copied buffers, provider errors, invalid recipient, and transport uncertainty tests |
+| Report email desktop/mobile proof | PASS locally with synthetic data; real Sharp charts rendered in a 900 px document and a 390 px responsive stacked-card document with no external URL or network request |
+| Functions regression after report email | PASS; 31 files / 350 unit tests; 6 emulator files / 69 tests correctly skipped outside their explicit emulator gates |
+| Report email type/build/security | PASS; strict Functions typecheck/build, unchanged 511.3 kB deployed bundle with no report-email symbols, production dependency audit with 0 vulnerabilities, static security, changed/staged credential scans, worktree and cached diff checks |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, and accessible local SVG/PNG chart rendering are green; provider-neutral email/rendering, scheduling, report-history UI, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, and the provider-neutral Resend mapping are green; durable delivery claims, scheduling, report-history UI, secret/domain configuration, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -767,17 +814,21 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with a provider-neutral `EmailProvider` and
-deterministic report-email rendering boundary. Evaluate the current official
-React Email/Resend packages before pinning them; produce bounded HTML, a useful
-text fallback, inline CID chart attachments, provider-neutral delivery IDs and
-sanitized failure state. Reverify the archived report and every chart attachment
-at the boundary, keep provider failure from destroying the report, and retain a
-fully deterministic useful email when OpenAI is unavailable. Add no runtime
-endpoint or scheduler in this slice, and make no provider request. Then add the
-owner-scoped report-history UI as a separate green slice before the scheduler
-and live-delivery gates. Do not read secret values, enable APIs/billing, create
-provider secrets, send messages, or mutate any Firebase project.
+Continue independent local R4 work with durable at-most-once report-email
+delivery state. Add an owner-derived Firestore repository and service that
+atomically claim an immutable archive before any provider call, record bounded
+delivery attempts, finalize accepted/provider-rejected/retryable/uncertain
+outcomes, and update the archive's existing provider-neutral delivery summary.
+Concurrent scheduler invocations must produce at most one provider invocation;
+an abandoned or ambiguous claim must never be automatically resent merely
+because Resend's 24-hour idempotency window elapsed. Definitive pre-send rate
+limits may retry with bounded backoff and the same content/idempotency authority.
+Use emulator concurrency/recovery tests and keep provider failure from modifying
+or deleting the archived deterministic report. Do not export a runtime endpoint
+or register a scheduler yet. Then add the owner-scoped report-history UI as a
+separate green slice before scheduler and live-delivery gates. Do not read secret
+values, enable APIs/billing, create provider secrets, send messages, or mutate
+any Firebase project.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
