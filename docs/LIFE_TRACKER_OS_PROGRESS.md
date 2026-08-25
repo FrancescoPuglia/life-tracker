@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `34f6810d86c5c9d1e0f6158fdb24ba1b4cd8e2f3`
+- Current implementation checkpoint SHA: `4219f576c36ca3578f4f331690aff45fc2316c04`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -909,6 +909,47 @@ slice changes one of those trust boundaries.
   Firebase/cloud resource, billing/budget, user document, or external message
   changed.
 
+### R6 authenticated read-only ChatGPT/MCP boundary
+
+- Green implementation commit: `4219f576c36ca3578f4f331690aff45fc2316c04`.
+- Added one explicit 12-tool read-only allowlist: Life Tracker state, Goals,
+  Projects, Tasks, TimeBlocks, Sessions, Habits, KPIs, reports,
+  planned-versus-actual, bounded period analysis, and Goal alignment. There is
+  no apply, rollback, delete, schedule replacement, arbitrary query/path, raw
+  Firestore, dynamic tool-registration, or other mutation tool.
+- Tool arguments use exact schemas, 90-day maximum ranges, small pagination and
+  state limits, and a 192,000-byte response ceiling. Existing deterministic
+  domain/report services remain the metric authority. Notes and editor JSON are
+  recursively removed, and returned user-controlled text is explicitly marked
+  untrusted data rather than instructions.
+- Implemented OAuth 2.1 authorization-code flow with exact S256 PKCE, RFC 9207
+  issuer identification, exact resource binding, one-time authorization codes,
+  rotating refresh tokens, revocation, and SHA-256-only token storage. The
+  canonical issuer must be one HTTPS root origin; path-bearing, HTTP,
+  cross-origin, callback-specific, or arbitrary client/redirect configuration
+  fails closed.
+- Firebase Authentication remains the sole identity authority. The backend
+  verifies a current ID token with revocation checking, rereads the Firebase
+  user on authorization and token use, rejects disabled/revoked users, and
+  allows only the fixed configured owner. Client/model UID fields cannot select
+  an owner or Firestore path.
+- OAuth state, codes, access tokens, refresh tokens, and authenticated rate
+  limits live only under five server-owned owner-scoped Firestore namespaces.
+  Codes/tokens have bounded expiries and TTL metadata; browser Rules deny both
+  nested and root access. Transaction-emulator tests prove one-time/concurrent
+  exchange, refresh rotation, hash-only persistence, revocation, tamper
+  rejection, owner isolation, and rate-limit serialization.
+- Added a stateless Streamable HTTP MCP endpoint using the official SDK, root
+  OAuth/protected-resource discovery, a same-origin Firebase consent page with
+  a strict CSP and `__Host-` CSRF cookie, bounded request bodies, safe logs, and
+  a 60-request/minute authenticated-owner limit. The deployment surface has no
+  provider secret, maximum two instances, and a default-off exact kill switch.
+- `docs/MCP_RUNTIME_PREDEPLOY.md` records the exact root-origin, Firebase public
+  configuration binding, stable ChatGPT client/redirect, endpoint, cost,
+  promotion, connection, acceptance, and rollback gates. Nothing was deployed;
+  no Firebase project, ChatGPT account, Developer Mode setting, provider,
+  credential, billing state, user document, or external network client changed.
+
 ## Evidence
 
 | Check | Result |
@@ -1066,6 +1107,13 @@ slice changes one of those trust boundaries.
 | Functions broad regression after interpretation | PASS; 41 files / 424 unit tests; 10 emulator files / 93 tests skipped in that non-emulator command, followed by the new sixth explicit interpretation-emulator assertion passing in the real emulator |
 | Weekly interpretation type/build gate | PASS; strict Functions typecheck and Node 22 production build, 866.8 kB entry bundle, exact default-off runtime, and evaluation corpus absent from the bundle |
 | Weekly interpretation security/hygiene | PASS; production dependency audit 0 vulnerabilities, static/Desktop security checks, changed/staged and generated-bundle credential scans, `git diff --check`, and staged diff check |
+| MCP focused unit/HTTP coverage | PASS; 7 files / 42 tests, with the 3 persistence-emulator tests skipped only in this non-emulator command; OAuth/PKCE, Firebase identity, consent/CSRF, exact tools, schemas/bounds, hostile content, rate limiting, discovery, and Streamable HTTP covered |
+| MCP Firestore transaction emulator | PASS; 3/3 concurrent one-time code exchange, rotating refresh, hash-only persistence, revocation, tamper fail-closed behavior, owner isolation, and serialized rate limiting against the real local emulator |
+| Firestore Rules after MCP controls | PASS; 72/72, including browser denial for all five nested and root OAuth/rate-limit namespaces |
+| Functions broad regression at MCP checkpoint | PASS on exact `4219f57`; 47 test files passed / 11 explicit emulator files skipped, 465 tests passed / 97 skipped |
+| MCP type/build/endpoint gate | PASS; strict Functions typecheck and Node 22 production build; source fingerprint `sha256:06b87ff4e25edfd8931533d5cc351f0ed85d07b71db9320dea6386ca8f5f9167`; one public HTTPS OAuth-protected endpoint, region `europe-west1`, 60-second timeout, 512 MiB, concurrency 20, max instances 2, no secret bindings |
+| MCP dependency/security/hygiene | PASS; production dependency audit 0 vulnerabilities, static/Desktop security, valid Rules/index JSON, changed/staged and generated-bundle high-confidence credential scans, `git diff --check`, staged diff check, and no unstaged overlap |
+| MCP deployment and real ChatGPT acceptance | NOT RUN; runtime remains default-off, no endpoint/account setting changed, and real Developer Mode questions remain an explicit later human/cloud gate |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
 
 ## Release status
@@ -1075,7 +1123,7 @@ slice changes one of those trust boundaries.
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
 - R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, default-off economical workload routing/evaluation, and bounded post-archive Weekly strategic interpretation are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
-- R6 ChatGPT read integration: NOT STARTED
+- R6 ChatGPT read integration: IN PROGRESS — the authenticated, owner-scoped, bounded, zero-write MCP/OAuth server is green locally and in the Firestore/Rules emulators; deployment and a real ChatGPT Developer Mode connection remain pending
 - R7 Pages removal and repository privacy conversion: NOT STARTED
 
 ## External blockers
@@ -1112,6 +1160,15 @@ budget/auto-reload, or enable routing until independent work is checkpointed and
 one exact maximum-cost staging action is approved. Goal 1's verified Sol staging
 revision remains untouched.
 
+The read-only MCP server has a separate deployment/connection gate documented
+in `docs/MCP_RUNTIME_PREDEPLOY.md`. Its local implementation is default-off and
+has no provider secret, but real acceptance requires one explicit root HTTPS
+deployment origin, reviewed Firebase public Web configuration, the fixed owner,
+and Francesco's interactive Firebase consent inside ChatGPT Developer Mode.
+Do not deploy it, enable the runtime, change a ChatGPT account setting, or claim
+real-client verification until the production/staging target and cost diff are
+approved. This does not block privacy/release dependency preparation.
+
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
 billing, APIs, or paid services without explicit human approval. This does not
@@ -1119,25 +1176,20 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R6 work by inventorying the existing MCP adapter and
-tests before changing them; do not assume the small current adapter is a remote
-ChatGPT-ready server. Reuse the verified Firebase-authenticated owner context,
-bounded domain read services, deterministic report metrics, and report archive
-queries. Define an explicit read-only tool allowlist with bounded date ranges,
-pagination/output size, exact schemas, hostile-Note containment, and zero raw
-Firestore paths.
+Continue independent R7 preparation with a read-only dependency and recovery
+audit. Inventory the current Pages workflow/configuration, Hosting/custom-domain
+state already recorded locally, Actions and release dependencies, Tauri runtime
+and updater assumptions, anonymous public-repository asset references, clone/
+push prerequisites, and the exact known-good tag/recovery-ref plan. Add a
+bounded runbook that separates unpublishing Pages, verifying public
+unavailability, and changing repository visibility, with explicit rollback and
+post-change checks.
 
-Implement the remote authenticated MCP/App SDK-compatible HTTP boundary only
-after proving the local authority contract. Missing/invalid auth, cross-user
-identity, malformed/excessive ranges, tool-name injection, and every attempted
-write must fail closed. Current Pro-exposed write tool count must be exactly
-zero: no apply, rollback, delete, schedule replacement, arbitrary query, or
-capability issuance. Use deterministic analytics/report services rather than
-duplicating formulas. Do not deploy, change Developer Mode/account settings, or
-connect Francesco's ChatGPT account without a later exact human action.
-
-After that local checkpoint, continue the Pages/private-repository dependency
-and recovery preparation while retaining the explicit cloud/provider gates.
+Do not unpublish Pages, change repository visibility, create a remote tag, alter
+DNS/CI/release settings, or make any GitHub account mutation during preparation.
+Those actions remain after the required production Desktop/backend prerequisites
+and one exact human approval. Preserve the public runtime until then and record
+that historic public exposure cannot be retroactively erased.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
