@@ -1250,6 +1250,36 @@ slice changes one of those trust boundaries.
   data, or installed Desktop artifact. The exact approved R1 staging Function
   deployment still has not executed.
 
+### R1 approved deployment revalidation and ready checkpoint
+
+- Re-ran the fixed public staging acceptance profiles after the exact
+  Function-only approval. `verify:r1-staging:baseline` passed all 16 probes with
+  the original two-origin release/runtime fingerprints; the Desktop profile
+  exited 1 because the live authority still does not match the reviewed
+  three-origin profile. This proves the approved deployment was not executed.
+- Recreated and retained a clean detached deployment worktree at exact source
+  `3100c42bfda50bb4627b7345270985a517439167`. Its ignored staging parameter file
+  contains only Sol/medium, the official OpenAI v1 base URL, and the exact three
+  non-secret origins recorded in `docs/R1_STAGING_DEPLOY_PRECHECK.md`.
+- The detached source passed an exact-lockfile install with zero reported
+  vulnerabilities, 3 focused files / 32 tests, strict Functions typecheck and
+  build, tracked-tree/diff hygiene, and source/bundle credential scans. Firebase
+  endpoint metadata proves exactly one deployable Gen 2 endpoint:
+  `lifeTrackerAiApi` in `europe-west1`.
+- The prepared bundle fingerprint remains
+  `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`;
+  the exact expected post-deploy runtime fingerprint remains
+  `sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f`.
+- No global Firebase or Google Cloud CLI is installed. Two bounded, non-JSON
+  local Firebase project checks after credential revocation produced no
+  authenticated identity/project result and were terminated without mutation.
+  The deployment command has not run. A positive interactive Firebase login is
+  therefore still required before the explicit target can be safely confirmed.
+- The existing approval remains valid only for this exact Function, exact
+  source, explicit staging project, and exact three-origin non-secret policy.
+  No production, billing, API, secret, provider, reminder, report, MCP, GitHub,
+  or other cloud action is included or performed.
+
 ## Evidence
 
 | Check | Result |
@@ -1437,7 +1467,7 @@ slice changes one of those trust boundaries.
 | Current artifact security | PASS for provider credential names/key shapes and Life Tracker GitHub/Pages runtime URLs; one broad Resend-shape false positive traced by hash/compiled lineage to `tauri_runtime_wry`, absent from source/export/installer |
 | Minimal R1 Function proof | PASS at exact `3100c42`; 3 files / 32 affected tests, strict typecheck/build, one deployable endpoint, production dependency audit 0 vulnerabilities, source/bundle credential scans, and diff hygiene |
 | Minimal R1 expected fingerprints | Backend `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`; exact three-origin Sol/medium runtime `sha256:6ef03a915ff73a9d688bd416fd13a622b9effc9c5573963d39eb85d563e50a7f` |
-| R1 staging deploy/install | APPROVED BUT NOT RUN; exact Function-only approval was received, then the CLI credential incident was contained before any deployment; fresh interactive Firebase login and post-deploy CORS/attestation checks remain required before installer use |
+| R1 staging deploy/install | APPROVED BUT NOT RUN; fresh live baseline proves the old two-origin revision remains active, and the exact `3100c42` one-endpoint package is locally green/ready; fresh interactive Firebase login, positive target confirmation, exact deploy, and post-deploy CORS/attestation checks remain required before installer use |
 | R1 automated baseline verifier | PASS; 16/16 public GET/POST-preflight probes, two exact allows, six exact denies, and full Goal 1 fingerprints |
 | R1 post-deploy verifier | Expected pre-deploy exit 1; live release/runtime remain baseline, so Desktop acceptance correctly cannot pass yet |
 | Local emulator Java prerequisite | PASS without repository/OS mutation; official Temurin JRE `21.0.12.1+1` downloaded only to `/tmp`, exact 52,059,408-byte size and SHA-256 `2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500` matched current Adoptium API metadata |
@@ -1574,10 +1604,10 @@ production, billing, secret, WhatsApp, GitHub, or other cloud change.
 After login, use only safe non-JSON identity output with the update check
 disabled, reconfirm project `life-tracker-staging` / number `675076431391`, and
 repeat the Function source/fingerprint/resource/secret-version metadata checks.
-Never use `login:list --json`. Recreate a clean detached `3100c42` worktree,
-install its exact lockfile, create only the reviewed four-line non-secret
-staging parameter file, rerun its focused proof/discovery/credential scan, and
-deploy with exact scope
+Never use `login:list --json`. Revalidate the retained clean detached
+`3100c42` worktree and its reviewed four-line non-secret staging parameter
+file; if `/tmp` did not survive, recreate the same proof exactly as documented.
+Then deploy with exact scope
 `--project life-tracker-staging --only functions:lifeTrackerAiApi`.
 
 Immediately prove the new full backend/runtime fingerprints, original-origin
