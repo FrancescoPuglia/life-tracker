@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `5a800bc8c0e7f95e1903f5d5fbf31e51155726ce`
+- Current implementation checkpoint SHA: `2d51356601a19662deda63a01cb717c6c9272b63`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -693,6 +693,33 @@ slice changes one of those trust boundaries.
   added. The production bundle remains 511.3 kB and contains no delivery-service
   or Firestore delivery-repository symbols.
 
+### R4 owner-scoped report history UI
+
+- Green implementation commit: `2d51356601a19662deda63a01cb717c6c9272b63`.
+- Added a lazy-loaded Scientific Reports surface inside the existing
+  Intelligence navigation. It shows the newest 12 Daily/Weekly archives, one
+  bounded overflow witness, local period/generation time, deterministic
+  executive summary, key metrics with N/missing/availability, data-quality
+  flags, formula/schema versions, and provider-neutral delivery state.
+- The browser query is exactly owner-filtered, `generatedAt` descending, and
+  limited to 13 documents. Rules now require an explicit limit at or below 20;
+  owner queries with no limit or limit 21, unfiltered/forged/cross-owner reads,
+  archive mutation, and server-only delivery control/attempt access fail.
+- A strict client decoder revalidates archive/report/metric/delivery schema,
+  document/embedded owner identity, report/hash identity, normalized period and
+  timestamp fields, deterministic-fallback policy, metric availability, and the
+  invariant that missing Sessions are never zero. Malformed records are
+  quarantined and counted without mutating or copying the archived report.
+- Full reports are reduced to a minimal frozen display model before React state.
+  Provider message IDs and stable internal failure codes are validated but not
+  surfaced; retry/uncertain/failed outcomes are mapped to provider-neutral UI.
+  Hostile summary text renders only as escaped text.
+- Explicit loading, empty, overflow, malformed, unavailable/retry, stale-owner,
+  partial-data, and delivery states are covered. The production static export is
+  green and contains no server-only report collection names or test/provider
+  details. No Function, scheduler, provider client/secret, cloud action,
+  API/billing change, Firebase mutation, or message send was added.
+
 ## Evidence
 
 | Check | Result |
@@ -815,13 +842,18 @@ slice changes one of those trust boundaries.
 | Firestore Rules after email delivery persistence | PASS; 64/64, including browser denial of report email controls and delivery attempts |
 | Functions regression after durable email delivery | PASS; 32 files / 359 unit tests; 7 emulator files / 75 tests correctly skipped outside their explicit emulator gates |
 | Durable email delivery build/security | PASS; strict Functions typecheck/build, unchanged 511.3 kB runtime bundle with no delivery symbols, static security, changed/staged high-confidence credential scans, `git diff --check`, and cached diff check |
+| Report history focused coverage | PASS in the final frontend run; 4 files / 28 tests across strict decoding, bounded source/query shape, UI states, hostile text, stale owner, navigation, and delivery-state mapping |
+| Report history Rules remediation | Initial run correctly failed after the limit guard was placed on the adjacent preference match; causal patch moved it to `reportArchives`; final Rules emulator 64/64 PASS, including no-limit and limit-21 denial |
+| Frontend regression after report history | PASS; 62 files / 686 tests |
+| Report history type/build gate | PASS; frontend typecheck and Next.js 15.5.23 production static build, 4 static pages, root route 231 kB / 333 kB first load; only established unrelated lint warnings |
+| Report history security/hygiene | PASS; output-inclusive static security, Desktop attack-surface check, changed/staged credential scans, absence of server-only collection/test/provider strings in `out/`, `git diff --check`, and cached diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, and durable at-most-once email claims/finalization are green; scheduling, report-history UI, secret/domain configuration, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, and the bounded owner-scoped report-history UI are green; scheduling, secret/domain configuration, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -849,18 +881,21 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with the owner-scoped report-history UI as a
-separate green slice. Reuse the existing bounded newest-first archive query and
-show Daily/Weekly period, generated time, deterministic summary/data-quality
-state, and provider-neutral delivery status without exposing server-only claim
-or attempt records. Add explicit loading, empty, overflow, unavailable, and
-malformed-record behavior; retain owner isolation through the existing Rules
-contract and do not duplicate raw source data in the browser. Do not export a
-report generation/delivery endpoint or register a scheduler yet. After that UI
-checkpoint, implement deterministic Daily/Weekly scheduling and report creation
-as a separately reviewed server-only slice. Do not read secret values, enable
-APIs/billing, create provider secrets, send messages, or mutate any Firebase
-project.
+Continue independent local R4 work with deterministic Daily/Weekly scheduling
+and report-generation orchestration as a separate server-only slice. Extend the
+versioned notification/report preferences with a bounded validated report
+recipient, then derive due local periods from persisted timezone and configured
+Daily/Weekly schedules across DST. Claim a privacy-safe user/type/local-period
+run identity before bounded source loading, build the deterministic report,
+archive it idempotently, and hand off only the immutable archive identity to the
+existing durable email-delivery service. Scheduler retries must neither
+regenerate conflicting content nor duplicate email; disabled email/report
+preferences, missing/invalid recipient, unavailable sources, and generation or
+chart failure must fail safely with durable non-secret state. Implement and
+prove the domain/repository/orchestrator locally and in the Firestore emulator
+before exporting any runtime scheduler. Do not read secret values, instantiate
+the Resend client, register/deploy a Function, enable APIs/billing, send a
+message, or mutate any Firebase project in this slice.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
