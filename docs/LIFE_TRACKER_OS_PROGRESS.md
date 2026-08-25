@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `45614cff81f0560baa591b2c7b0fad9ce77f6bca`
+- Current implementation checkpoint SHA: `5a800bc8c0e7f95e1903f5d5fbf31e51155726ce`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -664,6 +664,35 @@ slice changes one of those trust boundaries.
   was added. Provider idempotency lasts only 24 hours and is explicitly not yet
   treated as the durable scheduler duplicate-prevention authority.
 
+### R4 durable at-most-once report-email delivery
+
+- Green implementation commit: `5a800bc8c0e7f95e1903f5d5fbf31e51155726ce`.
+- Added claim-before-send orchestration around the existing immutable report
+  archive and provider-neutral email boundary. A one-way authority hash binds
+  the exact owner, report/artifact/metric/content identity, sender, recipient,
+  provider, and stable idempotency key; mailbox values and message bodies are
+  not persisted in delivery-control or attempt records.
+- Owner-derived Firestore transactions atomically create the first server-only
+  control record, provider attempt, and archive `pending` summary before a
+  provider call. Finalization atomically records the exact accepted, rejected,
+  retryable, or uncertain outcome and updates only the archive delivery summary;
+  the deterministic report and its hashes remain unchanged.
+- Two concurrent full delivery services produced exactly one provider call.
+  Exact finalization replay is idempotent; forged owner, attempt, authority, or
+  conflicting replay fails closed. Browser Rules explicitly deny both
+  `reportEmailDelivery` controls and `reportDeliveryAttempts` at owner and root
+  collection shapes.
+- Only definitive pre-send provider outcomes may retry: maximum three attempts,
+  5/10 minute deterministic backoff, and a 12-hour authority window. Provider
+  throws, malformed/5xx ambiguity, and an abandoned claim become terminal
+  `uncertain` state and are never automatically resent, preventing a scheduler
+  retry from duplicating an email after provider acceptance but before local
+  acknowledgement.
+- No Function, callable, HTTP route, scheduler, secret/client binding, provider
+  call, cloud action, API/billing change, or Firebase project mutation was
+  added. The production bundle remains 511.3 kB and contains no delivery-service
+  or Firestore delivery-repository symbols.
+
 ## Evidence
 
 | Check | Result |
@@ -780,13 +809,19 @@ slice changes one of those trust boundaries.
 | Report email desktop/mobile proof | PASS locally with synthetic data; real Sharp charts rendered in a 900 px document and a 390 px responsive stacked-card document with no external URL or network request |
 | Functions regression after report email | PASS; 31 files / 350 unit tests; 6 emulator files / 69 tests correctly skipped outside their explicit emulator gates |
 | Report email type/build/security | PASS; strict Functions typecheck/build, unchanged 511.3 kB deployed bundle with no report-email symbols, production dependency audit with 0 vulnerabilities, static security, changed/staged credential scans, worktree and cached diff checks |
+| Report email delivery focused tests | PASS; 9/9 claim-before-send ordering, content/envelope authority, no-send paths, bounded retry, invalid recipient, missing archive, and transport-ambiguity tests |
+| Report email delivery Firestore emulator | PASS; 6/6 concurrent single-claim, concurrent full-service single provider invocation, bounded three-attempt retry, abandoned-claim uncertainty, rejected/ambiguous terminal state, replay, forgery, owner isolation, and no-mailbox persistence tests |
+| Combined report archive/delivery emulator | PASS; 12/12 archive immutability/idempotency plus delivery claim/finalization transactions against the same local Firestore emulator |
+| Firestore Rules after email delivery persistence | PASS; 64/64, including browser denial of report email controls and delivery attempts |
+| Functions regression after durable email delivery | PASS; 32 files / 359 unit tests; 7 emulator files / 75 tests correctly skipped outside their explicit emulator gates |
+| Durable email delivery build/security | PASS; strict Functions typecheck/build, unchanged 511.3 kB runtime bundle with no delivery symbols, static security, changed/staged high-confidence credential scans, `git diff --check`, and cached diff check |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, and the provider-neutral Resend mapping are green; durable delivery claims, scheduling, report-history UI, secret/domain configuration, and live delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, and durable at-most-once email claims/finalization are green; scheduling, report-history UI, secret/domain configuration, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -814,21 +849,18 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4 work with durable at-most-once report-email
-delivery state. Add an owner-derived Firestore repository and service that
-atomically claim an immutable archive before any provider call, record bounded
-delivery attempts, finalize accepted/provider-rejected/retryable/uncertain
-outcomes, and update the archive's existing provider-neutral delivery summary.
-Concurrent scheduler invocations must produce at most one provider invocation;
-an abandoned or ambiguous claim must never be automatically resent merely
-because Resend's 24-hour idempotency window elapsed. Definitive pre-send rate
-limits may retry with bounded backoff and the same content/idempotency authority.
-Use emulator concurrency/recovery tests and keep provider failure from modifying
-or deleting the archived deterministic report. Do not export a runtime endpoint
-or register a scheduler yet. Then add the owner-scoped report-history UI as a
-separate green slice before scheduler and live-delivery gates. Do not read secret
-values, enable APIs/billing, create provider secrets, send messages, or mutate
-any Firebase project.
+Continue independent local R4 work with the owner-scoped report-history UI as a
+separate green slice. Reuse the existing bounded newest-first archive query and
+show Daily/Weekly period, generated time, deterministic summary/data-quality
+state, and provider-neutral delivery status without exposing server-only claim
+or attempt records. Add explicit loading, empty, overflow, unavailable, and
+malformed-record behavior; retain owner isolation through the existing Rules
+contract and do not duplicate raw source data in the browser. Do not export a
+report generation/delivery endpoint or register a scheduler yet. After that UI
+checkpoint, implement deterministic Daily/Weekly scheduling and report creation
+as a separately reviewed server-only slice. Do not read secret values, enable
+APIs/billing, create provider secrets, send messages, or mutate any Firebase
+project.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
