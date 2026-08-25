@@ -2,6 +2,7 @@ export { buildReportChartData } from './charts';
 export { computeScientificMetricBundle } from './metrics';
 export * from './archive';
 export { FirestoreScientificReportArchiveRepository } from './firestore-archive-repository';
+export * from './png-chart-renderer';
 export {
   REPORT_TIMEZONE_FALLBACK,
   enumeratePeriodDates,
@@ -19,4 +20,5 @@ export {
 export { ScientificReportSourceLoader } from './source-loader';
 export type { ScientificReportSourceRequest } from './source-loader';
 export { buildScientificStatements } from './statements';
+export * from './svg-chart-renderer';
 export * from './types';
