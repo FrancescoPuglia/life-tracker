@@ -1,0 +1,21 @@
+{
+  "functions": [
+    {
+      "source": "functions-mcp",
+      "codebase": "mcp",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "src",
+        "test",
+        "lib/*.map",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run verify:deploy"
+      ]
+    }
+  ]
+}

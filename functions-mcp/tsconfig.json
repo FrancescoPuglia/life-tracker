@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "baseUrl": ".",
+    "paths": {
+      "@life-tracker/ai-contract": ["../packages/ai-contract/index.d.ts"],
+      "@js-temporal/polyfill": ["node_modules/@js-temporal/polyfill"],
+      "@modelcontextprotocol/sdk/*": ["node_modules/@modelcontextprotocol/sdk/*"],
+      "express": ["node_modules/express"],
+      "firebase-admin/*": ["node_modules/firebase-admin/*"],
+      "firebase-functions/*": ["node_modules/firebase-functions/*"],
+      "zod": ["node_modules/zod"]
+    },
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}

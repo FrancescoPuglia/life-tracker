@@ -52,6 +52,8 @@ functions-reminders/lib/
 functions-reminders/.env*
 functions-reports/lib/
 functions-reports/.env*
+functions-mcp/lib/
+functions-mcp/.env*
 
 # Environment variables (NEVER COMMIT THESE!)
 .env
