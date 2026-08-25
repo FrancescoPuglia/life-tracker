@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `43efb669c875f6977e439b16baa7b8dad2c9ff49`
+- Current implementation checkpoint SHA: `43a019c19c77e1a27fd664557cb72447dda0395e`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -834,6 +834,37 @@ slice changes one of those trust boundaries.
   index, Scheduler job, API, IAM/billing setting, parameter, secret, provider,
   domain, user document, or email was changed outside local/emulator state.
 
+### Economical AI workload routing and evaluation boundary
+
+- Green implementation commit: `43a019c19c77e1a27fd664557cb72447dda0395e`.
+- Added a backend-only, exact opt-in route manifest for Ask, Coach, Analyze,
+  Plan, and Weekly Strategic Review. Exact `false` is the default and does not
+  read the manifest; it preserves Goal 1's model, reasoning effort, runtime
+  config ID/health shape, and exact 30-second/6-turn/12-tool/1,500-token bounds.
+- Exact `true` requires all five routes, a current price-catalog version, a
+  receipt-bound evaluation time, and models/reasoning within workload ceilings.
+  Missing, partial, stale, arbitrary, or over-ceiling routes fail closed. The
+  authenticated fixed mode is the only route selector; prompt/user/tool data
+  cannot select a model. A selected provider failure never triggers an
+  automatic retry on a more expensive model.
+- Added a seven-case synthetic evaluation corpus covering grounded owner reads,
+  hostile Note containment, bounded coaching, exact planned-versus-actual,
+  unavailable Sessions, preview-only planning, and immutable weekly metrics.
+  The cheapest-first selector requires complete failing evidence before every
+  escalation, validates provider model/usage/criteria, estimates direct token
+  cost from the reviewed 2026-08-25 official catalog, and hashes only safe
+  structured observations into receipts. Raw model/user output is not retained.
+- Runtime and provider request/response metadata safely attest workload,
+  manifest hash, and evaluation receipt. The production Functions bundle
+  contains the default-off parser/adapter but excludes every evaluation prompt,
+  fixture, selector, and receipt-building symbol.
+- Added `docs/AI_MODEL_ROUTING_EVALUATION.md` with official source links,
+  prices, workload ceilings, exact corpus, sequential stopping rules, cost
+  envelope, activation/rollback boundary, and a separate live-evaluation gate.
+  No OpenAI call, provider secret access, credit spend, retry loop, deployment,
+  parameter, budget, billing, auto-reload, staging, or production change
+  occurred. No model is yet claimed cheapest adequate.
+
 ## Evidence
 
 | Check | Result |
@@ -980,13 +1011,17 @@ slice changes one of those trust boundaries.
 | Firestore Rules after report manifests | PASS; 66/66, including client denial of owner-nested and root schedule-manifest state |
 | Functions regression after report runtime | PASS; 37 files / 393 unit tests; 9 emulator files / 88 tests correctly skipped outside their explicit gates |
 | Report runtime build/security | PASS; strict typecheck and 801.2 kB reachable Functions bundle, production dependency audit 0 vulnerabilities, valid index JSON, static/Desktop security, generated-bundle and staged high-confidence credential scans, worktree/cached diff checks |
+| AI routing focused regression | PASS; 7 files / 64 tests across exact-off legacy behavior, strict manifests/ceilings, cheapest-first evidence, receipt construction, route-only dispatch, no expensive fallback, response metadata, runtime attestation, application, and HTTP boundaries |
+| Functions regression after AI routing | PASS; 40 files / 410 unit tests; 9 emulator files / 88 tests correctly skipped outside their explicit gates |
+| AI routing type/build/security | PASS; strict Functions typecheck, 816.8 kB bundle, evaluation corpus absent from bundle, production dependency audit 0 vulnerabilities, static/Desktop security, staged high-confidence credential scan, and diff hygiene |
+| Live economical model evaluation | NOT RUN; routing remains exact `false`, Goal 1 revision/model unchanged, no provider credit or secret used, and no cheapest-adequate model asserted |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, and default-off fixed-owner runtime scheduling are green; secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, formula specification, scientific statement discipline, bounded owner-scoped source reads, immutable/idempotent report archives, accessible local SVG/PNG charts, responsive HTML/text composition, provider-neutral Resend mapping, durable at-most-once email claims/finalization, bounded owner-scoped report history, preference v2, DST-safe due-period planning, durable claim/generate/archive/reauthorize/deliver orchestration, default-off fixed-owner runtime scheduling, and default-off economical workload routing/evaluation are green; post-archive strategic interpretation, secure secret/sender/domain configuration, deployment, and live Daily/Weekly delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -1013,7 +1048,16 @@ Rules denial, API/service inventory, cost envelope, default-off verification,
 and rollback sequence. A future Resend credential/sender/domain action must be
 performed by Francesco through a trusted provider/Secret Manager surface and
 must never be pasted into chat. No such action is yet requested because model
-routing, MCP, privacy preparation, and other independent implementation remain.
+routing activation/evaluation, MCP, privacy preparation, and other independent
+implementation remain.
+
+Economical routing has a separate paid-evaluation/activation gate documented in
+`docs/AI_MODEL_ROUTING_EVALUATION.md`. The technically green parser, bounds,
+synthetic corpus, selector, and receipts do not establish live model quality.
+Do not run the live corpus, read a provider secret, spend OpenAI credit, change
+budget/auto-reload, or enable routing until independent work is checkpointed and
+one exact maximum-cost staging action is approved. Goal 1's verified Sol staging
+revision remains untouched.
 
 Production promotion has a separate later cost gate: `life-tracker-12000` has
 no billing link and its required backend APIs are disabled. Do not enable
@@ -1022,24 +1066,27 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local R4/cost work with an economical AI workload router
-and representative evaluation contract. Read the current official OpenAI/Codex
-documentation first. Inventory every existing model parameter/call site and do
-not change Goal 1's deployed revision. Define bounded workloads (lightweight
-language, normal Ask AI/planning, difficult strategic review), deterministic
-no-LLM paths, backend-only runtime routes, per-workload token/tool/turn ceilings,
-and a small sanitized evaluation corpus with explicit adequacy criteria. Model
-names and routing must stay backend-configurable; malformed configuration must
-fail closed or fall back deterministically, never select a more expensive model
-implicitly. Weekly narrative may interpret immutable metric facts but cannot
-calculate, replace, or mutate them, and deterministic Daily/Weekly reports must
-remain useful when OpenAI is unavailable/quota-exhausted.
+Continue independent local R4 work by adding the optional Weekly Strategic
+Interpretation as a versioned, server-owned addendum to an already archived
+deterministic Weekly report. Read only the report archive/run/email contracts
+and the new routing boundary. The addendum must bind owner, report ID, immutable
+metric-bundle hash/schema, prompt/schema version, route/evaluation receipt, and
+sanitized structured OBSERVED/INFERENCE/RECOMMENDATION output. It must never
+calculate or replace metrics, alter chart data, mutate the immutable archive,
+accept arbitrary facts/tool calls, or run before archive creation.
 
-Use local fakes/recorded fixtures first. Do not spend provider credit, run a
-live evaluation, read/change OpenAI secrets, deploy, alter budget/billing,
-enable auto-reload, or mutate staging/production without a later exact human
-approval. End with an evaluation/runbook boundary that separates technically
-green routing from live cheapest-adequate selection evidence.
+Keep the path exact opt-in/default-off. Provider timeout, quota exhaustion,
+malformed output, missing evaluated weekly route, or addendum persistence error
+must leave the deterministic archive/email useful and must not trigger a more
+expensive fallback. Reuse the existing claim/idempotency and at-most-once email
+boundaries so a scheduler retry cannot duplicate provider interpretation or
+email delivery. Use local fakes only; do not spend provider credit, read/change
+OpenAI secrets, deploy, enable routing, or mutate staging/production.
+
+After that green local checkpoint, implement the bounded authenticated
+read-only ChatGPT/MCP surface over the existing secure domain/report services;
+its current Pro-exposed write-tool count must remain zero. Continue privacy and
+release preparation before requesting any provider or cloud action.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
