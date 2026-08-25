@@ -72,6 +72,7 @@ const SERVER_ONLY_COLLECTIONS = [
   'reportEmailDelivery',
   'reportDeliveryAttempts',
   'reportRuns',
+  'reportScheduleManifests',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [

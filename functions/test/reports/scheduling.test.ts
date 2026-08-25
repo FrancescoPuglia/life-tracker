@@ -3,8 +3,10 @@ import { normalizeNotificationPreferences } from '../../src/notifications/domain
 import {
   authorizeScientificReportScheduleCandidate,
   deriveScientificReportSchedulePolicy,
+  nextScientificReportScheduleCandidate,
   planDueScientificReportRuns,
   reportScheduleVersion,
+  scientificReportScheduleCandidateForPeriod,
   type ScientificReportSchedulePolicy,
 } from '../../src/reports/scheduling';
 
@@ -188,6 +190,68 @@ describe('deterministic due report planning', () => {
     expect(retargeted?.expectedScheduleVersion).not.toBe(first?.expectedScheduleVersion);
     expect(retargeted?.recipientAuthorityHash).not.toBe(first?.recipientAuthorityHash);
     expect(reportScheduleVersion(original, 'daily')).toBe(first?.expectedScheduleVersion);
+  });
+
+  it('advances Daily schedules across DST with a new period identity', () => {
+    const dstPolicy = policy({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '02:30' },
+    });
+    const current = planDueScientificReportRuns(
+      dstPolicy,
+      '2026-03-29T01:31:00.000Z',
+    )[0]!;
+
+    expect(nextScientificReportScheduleCandidate(dstPolicy, current)).toMatchObject({
+      localDate: '2026-03-30',
+      localStartDate: '2026-03-30',
+      scheduledFor: '2026-03-30T00:30:00.000Z',
+    });
+  });
+
+  it('skips a changed Weekly wall-clock occurrence that still names a consumed period', () => {
+    const sunday = policy({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      weeklyReport: { enabled: true, isoWeekday: 7, localTime: '20:30' },
+    });
+    const monday = policy({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      weeklyReport: { enabled: true, isoWeekday: 1, localTime: '20:30' },
+    });
+    const current = planDueScientificReportRuns(
+      sunday,
+      '2026-08-30T21:00:00.000Z',
+    ).find((candidate) => candidate.reportType === 'weekly')!;
+
+    const next = nextScientificReportScheduleCandidate(monday, current);
+    expect(next.id).not.toBe(current.id);
+    expect(next).toMatchObject({
+      localDate: '2026-09-06',
+      localStartDate: '2026-08-31',
+      scheduledFor: '2026-09-07T18:30:00.000Z',
+    });
+  });
+
+  it('maps one unconsumed Weekly period onto a changed delivery day without changing identity', () => {
+    const monday = policy({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      weeklyReport: { enabled: true, isoWeekday: 1, localTime: '20:30' },
+    });
+    const mapped = scientificReportScheduleCandidateForPeriod(
+      monday,
+      'weekly',
+      '2026-08-24',
+    );
+
+    expect(mapped).toMatchObject({
+      localDate: '2026-08-30',
+      localStartDate: '2026-08-24',
+      scheduledFor: '2026-08-31T18:30:00.000Z',
+    });
   });
 });
 

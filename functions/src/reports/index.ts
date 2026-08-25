@@ -6,9 +6,16 @@ export * from './email-provider';
 export { FirestoreScientificReportArchiveRepository } from './firestore-archive-repository';
 export { FirestoreScientificReportEmailDeliveryRepository } from './firestore-email-delivery-repository';
 export { FirestoreScientificReportRunRepository } from './firestore-report-run-repository';
+export {
+  FirestoreScientificReportScheduleManifestRepository,
+  decodeStoredScientificReportScheduleManifest,
+  encodeStoredScientificReportScheduleManifest,
+} from './firestore-schedule-manifest-repository';
 export * from './png-chart-renderer';
 export * from './report-email-template';
 export * from './report-run';
+export * from './schedule-manifest';
+export * from './schedule-trigger';
 export * from './resend-email-provider';
 export * from './scheduling';
 export {

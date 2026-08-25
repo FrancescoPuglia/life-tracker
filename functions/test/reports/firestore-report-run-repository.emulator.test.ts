@@ -154,6 +154,51 @@ describe.skipIf(!process.env.FIRESTORE_EMULATOR_HOST)(
       expect(marker.exists).toBe(false);
     }, 30_000);
 
+    it('suppresses a new same-period authority instead of retrying or duplicating an in-flight run', async () => {
+      const uid = uniqueUid('same-period-change');
+      const original = await seedAuthority(firestore, uid);
+      const repository = new FirestoreScientificReportRunRepository(firestore);
+      const claim = await repository.claimGeneration(original, NOW);
+      if (claim.action !== 'generate') throw new Error('Expected a generation claim.');
+      await firestore.doc(`users/${uid}/notificationPreferences/default`).update({
+        reportRecipient: 'changed@example.test',
+        updatedAt: Timestamp.fromDate(new Date('2026-08-25T21:00:01.000Z')),
+      });
+      const changedPreferences = normalizeNotificationPreferences(uid, {
+        userId: uid,
+        timezone: 'Europe/Rome',
+        locale: 'it-IT',
+        emailEnabled: true,
+        reportRecipient: 'changed@example.test',
+        dailyReport: { enabled: true, localTime: '22:30' },
+        weeklyReport: { enabled: false, isoWeekday: 7, localTime: '20:30' },
+      }, 'Europe/Rome');
+      const changed = planDueScientificReportRuns(
+        deriveScientificReportSchedulePolicy(changedPreferences),
+        NOW,
+      )[0]!;
+      expect(changed.id).toBe(original.id);
+      expect(changed.recipientAuthorityHash).not.toBe(original.recipientAuthorityHash);
+
+      await expect(repository.claimGeneration(
+        changed,
+        '2026-08-25T21:00:02.000Z',
+      )).resolves.toEqual({ action: 'no_op', reason: 'recipient_changed' });
+      expect(decodeStoredReportRun(
+        uid,
+        await firestore.doc(`users/${uid}/reportRuns/${original.id}`).get(),
+      )).toMatchObject({ state: 'suppressed', suppressionReason: 'recipient_changed' });
+      await expect(repository.commitGeneratedReport({
+        candidate: original,
+        claimId: claim.claimId,
+        report: report(uid, original, claim.generatedAt),
+        now: '2026-08-25T21:00:03.000Z',
+      })).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect((await firestore.doc(
+        `users/${uid}/reportArchives/${claim.reportId}`,
+      ).get()).exists).toBe(false);
+    }, 30_000);
+
     it('atomically archives, exactly replays, rejects conflicting content, and finalizes one delivery claim', async () => {
       const uid = uniqueUid('archive');
       const candidate = await seedAuthority(firestore, uid);

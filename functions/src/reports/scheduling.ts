@@ -114,6 +114,80 @@ export function planDueScientificReportRuns(
   return Object.freeze(candidates);
 }
 
+/**
+ * First future occurrence whose report period has not already been consumed.
+ * A schedule-day change can make the next wall-clock occurrence point at the
+ * same weekly period, so that occurrence is deliberately skipped.
+ */
+export function nextScientificReportScheduleCandidate(
+  policy: ScientificReportSchedulePolicy,
+  previous: ScientificReportScheduleCandidate,
+): ScientificReportScheduleCandidate {
+  validatePolicy(policy);
+  validateScientificReportScheduleCandidate(previous);
+  if (previous.uid !== policy.uid) throw new Error('Scientific report run owner is invalid.');
+  if (!policy.emailEnabled || !policy.recipient) {
+    throw new Error('Scientific report email authority is unavailable.');
+  }
+  const schedule = previous.reportType === 'daily' ? policy.dailyReport : policy.weeklyReport;
+  if (!schedule.enabled) throw new Error('Scientific report schedule is disabled.');
+
+  let after = normalizedInstant(previous.scheduledFor);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const occurrence = nextOccurrenceAfter(
+      after,
+      policy.timezone,
+      schedule.localTime,
+      previous.reportType === 'weekly' ? policy.weeklyReport.isoWeekday : null,
+    );
+    const next = candidate(
+      policy,
+      previous.reportType,
+      occurrence.localDate,
+      occurrence.instant,
+    );
+    if (next.id !== previous.id) return next;
+    after = occurrence.instant;
+  }
+  throw new Error('Scientific report next period could not be resolved.');
+}
+
+/** Maps an unconsumed report period onto the current schedule authority. */
+export function scientificReportScheduleCandidateForPeriod(
+  policy: ScientificReportSchedulePolicy,
+  reportType: ScientificReportType,
+  localStartDate: string,
+): ScientificReportScheduleCandidate {
+  validatePolicy(policy);
+  if (!policy.emailEnabled || !policy.recipient) {
+    throw new Error('Scientific report email authority is unavailable.');
+  }
+  const start = Temporal.PlainDate.from(localStartDate);
+  if (start.toString() !== localStartDate) {
+    throw new Error('Scientific report local period is invalid.');
+  }
+  const schedule = reportType === 'daily' ? policy.dailyReport : policy.weeklyReport;
+  if (!schedule.enabled) throw new Error('Scientific report schedule is disabled.');
+  const deliveryDate = reportType === 'daily'
+    ? start
+    : start.add({ days: 6 + (policy.weeklyReport.isoWeekday % 7) });
+  const scheduledInstant = occurrenceInstant(
+    deliveryDate,
+    schedule.localTime,
+    policy.timezone,
+  );
+  const mapped = candidate(
+    policy,
+    reportType,
+    deliveryDate.toString(),
+    scheduledInstant,
+  );
+  if (mapped.localStartDate !== localStartDate) {
+    throw new Error('Scientific report period cannot be mapped to its schedule.');
+  }
+  return mapped;
+}
+
 export function reportScheduleVersion(
   policy: ScientificReportSchedulePolicy,
   reportType: ScientificReportType,
@@ -285,6 +359,25 @@ function mostRecentOccurrence(
   let instant = occurrenceInstant(date, localTime, timezone);
   if (Temporal.Instant.compare(instant, now) > 0) {
     date = date.subtract({ days: isoWeekday === null ? 1 : 7 });
+    instant = occurrenceInstant(date, localTime, timezone);
+  }
+  return Object.freeze({ localDate: date.toString(), instant });
+}
+
+function nextOccurrenceAfter(
+  after: Temporal.Instant,
+  timezone: string,
+  localTime: string,
+  isoWeekday: number | null,
+): Readonly<{ localDate: string; instant: Temporal.Instant }> {
+  const afterLocal = after.toZonedDateTimeISO(timezone);
+  let date = afterLocal.toPlainDate();
+  if (isoWeekday !== null) {
+    date = date.add({ days: (isoWeekday - date.dayOfWeek + 7) % 7 });
+  }
+  let instant = occurrenceInstant(date, localTime, timezone);
+  if (Temporal.Instant.compare(instant, after) <= 0) {
+    date = date.add({ days: isoWeekday === null ? 1 : 7 });
     instant = occurrenceInstant(date, localTime, timezone);
   }
   return Object.freeze({ localDate: date.toString(), instant });

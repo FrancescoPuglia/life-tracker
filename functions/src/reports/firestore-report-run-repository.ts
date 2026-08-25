@@ -6,7 +6,6 @@ import {
   type Firestore,
 } from 'firebase-admin/firestore';
 import { DomainError } from '../domain/errors';
-import { normalizeNotificationPreferences } from '../notifications/domain';
 import {
   createReportArchiveIdempotencyRecord,
   createStoredScientificReportArchive,
@@ -19,6 +18,7 @@ import {
   encodeReportArchiveIdempotencyRecord,
   encodeStoredScientificReportArchive,
 } from './firestore-archive-repository';
+import { deriveFirestoreScientificReportSchedulePolicy } from './firestore-schedule-authority';
 import {
   REPORT_RUN_DELIVERY_CLAIM_LEASE_MS,
   REPORT_RUN_GENERATION_CLAIM_LEASE_MS,
@@ -94,7 +94,8 @@ implements ScientificReportRunRepository {
       const [runSnapshot, userSnapshot, preferenceSnapshot, archiveSnapshot, markerSnapshot]
         = completeSnapshots(snapshots, 'Report run claim authority read is incomplete.');
       const stored = runSnapshot.exists ? decodeStoredReportRun(candidate.uid, runSnapshot) : null;
-      if (stored) assertRunCandidate(stored, candidate, reportId);
+      const exactStoredCandidate = stored ? runMatchesCandidate(stored, candidate, reportId) : false;
+      if (stored) assertRunPeriod(stored, candidate, reportId);
       const archive = decodeArchivePair(
         candidate.uid,
         archiveSnapshot,
@@ -113,7 +114,11 @@ implements ScientificReportRunRepository {
         }
         return Object.freeze({ action: 'no_op', reason: 'outside_catch_up_window' });
       }
-      const policy = schedulePolicy(candidate.uid, userSnapshot, preferenceSnapshot);
+      const policy = deriveFirestoreScientificReportSchedulePolicy(
+        candidate.uid,
+        userSnapshot,
+        preferenceSnapshot,
+      );
       const authorization = authorizeScientificReportScheduleCandidate(policy, candidate);
 
       if (authorization.action === 'suppress') {
@@ -125,6 +130,25 @@ implements ScientificReportRunRepository {
           )));
         }
         return Object.freeze({ action: 'no_op', reason: authorization.reason });
+      }
+
+      if (stored && !exactStoredCandidate) {
+        if (stored.state === 'completed') {
+          return Object.freeze({ action: 'no_op', reason: 'already_completed' });
+        }
+        if (stored.state === 'failed') {
+          return Object.freeze({ action: 'no_op', reason: 'terminal_failure' });
+        }
+        const reason: ScientificReportScheduleSuppressionReason =
+          stored.recipientAuthorityHash !== candidate.recipientAuthorityHash
+            ? 'recipient_changed'
+            : 'schedule_changed';
+        transaction.set(refs.run, encodeStoredReportRun(suppressedRun(
+          stored,
+          reason,
+          timestamp,
+        )));
+        return Object.freeze({ action: 'no_op', reason });
       }
 
       if (!stored) {
@@ -278,7 +302,11 @@ implements ScientificReportRunRepository {
         throw new DomainError('CONFLICT', 'Report generation claim is no longer current.');
       }
 
-      const policy = schedulePolicy(input.candidate.uid, userSnapshot, preferenceSnapshot);
+      const policy = deriveFirestoreScientificReportSchedulePolicy(
+        input.candidate.uid,
+        userSnapshot,
+        preferenceSnapshot,
+      );
       const authorization = authorizeScientificReportScheduleCandidate(policy, input.candidate);
       if (authorization.action === 'suppress') {
         transaction.set(refs.run, encodeStoredReportRun(suppressedRun(
@@ -433,7 +461,11 @@ implements ScientificReportRunRepository {
       ) {
         throw new DomainError('CONFLICT', 'Report archive is not ready for delivery.');
       }
-      const policy = schedulePolicy(input.candidate.uid, userSnapshot, preferenceSnapshot);
+      const policy = deriveFirestoreScientificReportSchedulePolicy(
+        input.candidate.uid,
+        userSnapshot,
+        preferenceSnapshot,
+      );
       const authorization = authorizeScientificReportScheduleCandidate(policy, input.candidate);
       if (authorization.action === 'suppress') {
         transaction.set(refs.run, encodeStoredReportRun(suppressedRun(
@@ -890,70 +922,6 @@ function replayDeliveryFinalization(
   return null;
 }
 
-function schedulePolicy(
-  uid: string,
-  userSnapshot: DocumentSnapshot,
-  preferenceSnapshot: DocumentSnapshot,
-): ScientificReportSchedulePolicy {
-  const userValue = userSnapshot.exists ? userSnapshot.data() ?? {} : null;
-  const preferenceValue = preferenceSnapshot.exists ? preferenceSnapshot.data() ?? {} : {};
-  const persistedTimezone = persistedUserTimezone(uid, userValue);
-  if (preferenceSnapshot.exists) {
-    assertScopedOwner(uid, preferenceValue, 'Notification preferences', true);
-  }
-  let effectivePreferences = preferenceValue;
-  if (preferenceSnapshot.exists) {
-    if (preferenceValue.schemaVersion === 'notification-preferences-v1') {
-      effectivePreferences = {
-        ...preferenceValue,
-        emailEnabled: false,
-        reportRecipient: null,
-        dailyReport: {
-          ...plainRecord(preferenceValue.dailyReport, 'Legacy Daily report preference'),
-          enabled: false,
-        },
-        weeklyReport: {
-          ...plainRecord(preferenceValue.weeklyReport, 'Legacy Weekly report preference'),
-          enabled: false,
-        },
-      };
-    } else if (preferenceValue.schemaVersion !== 'notification-preferences-v2') {
-      throw new DomainError('INTERNAL', 'Notification preference schema is invalid.');
-    }
-  }
-  return deriveScientificReportSchedulePolicy(normalizeNotificationPreferences(
-    uid,
-    effectivePreferences,
-    persistedTimezone,
-  ));
-}
-
-function persistedUserTimezone(uid: string, value: DocumentData | null): unknown {
-  if (value === null) return undefined;
-  assertScopedOwner(uid, value, 'Persisted user profile', false);
-  const preferences = value.preferences === undefined
-    ? null
-    : plainRecord(value.preferences, 'Persisted user preferences');
-  return preferences?.timezone ?? value.timezone;
-}
-
-function assertScopedOwner(
-  uid: string,
-  value: unknown,
-  label: string,
-  requireUserId: boolean,
-): void {
-  const record = plainRecord(value, label);
-  if (requireUserId && record.userId !== uid) {
-    throw new DomainError('INTERNAL', `${label} owner is invalid.`);
-  }
-  for (const field of ['userId', 'uid', 'ownerId', 'ownerUid'] as const) {
-    if (record[field] !== undefined && record[field] !== uid) {
-      throw new DomainError('INTERNAL', `${label} owner is invalid.`);
-    }
-  }
-}
-
 function decodeArchivePair(
   uid: string,
   archiveSnapshot: DocumentSnapshot,
@@ -990,19 +958,41 @@ function assertRunCandidate(
   candidate: ScientificReportScheduleCandidate,
   reportId: string,
 ): void {
+  if (!runMatchesCandidate(run, candidate, reportId)) {
+    throw new DomainError('CONFLICT', 'Stored report run does not match its candidate.');
+  }
+}
+
+function assertRunPeriod(
+  run: StoredScientificReportRun,
+  candidate: ScientificReportScheduleCandidate,
+  reportId: string,
+): void {
   if (
     run.id !== candidate.id
     || run.userId !== candidate.uid
     || run.reportId !== reportId
     || run.reportType !== candidate.reportType
-    || run.localDate !== candidate.localDate
     || run.localStartDate !== candidate.localStartDate
-    || run.scheduledFor !== candidate.scheduledFor
-    || run.expectedScheduleVersion !== candidate.expectedScheduleVersion
-    || run.recipientAuthorityHash !== candidate.recipientAuthorityHash
   ) {
-    throw new DomainError('CONFLICT', 'Stored report run does not match its candidate.');
+    throw new DomainError('CONFLICT', 'Stored report run does not match its period.');
   }
+}
+
+function runMatchesCandidate(
+  run: StoredScientificReportRun,
+  candidate: ScientificReportScheduleCandidate,
+  reportId: string,
+): boolean {
+  return run.id === candidate.id
+    && run.userId === candidate.uid
+    && run.reportId === reportId
+    && run.reportType === candidate.reportType
+    && run.localDate === candidate.localDate
+    && run.localStartDate === candidate.localStartDate
+    && run.scheduledFor === candidate.scheduledFor
+    && run.expectedScheduleVersion === candidate.expectedScheduleVersion
+    && run.recipientAuthorityHash === candidate.recipientAuthorityHash;
 }
 
 /** @internal Exported for bounded emulator assertions and future worker reads. */
@@ -1304,13 +1294,6 @@ function timestampValue(value: unknown, label: string): string {
 
 function nullableTimestampValue(value: unknown, label: string): string | null {
   return value === null ? null : timestampValue(value, label);
-}
-
-function plainRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new DomainError('INTERNAL', `${label} is invalid.`);
-  }
-  return value as Record<string, unknown>;
 }
 
 function assertUid(uid: string): void {
