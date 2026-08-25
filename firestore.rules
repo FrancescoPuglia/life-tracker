@@ -163,6 +163,15 @@ service cloud.firestore {
         && (offsets.size() < 8 || validReminderOffset(offsets[7]));
     }
 
+    function validReportRecipient(value) {
+      return value is string
+        && value.size() >= 3
+        && value.size() <= 254
+        && value.matches('^[^\\s@<>]{1,64}@[^\\s@<>]{1,185}$')
+        && value.matches('^[^\\r\\n\\x00]+$')
+        && value.matches('^.+@[^.].*\\..*[^.]$');
+    }
+
     function hasValidNotificationPreferences(uid, documentId) {
       let data = request.resource.data;
       return documentId == 'default'
@@ -177,10 +186,9 @@ service cloud.firestore {
           'schemaVersion', 'id', 'userId', 'timezone', 'locale', 'quietHours',
           'desktopEnabled', 'whatsappEnabled', 'emailEnabled',
           'reminderOffsetsMinutes', 'atStartEnabled', 'missedStart',
-          'maxRemindersPerBlock', 'dailyReport', 'weeklyReport',
+          'maxRemindersPerBlock', 'dailyReport', 'weeklyReport', 'reportRecipient',
           'createdAt', 'updatedAt'
         ])
-        && data.schemaVersion == 'notification-preferences-v1'
         && data.id == documentId
         && data.userId == uid
         && data.timezone is string
@@ -224,7 +232,22 @@ service cloud.firestore {
         && data.weeklyReport.isoWeekday <= 7
         && validClock(data.weeklyReport.localTime)
         && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && data.updatedAt is timestamp
+        && (
+          (data.schemaVersion == 'notification-preferences-v1'
+            && !('reportRecipient' in data))
+          || (data.schemaVersion == 'notification-preferences-v2'
+            && 'reportRecipient' in data
+            && (
+              (data.emailEnabled
+                && validReportRecipient(data.reportRecipient))
+              || (!data.emailEnabled
+                && (data.reportRecipient == null
+                  || validReportRecipient(data.reportRecipient)))
+            )
+            && (!data.dailyReport.enabled || data.emailEnabled)
+            && (!data.weeklyReport.enabled || data.emailEnabled))
+        );
     }
 
     function isClientCollection(collectionName) {
@@ -328,8 +351,14 @@ service cloud.firestore {
 
         allow update: if ownsPath(uid)
           && resource.data.userId == uid
-          && !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['schemaVersion', 'id', 'userId', 'createdAt'])
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && (
+            request.resource.data.schemaVersion == resource.data.schemaVersion
+            || (resource.data.schemaVersion == 'notification-preferences-v1'
+              && request.resource.data.schemaVersion == 'notification-preferences-v2')
+          )
           && hasValidNotificationPreferences(uid, documentId);
 
         allow delete: if ownsPath(uid)

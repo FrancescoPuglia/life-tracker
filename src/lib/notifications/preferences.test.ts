@@ -11,6 +11,7 @@ describe('notification preference client contract', () => {
       desktopEnabled: false,
       whatsappEnabled: false,
       emailEnabled: false,
+      reportRecipient: null,
       reminderOffsetsMinutes: [15],
     });
   });
@@ -39,5 +40,32 @@ describe('notification preference client contract', () => {
       ...defaultNotificationPreferences(),
       maxRemindersPerBlock: 9,
     })).toThrow(/Maximum/);
+  });
+
+  it('requires a bounded valid recipient and email authority for report schedules', () => {
+    const normalized = normalizeEditableNotificationPreferences({
+      ...defaultNotificationPreferences(),
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '22:30' },
+    });
+    expect(normalized).toMatchObject({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '22:30' },
+    });
+    expect(() => normalizeEditableNotificationPreferences({
+      ...defaultNotificationPreferences(),
+      emailEnabled: true,
+      reportRecipient: null,
+    })).toThrow(/recipient/i);
+    expect(() => normalizeEditableNotificationPreferences({
+      ...defaultNotificationPreferences(),
+      reportRecipient: 'invalid\nrecipient@example.com',
+    })).toThrow(/recipient/i);
+    expect(() => normalizeEditableNotificationPreferences({
+      ...defaultNotificationPreferences(),
+      dailyReport: { enabled: true, localTime: '22:30' },
+    })).toThrow(/Email reports/i);
   });
 });

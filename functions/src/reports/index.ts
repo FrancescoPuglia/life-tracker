@@ -8,6 +8,7 @@ export { FirestoreScientificReportEmailDeliveryRepository } from './firestore-em
 export * from './png-chart-renderer';
 export * from './report-email-template';
 export * from './resend-email-provider';
+export * from './scheduling';
 export {
   REPORT_TIMEZONE_FALLBACK,
   enumeratePeriodDates,

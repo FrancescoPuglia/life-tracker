@@ -76,9 +76,9 @@ describe('Desktop settings', () => {
     await waitFor(() => expect(enabled).not.toBeDisabled());
     fireEvent.click(enabled);
     fireEvent.change(screen.getByLabelText('Reminder offsets'), { target: { value: '60, 15' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save reminder policy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
 
-    await screen.findByText(/Reminder policy saved/);
+    await screen.findByText(/Notification and report preferences saved/);
     expect(preferencesStore.save).toHaveBeenCalledWith('owner-1', expect.objectContaining({
       desktopEnabled: true,
       reminderOffsetsMinutes: [60, 15],
@@ -92,7 +92,42 @@ describe('Desktop settings', () => {
     const offsets = await screen.findByLabelText('Reminder offsets');
     await waitFor(() => expect(offsets).not.toBeDisabled());
     fireEvent.change(offsets, { target: { value: '15, arbitrary' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save reminder policy' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('invalid or unavailable');
+    expect(preferencesStore.save).not.toHaveBeenCalled();
+  });
+
+  it('persists a validated recipient and configurable Daily/Weekly schedules', async () => {
+    renderSettings();
+    const emailEnabled = await screen.findByRole('checkbox', { name: 'Enable email reports' });
+    await waitFor(() => expect(emailEnabled).not.toBeDisabled());
+    fireEvent.click(emailEnabled);
+    fireEvent.change(screen.getByLabelText('Report recipient'), {
+      target: { value: 'francesco@example.com' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Daily Report' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Weekly Report' }));
+    fireEvent.change(screen.getByLabelText('Daily Report time'), { target: { value: '21:45' } });
+    fireEvent.change(screen.getByLabelText('Weekly Report day'), { target: { value: '6' } });
+    fireEvent.change(screen.getByLabelText('Weekly Report time'), { target: { value: '19:15' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
+
+    await screen.findByText(/Notification and report preferences saved/);
+    expect(preferencesStore.save).toHaveBeenCalledWith('owner-1', expect.objectContaining({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '21:45' },
+      weeklyReport: { enabled: true, isoWeekday: 6, localTime: '19:15' },
+    }));
+  });
+
+  it('does not persist enabled email reports without a recipient', async () => {
+    renderSettings();
+    const emailEnabled = await screen.findByRole('checkbox', { name: 'Enable email reports' });
+    await waitFor(() => expect(emailEnabled).not.toBeDisabled());
+    fireEvent.click(emailEnabled);
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('invalid or unavailable');
     expect(preferencesStore.save).not.toHaveBeenCalled();

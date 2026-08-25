@@ -26,6 +26,7 @@ describe('notification preferences', () => {
       desktopEnabled: false,
       whatsappEnabled: false,
       emailEnabled: false,
+      reportRecipient: null,
       reminderOffsetsMinutes: [15],
       atStartEnabled: true,
       missedStart: { enabled: false, afterMinutes: 10 },
@@ -57,6 +58,36 @@ describe('notification preferences', () => {
   it('rejects a forged embedded owner', () => {
     expect(() => normalizeNotificationPreferences(UID, { userId: 'other' }, 'Europe/Rome'))
       .toThrow('owner');
+  });
+
+  it('enables report schedules only with a validated recipient authority', () => {
+    const enabled = normalizeNotificationPreferences(UID, {
+      userId: UID,
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '22:30' },
+      weeklyReport: { enabled: true, isoWeekday: 7, localTime: '20:30' },
+    }, 'Europe/Rome');
+    expect(enabled).toMatchObject({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '22:30' },
+      weeklyReport: { enabled: true, isoWeekday: 7, localTime: '20:30' },
+    });
+
+    const invalid = normalizeNotificationPreferences(UID, {
+      userId: UID,
+      emailEnabled: true,
+      reportRecipient: 'invalid\nrecipient@example.com',
+      dailyReport: { enabled: true, localTime: '99:99' },
+      weeklyReport: { enabled: true, isoWeekday: 8, localTime: '20:30' },
+    }, 'Europe/Rome');
+    expect(invalid).toMatchObject({
+      emailEnabled: false,
+      reportRecipient: null,
+      dailyReport: { enabled: false, localTime: '22:30' },
+      weeklyReport: { enabled: false, isoWeekday: 7, localTime: '20:30' },
+    });
   });
 });
 

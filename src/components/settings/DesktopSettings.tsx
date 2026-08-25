@@ -133,7 +133,7 @@ export default function DesktopSettings({
     await preferencesStore.save(userId, normalized);
     setPreferences(normalized);
     setOffsetText(normalized.reminderOffsetsMinutes.join(', '));
-    setMessage('Reminder policy saved. Future TimeBlocks will be reconciled safely.');
+    setMessage('Notification and report preferences saved. Future work will be reconciled safely.');
     window.dispatchEvent(new Event(DESKTOP_REMINDER_REFRESH_EVENT));
   });
 
@@ -342,17 +342,141 @@ export default function DesktopSettings({
             </label>
           </div>
 
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-slate-900">Daily and Weekly email reports</h4>
+                <p className="mt-1 text-sm text-slate-600">
+                  Times use the persisted timezone above. Saving a preference does not configure
+                  a provider or send an email.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={preferences.emailEnabled}
+                  onChange={(event) => setPreferences((current) => ({
+                    ...current,
+                    emailEnabled: event.target.checked,
+                    dailyReport: event.target.checked
+                      ? current.dailyReport
+                      : { ...current.dailyReport, enabled: false },
+                    weeklyReport: event.target.checked
+                      ? current.weeklyReport
+                      : { ...current.weeklyReport, enabled: false },
+                  }))}
+                />
+                Enable email reports
+              </label>
+            </div>
+
+            <label className="mt-4 block max-w-xl text-sm font-semibold text-slate-800">
+              Report recipient
+              <input
+                aria-label="Report recipient"
+                type="email"
+                autoComplete="email"
+                value={preferences.reportRecipient ?? ''}
+                onChange={(event) => setPreferences((current) => ({
+                  ...current,
+                  reportRecipient: event.target.value || null,
+                }))}
+                placeholder="name@example.com"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal"
+              />
+            </label>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={preferences.dailyReport.enabled}
+                    disabled={!preferences.emailEnabled}
+                    onChange={(event) => setPreferences((current) => ({
+                      ...current,
+                      dailyReport: { ...current.dailyReport, enabled: event.target.checked },
+                    }))}
+                  />
+                  Daily Report
+                </label>
+                <label className="mt-3 block text-sm text-slate-700">
+                  Delivery time
+                  <input
+                    aria-label="Daily Report time"
+                    type="time"
+                    value={preferences.dailyReport.localTime}
+                    onChange={(event) => setPreferences((current) => ({
+                      ...current,
+                      dailyReport: { ...current.dailyReport, localTime: event.target.value },
+                    }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={preferences.weeklyReport.enabled}
+                    disabled={!preferences.emailEnabled}
+                    onChange={(event) => setPreferences((current) => ({
+                      ...current,
+                      weeklyReport: { ...current.weeklyReport, enabled: event.target.checked },
+                    }))}
+                  />
+                  Weekly Report
+                </label>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <label className="text-sm text-slate-700">
+                    Day
+                    <select
+                      aria-label="Weekly Report day"
+                      value={preferences.weeklyReport.isoWeekday}
+                      onChange={(event) => setPreferences((current) => ({
+                        ...current,
+                        weeklyReport: {
+                          ...current.weeklyReport,
+                          isoWeekday: Number(event.target.value),
+                        },
+                      }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                    >
+                      {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                        .map((day, index) => <option key={day} value={index + 1}>{day}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    Time
+                    <input
+                      aria-label="Weekly Report time"
+                      type="time"
+                      value={preferences.weeklyReport.localTime}
+                      onChange={(event) => setPreferences((current) => ({
+                        ...current,
+                        weeklyReport: { ...current.weeklyReport, localTime: event.target.value },
+                      }))}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={saveReminderPolicy}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {busyAction === 'reminder-policy' ? 'Saving…' : 'Save reminder policy'}
+            {busyAction === 'reminder-policy' ? 'Saving…' : 'Save notification preferences'}
           </button>
         </fieldset>
 
         <p className="mt-4 text-xs text-slate-500">
-          WhatsApp and email remain off until their backend providers are configured and verified.
+          WhatsApp and email delivery remain off until you enable them. Provider deployment and
+          credentials are separate backend-only gates.
         </p>
       </div>
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const NOTIFICATION_SCHEMA_VERSION = 'notification-preferences-v1' as const;
+export const NOTIFICATION_SCHEMA_VERSION = 'notification-preferences-v2' as const;
 export const REMINDER_JOB_SCHEMA_VERSION = 'reminder-job-v1' as const;
 export const REMINDER_TASK_SCHEMA_VERSION = 'reminder-task-v1' as const;
 export const PRODUCT_TIMEZONE_FALLBACK = 'Europe/Rome' as const;
@@ -25,6 +25,7 @@ export interface NotificationPreferences {
   readonly desktopEnabled: boolean;
   readonly whatsappEnabled: boolean;
   readonly emailEnabled: boolean;
+  readonly reportRecipient: string | null;
   readonly reminderOffsetsMinutes: readonly number[];
   readonly atStartEnabled: boolean;
   readonly missedStart: Readonly<{
@@ -150,6 +151,17 @@ export function normalizeNotificationPreferences(
   const missedSource = asRecord(source?.missedStart);
   const dailySource = asRecord(source?.dailyReport);
   const weeklySource = asRecord(source?.weeklyReport);
+  const requestedDailyTime = dailySource?.localTime;
+  const requestedWeeklyTime = weeklySource?.localTime;
+  const requestedWeeklyDay = weeklySource?.isoWeekday;
+  const dailyTimeValid = validClock(requestedDailyTime);
+  const weeklyTimeValid = validClock(requestedWeeklyTime);
+  const weeklyDayValid = typeof requestedWeeklyDay === 'number'
+    && Number.isInteger(requestedWeeklyDay)
+    && requestedWeeklyDay >= 1
+    && requestedWeeklyDay <= 7;
+  const reportRecipient = normalizedReportRecipient(source?.reportRecipient);
+  const emailEnabled = source?.emailEnabled === true && reportRecipient !== null;
 
   return Object.freeze({
     schemaVersion: NOTIFICATION_SCHEMA_VERSION,
@@ -163,7 +175,8 @@ export function normalizeNotificationPreferences(
     }),
     desktopEnabled: source?.desktopEnabled === true,
     whatsappEnabled: source?.whatsappEnabled === true,
-    emailEnabled: source?.emailEnabled === true,
+    emailEnabled,
+    reportRecipient,
     reminderOffsetsMinutes: Object.freeze(normalizeOffsets(source?.reminderOffsetsMinutes)),
     atStartEnabled: source?.atStartEnabled !== false,
     missedStart: Object.freeze({
@@ -172,13 +185,13 @@ export function normalizeNotificationPreferences(
     }),
     maxRemindersPerBlock: boundedInteger(source?.maxRemindersPerBlock, 1, 8, 3),
     dailyReport: Object.freeze({
-      enabled: dailySource?.enabled === true,
-      localTime: validClock(dailySource?.localTime) ? dailySource.localTime : '22:30',
+      enabled: emailEnabled && dailySource?.enabled === true && dailyTimeValid,
+      localTime: dailyTimeValid ? requestedDailyTime : '22:30',
     }),
     weeklyReport: Object.freeze({
-      enabled: weeklySource?.enabled === true,
-      isoWeekday: boundedInteger(weeklySource?.isoWeekday, 1, 7, 7),
-      localTime: validClock(weeklySource?.localTime) ? weeklySource.localTime : '20:30',
+      enabled: emailEnabled && weeklySource?.enabled === true && weeklyTimeValid && weeklyDayValid,
+      isoWeekday: weeklyDayValid ? requestedWeeklyDay : 7,
+      localTime: weeklyTimeValid ? requestedWeeklyTime : '20:30',
     }),
   });
 }
@@ -509,6 +522,20 @@ function validLocale(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function normalizedReportRecipient(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 254 || value !== value.trim()) return null;
+  if (!/^[^\s@<>]{1,64}@[^\s@<>]{1,185}$/.test(value) || /[\r\n\u0000]/.test(value)) {
+    return null;
+  }
+  const domain = value.slice(value.lastIndexOf('@') + 1);
+  return domain.length >= 3
+    && !domain.startsWith('.')
+    && !domain.endsWith('.')
+    && domain.includes('.')
+    ? value
+    : null;
 }
 
 function validClock(value: unknown): value is string {

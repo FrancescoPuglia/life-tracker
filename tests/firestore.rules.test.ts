@@ -147,6 +147,15 @@ function notificationPreferences(uid: string, extra: Record<string, unknown> = {
   };
 }
 
+function notificationPreferencesV2(uid: string, extra: Record<string, unknown> = {}) {
+  return {
+    ...notificationPreferences(uid),
+    schemaVersion: 'notification-preferences-v2',
+    reportRecipient: null,
+    ...extra,
+  };
+}
+
 function reportArchive(uid: string, id: string, extra: Record<string, unknown> = {}) {
   return {
     schemaVersion: 'scientific-report-archive-v1',
@@ -482,6 +491,17 @@ describe('Firestore user isolation rules', () => {
       reminderOffsetsMinutes: [60, 15],
       updatedAt: new Date('2026-08-10T09:00:00.000Z'),
     }));
+    await assertSucceeds(updateDoc(preferences, {
+      schemaVersion: 'notification-preferences-v2',
+      reportRecipient: null,
+      updatedAt: new Date('2026-08-10T09:30:00.000Z'),
+    }));
+    await assertSucceeds(updateDoc(preferences, {
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '22:30' },
+      updatedAt: new Date('2026-08-10T10:00:00.000Z'),
+    }));
     await assertSucceeds(deleteDoc(preferences));
   });
 
@@ -503,10 +523,28 @@ describe('Firestore user isolation rules', () => {
     await assertFails(setDoc(preferences, notificationPreferences('alice', {
       quietHours: { enabled: true, start: '25:00', end: '07:00' },
     })));
+    await assertFails(setDoc(preferences, notificationPreferencesV2('alice', {
+      emailEnabled: true,
+      reportRecipient: null,
+    })));
+    await assertFails(setDoc(preferences, notificationPreferencesV2('alice', {
+      reportRecipient: 'invalid\nrecipient@example.com',
+    })));
+    await assertFails(setDoc(preferences, notificationPreferencesV2('alice', {
+      dailyReport: { enabled: true, localTime: '22:30' },
+    })));
 
     await assertSucceeds(setDoc(preferences, notificationPreferences('alice')));
     await assertFails(updateDoc(preferences, { schemaVersion: 'forged-v2' }));
     await assertFails(updateDoc(preferences, { userId: 'bob' }));
+    await assertSucceeds(updateDoc(preferences, {
+      schemaVersion: 'notification-preferences-v2',
+      reportRecipient: null,
+    }));
+    await assertFails(updateDoc(preferences, {
+      schemaVersion: 'notification-preferences-v1',
+      reportRecipient: null,
+    }));
     const bobDb = testEnv.authenticatedContext('bob').firestore();
     await assertFails(getDoc(doc(bobDb, 'users/alice/notificationPreferences/default')));
     await assertFails(updateDoc(
