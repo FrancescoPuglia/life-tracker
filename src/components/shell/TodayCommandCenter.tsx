@@ -1,45 +1,84 @@
 'use client';
 
-// src/components/shell/TodayCommandCenter.tsx
-// Minimal "Today" dashboard composed exclusively from data already loaded
-// by the DataProvider — no new fetches, no new persistence, no new logic.
-//
-// Sections:
-//   1. Today Mission        — active / next block, top 3 tasks, focus CTA
-//   2. Execution Pulse      — planned vs completed minutes, streak
-//   3. Strategic Goals      — top active goals, at-risk count
-//   4. Weekly Intelligence  — quick link with planned vs completed minutes
-//   5. Quick Actions        — Goal Architect / Weekly / Add Block / Time Planner
-
-import { useMemo, type ReactNode } from 'react';
-import type { Goal, Project, Task, TimeBlock } from '@/types';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
+import type { Goal, Project, Session, Task, TimeBlock } from '@/types';
 import type { StreakData } from '@/lib/streakCalculator';
+import type { DesktopNativeStatus } from '@/lib/desktop/nativeBridge';
+import type { EditableNotificationPreferences } from '@/lib/notifications/preferences';
+import {
+  computeTodayExecutionMetrics,
+  type TodaySessionCoverage,
+} from '@/lib/todayExecution';
+
+type PreferenceStatus = 'loading' | 'ready' | 'error';
 
 export interface TodayCommandCenterProps {
-  /** Real-time clock to keep "active block" math testable. Defaults to `new Date()`. */
+  /** Fixed clock for tests. Without it, the view refreshes every 30 seconds. */
   now?: Date;
+  ownerUid: string;
+  timezone: string;
+  locale: string;
+  preferenceStatus: PreferenceStatus;
+  reminderPreferences: EditableNotificationPreferences;
+  nativeStatus: DesktopNativeStatus;
   timeBlocks: ReadonlyArray<TimeBlock>;
+  sessions: ReadonlyArray<Session>;
+  sessionCoverage: TodaySessionCoverage;
+  currentSessionStatus?: Session['status'] | null;
   tasks: ReadonlyArray<Task>;
   goals: ReadonlyArray<Goal>;
   projects: ReadonlyArray<Project>;
   streakData: StreakData;
   onOpenTab: (tabId: string) => void;
-  onStartFocus?: () => void;
+  onOpenAskAI: () => void;
+  onStartFocus: (taskId?: string, timeBlockId?: string) => void;
+  onQuickCapture: (text: string) => Promise<void>;
 }
 
 export default function TodayCommandCenter({
-  now = new Date(),
+  now,
+  ownerUid,
+  timezone,
+  locale,
+  preferenceStatus,
+  reminderPreferences,
+  nativeStatus,
   timeBlocks,
+  sessions,
+  sessionCoverage,
+  currentSessionStatus = null,
   tasks,
   goals,
   projects,
   streakData,
   onOpenTab,
+  onOpenAskAI,
   onStartFocus,
+  onQuickCapture,
 }: TodayCommandCenterProps) {
+  const [liveNow, setLiveNow] = useState(() => new Date());
+  useEffect(() => {
+    if (now) return undefined;
+    const interval = window.setInterval(() => setLiveNow(new Date()), 30_000);
+    return () => window.clearInterval(interval);
+  }, [now]);
+  const effectiveNow = now ?? liveNow;
   const todayMetrics = useMemo(
-    () => computeTodayMetrics(now, timeBlocks),
-    [now, timeBlocks],
+    () => computeTodayExecutionMetrics({
+      now: effectiveNow,
+      ownerUid,
+      timezone,
+      timeBlocks,
+      sessions,
+      sessionCoverage,
+    }),
+    [effectiveNow, ownerUid, sessionCoverage, sessions, timeBlocks, timezone],
   );
   const topTasks = useMemo(() => pickTopTasks(tasks), [tasks]);
   const goalsView = useMemo(() => summarizeGoals(goals), [goals]);
@@ -53,90 +92,126 @@ export default function TodayCommandCenter({
       <Hero
         active={todayMetrics.active}
         next={todayMetrics.next}
+        currentSessionStatus={currentSessionStatus}
+        sessionCoverage={sessionCoverage}
+        onOpenAskAI={onOpenAskAI}
         onStartFocus={onStartFocus}
       />
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <TodayMissionCard
-          topTasks={topTasks}
-          onOpenTab={onOpenTab}
-        />
+        <TodayMissionCard topTasks={topTasks} onOpenTab={onOpenTab} />
         <ExecutionPulseCard
-          plannedMinutes={todayMetrics.plannedMinutes}
-          completedMinutes={todayMetrics.completedMinutes}
-          completionPct={todayMetrics.completionPct}
+          metrics={todayMetrics}
           streak={streakData.currentStreak}
           bestStreak={streakData.bestStreak}
         />
         <StrategicGoalsCard goals={goalsView} onOpenTab={onOpenTab} />
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-3">
+        <UpcomingCommitmentsCard
+          blocks={todayMetrics.upcoming.slice(0, 3)}
+          locale={locale}
+          timezone={timezone}
+          onOpenTab={onOpenTab}
+        />
+        <ReminderStatusCard
+          preferences={reminderPreferences}
+          preferenceStatus={preferenceStatus}
+          nativeStatus={nativeStatus}
+          onOpenSettings={() => onOpenTab('settings')}
+        />
+        <QuickCaptureCard onCapture={onQuickCapture} onOpenNotes={() => onOpenTab('notes')} />
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
-        <WeeklyIntelligenceSnapshot
+        <ExecutionSnapshot
           plannedMinutes={todayMetrics.plannedMinutes}
-          completedMinutes={todayMetrics.completedMinutes}
+          actualMinutes={todayMetrics.actualMinutes}
+          actualAvailability={todayMetrics.actualAvailability}
           onOpenTab={onOpenTab}
         />
         <QuickActions
           onOpenTab={onOpenTab}
-          projectsCount={projects.length}
-          goalsCount={goals.length}
+          onOpenAskAI={onOpenAskAI}
+          projectsCount={projects.filter((project) => !project.deleted).length}
+          goalsCount={goals.filter((goal) => !goal.deleted).length}
         />
       </div>
     </section>
   );
 }
 
-// ============================================================================
-// HERO
-// ============================================================================
-
-interface HeroProps {
+function Hero({
+  active,
+  next,
+  currentSessionStatus,
+  sessionCoverage,
+  onOpenAskAI,
+  onStartFocus,
+}: {
   active: TimeBlock | undefined;
   next: TimeBlock | undefined;
-  onStartFocus?: () => void;
-}
-
-function Hero({ active, next, onStartFocus }: HeroProps) {
+  currentSessionStatus: Session['status'] | null;
+  sessionCoverage: TodaySessionCoverage;
+  onOpenAskAI: () => void;
+  onStartFocus: (taskId?: string, timeBlockId?: string) => void;
+}) {
+  const sessionActive = currentSessionStatus === 'active';
+  const sessionPaused = currentSessionStatus === 'paused';
+  const sessionAuthorityReady = sessionCoverage === 'ready' || sessionPaused;
+  let startLabel = active ? 'Start current block' : 'Start unplanned session';
+  if (sessionPaused) startLabel = 'Resume session';
+  if (!sessionAuthorityReady) {
+    startLabel = sessionCoverage === 'loading' ? 'Checking Sessions' : 'Sessions unavailable';
+  }
+  if (sessionActive) startLabel = 'Session active';
   return (
     <header
       data-testid="today-hero"
       className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 px-6 py-5 shadow-sm"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] uppercase tracking-wider font-semibold text-blue-700">
-            Today
-          </p>
-          <h2 className="mt-1 text-2xl font-bold text-gray-900">
-            What matters now
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 max-w-2xl">
-            One screen with the active block, the next block, and the few
-            things worth doing today.
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">Today</p>
+          <h2 className="mt-1 text-2xl font-bold text-gray-900">What matters now</h2>
+          <p className="mt-1 max-w-2xl text-sm text-gray-600">
+            Your current block, tracked execution, reminders, and next commitments in one place.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2 text-sm">
           <StatusLine
             label="Active"
-            value={active ? active.title : 'No active block'}
+            value={active?.title ?? 'No active block'}
             tone={active ? 'emerald' : 'neutral'}
           />
           <StatusLine
             label="Next"
-            value={next ? next.title : 'No upcoming block'}
+            value={next?.title ?? 'No upcoming block'}
             tone={next ? 'blue' : 'neutral'}
           />
-          {onStartFocus && (
+          <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
-              onClick={onStartFocus}
-              data-testid="today-start-focus"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:from-emerald-700 hover:to-blue-700 transition"
+              onClick={onOpenAskAI}
+              data-testid="today-ask-ai"
+              className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
             >
-              ▶ Start focus
+              Ask AI
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => onStartFocus(
+                sessionPaused ? undefined : active?.taskId,
+                sessionPaused ? undefined : active?.id,
+              )}
+              disabled={sessionActive || !sessionAuthorityReady}
+              data-testid="today-start-focus"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:from-emerald-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              ▶ {startLabel}
+            </button>
+          </div>
         </div>
       </div>
     </header>
@@ -152,49 +227,43 @@ function StatusLine({
   value: string;
   tone: 'emerald' | 'blue' | 'neutral';
 }) {
-  const cls =
-    tone === 'emerald'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-      : tone === 'blue'
-        ? 'border-blue-200 bg-blue-50 text-blue-700'
-        : 'border-gray-200 bg-gray-50 text-gray-600';
+  const cls = tone === 'emerald'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : tone === 'blue'
+      ? 'border-blue-200 bg-blue-50 text-blue-700'
+      : 'border-gray-200 bg-gray-50 text-gray-600';
   return (
-    <span
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${cls}`}
-    >
+    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${cls}`}>
       <span className="opacity-70">{label}</span>
-      <span className="font-semibold max-w-[200px] truncate">{value}</span>
+      <span className="max-w-[220px] truncate font-semibold">{value}</span>
     </span>
   );
 }
 
-// ============================================================================
-// CARDS
-// ============================================================================
-
-interface TodayMissionCardProps {
+function TodayMissionCard({
+  topTasks,
+  onOpenTab,
+}: {
   topTasks: ReadonlyArray<Task>;
   onOpenTab: (tabId: string) => void;
-}
-
-function TodayMissionCard({ topTasks, onOpenTab }: TodayMissionCardProps) {
+}) {
   return (
     <Card title="Today Mission" subtitle="Top 3 priorities">
       {topTasks.length === 0 ? (
         <EmptyHint
-          message="No prioritized tasks for today."
+          message="No prioritized tasks are open."
           ctaLabel="Open Goals & Projects"
           onCta={() => onOpenTab('okr')}
         />
       ) : (
         <ul className="space-y-1.5">
-          {topTasks.map((t) => (
+          {topTasks.map((task) => (
             <li
-              key={t.id}
-              className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs flex items-center justify-between gap-2"
+              key={task.id}
+              className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs"
             >
-              <span className="truncate font-medium text-gray-800">{t.title}</span>
-              <PriorityChip priority={t.priority} />
+              <span className="truncate font-medium text-gray-800">{task.title}</span>
+              <PriorityChip priority={task.priority} />
             </li>
           ))}
         </ul>
@@ -205,58 +274,100 @@ function TodayMissionCard({ topTasks, onOpenTab }: TodayMissionCardProps) {
 
 function PriorityChip({ priority }: { priority: Task['priority'] | undefined }) {
   if (!priority) return null;
-  const cls =
-    priority === 'critical'
-      ? 'border-rose-200 bg-rose-50 text-rose-700'
-      : priority === 'high'
-        ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : priority === 'medium'
-          ? 'border-sky-200 bg-sky-50 text-sky-700'
-          : 'border-slate-200 bg-slate-50 text-slate-700';
+  const cls = priority === 'critical'
+    ? 'border-rose-200 bg-rose-50 text-rose-700'
+    : priority === 'high'
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : priority === 'medium'
+        ? 'border-sky-200 bg-sky-50 text-sky-700'
+        : 'border-slate-200 bg-slate-50 text-slate-700';
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
-    >
+    <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>
       {priority}
     </span>
   );
 }
 
-interface ExecutionPulseProps {
-  plannedMinutes: number;
-  completedMinutes: number;
-  completionPct: number;
+function ExecutionPulseCard({
+  metrics,
+  streak,
+  bestStreak,
+}: {
+  metrics: ReturnType<typeof computeTodayExecutionMetrics>;
   streak: number;
   bestStreak: number;
-}
-
-function ExecutionPulseCard(p: ExecutionPulseProps) {
+}) {
+  const complete = metrics.actualAvailability === 'complete';
+  const qualityMessage = executionQualityMessage(metrics);
+  const progress = metrics.adherencePct === null
+    ? 0
+    : Math.min(100, Math.max(0, Math.round(metrics.adherencePct)));
   return (
-    <Card title="Execution Pulse" subtitle="Today vs plan">
-      <div className="space-y-2 text-xs">
-        <Row label="Planned today" value={`${minutesLabel(p.plannedMinutes)}`} />
-        <Row label="Completed" value={`${minutesLabel(p.completedMinutes)}`} />
-        <Row label="Completion" value={`${Math.round(p.completionPct)}%`} highlight />
-        <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+    <Card title="Execution Pulse" subtitle="Persisted evidence only">
+      <div className="space-y-2 text-xs" data-testid="today-execution-pulse">
+        <Row label="Planned today" value={minutesLabel(metrics.plannedMinutes)} />
+        <Row
+          label={complete ? 'Tracked actual' : 'Known actual'}
+          value={metrics.actualMinutes === null ? 'Unavailable' : minutesLabel(metrics.actualMinutes)}
+        />
+        <Row
+          label="Adherence"
+          value={metrics.adherencePct === null ? '—' : `${Math.round(metrics.adherencePct)}%`}
+          highlight
+        />
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100" aria-hidden="true">
           <div
             className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
-            style={{ width: `${Math.min(100, Math.max(0, Math.round(p.completionPct)))}%` }}
+            style={{ width: `${progress}%` }}
           />
         </div>
-        <Row label="Streak" value={`${p.streak} days · best ${p.bestStreak}`} />
+        <p
+          className={complete ? 'text-[11px] text-emerald-700' : 'text-[11px] text-amber-700'}
+          data-testid="today-execution-quality"
+        >
+          {qualityMessage}
+        </p>
+        <Row label="Streak" value={`${streak} days · best ${bestStreak}`} />
       </div>
     </Card>
   );
 }
 
-interface StrategicGoalsCardProps {
-  goals: GoalsView;
-  onOpenTab: (tabId: string) => void;
+function executionQualityMessage(
+  metrics: ReturnType<typeof computeTodayExecutionMetrics>,
+): string {
+  if (metrics.actualAvailability === 'loading') return 'Loading persisted Sessions…';
+  if (metrics.actualAvailability === 'unavailable') {
+    return 'Session data is unavailable; execution is not reported as zero.';
+  }
+  if (metrics.actualAvailability === 'complete') {
+    return 'Actual time comes from completed Sessions or explicit actual intervals.';
+  }
+  const issues: string[] = [];
+  if (metrics.blocksMissingActualCount > 0) {
+    issues.push(`${metrics.blocksMissingActualCount} executed block${metrics.blocksMissingActualCount === 1 ? '' : 's'} missing actual evidence`);
+  }
+  if (metrics.openSessionCount > 0) {
+    issues.push(`${metrics.openSessionCount} open Session${metrics.openSessionCount === 1 ? '' : 's'} excluded`);
+  }
+  if (metrics.invalidActualSourceCount > 0) {
+    issues.push(`${metrics.invalidActualSourceCount} invalid actual source${metrics.invalidActualSourceCount === 1 ? '' : 's'} excluded`);
+  }
+  if (metrics.invalidPlannedBlockCount > 0) {
+    issues.push(`${metrics.invalidPlannedBlockCount} invalid planned block${metrics.invalidPlannedBlockCount === 1 ? '' : 's'} excluded`);
+  }
+  return `Partial data: ${issues.join('; ')}.`;
 }
 
-function StrategicGoalsCard({ goals, onOpenTab }: StrategicGoalsCardProps) {
+function StrategicGoalsCard({
+  goals,
+  onOpenTab,
+}: {
+  goals: GoalsView;
+  onOpenTab: (tabId: string) => void;
+}) {
   return (
-    <Card title="Strategic Goals" subtitle="Top focus this quarter">
+    <Card title="Strategic Goals" subtitle="Top active focus">
       {goals.active.length === 0 ? (
         <EmptyHint
           message="No active goals yet."
@@ -266,21 +377,18 @@ function StrategicGoalsCard({ goals, onOpenTab }: StrategicGoalsCardProps) {
       ) : (
         <>
           <ul className="space-y-1.5">
-            {goals.active.slice(0, 3).map((g) => (
+            {goals.active.slice(0, 3).map((goal) => (
               <li
-                key={g.id}
-                className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs flex items-center justify-between gap-2"
+                key={goal.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs"
               >
-                <span className="truncate font-medium text-gray-800">{g.title}</span>
-                <PriorityChip priority={g.priority} />
+                <span className="truncate font-medium text-gray-800">{goal.title}</span>
+                <PriorityChip priority={goal.priority} />
               </li>
             ))}
           </ul>
           {goals.atRiskCount > 0 && (
-            <p
-              className="mt-2 text-[11px] text-amber-700"
-              data-testid="today-at-risk"
-            >
+            <p className="mt-2 text-[11px] text-amber-700" data-testid="today-at-risk">
               ⚠ {goals.atRiskCount} goal{goals.atRiskCount === 1 ? '' : 's'} at risk
             </p>
           )}
@@ -290,88 +398,237 @@ function StrategicGoalsCard({ goals, onOpenTab }: StrategicGoalsCardProps) {
   );
 }
 
-interface WeeklySnapshotProps {
-  plannedMinutes: number;
-  completedMinutes: number;
-  onOpenTab: (tabId: string) => void;
-}
-
-function WeeklyIntelligenceSnapshot({
-  plannedMinutes,
-  completedMinutes,
+function UpcomingCommitmentsCard({
+  blocks,
+  locale,
+  timezone,
   onOpenTab,
-}: WeeklySnapshotProps) {
-  const empty = plannedMinutes === 0 && completedMinutes === 0;
+}: {
+  blocks: readonly TimeBlock[];
+  locale: string;
+  timezone: string;
+  onOpenTab: (tabId: string) => void;
+}) {
   return (
-    <Card
-      title="Weekly Intelligence Snapshot"
-      subtitle="Planned vs completed minutes (today)"
-    >
-      {empty ? (
+    <Card title="Upcoming Commitments" subtitle="Next three today">
+      {blocks.length === 0 ? (
         <EmptyHint
-          message="No planned blocks yet this week."
-          ctaLabel="Generate Weekly Plan"
-          onCta={() => onOpenTab('weekly_intel')}
+          message="No more commitments today."
+          ctaLabel="Open Time Planner"
+          onCta={() => onOpenTab('planner')}
         />
       ) : (
-        <div className="space-y-2 text-xs">
-          <Row label="Planned" value={minutesLabel(plannedMinutes)} />
-          <Row label="Completed" value={minutesLabel(completedMinutes)} highlight />
-          <button
-            type="button"
-            onClick={() => onOpenTab('weekly_intel')}
-            className="mt-1 inline-flex items-center gap-2 text-xs font-medium text-blue-700 hover:text-blue-900"
-            data-testid="today-open-weekly-intel"
-          >
-            Open Weekly Intelligence →
-          </button>
-        </div>
+        <ul className="space-y-2" data-testid="today-upcoming-commitments">
+          {blocks.map((block) => (
+            <li key={block.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs">
+              <p className="truncate font-semibold text-slate-800">{block.title}</p>
+              <p className="mt-0.5 text-slate-500">
+                {formatTime(block.startTime, locale, timezone)}–{formatTime(block.endTime, locale, timezone)}
+              </p>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );
 }
 
-interface QuickActionsProps {
-  onOpenTab: (tabId: string) => void;
-  projectsCount: number;
-  goalsCount: number;
+function ReminderStatusCard({
+  preferences,
+  preferenceStatus,
+  nativeStatus,
+  onOpenSettings,
+}: {
+  preferences: EditableNotificationPreferences;
+  preferenceStatus: PreferenceStatus;
+  nativeStatus: DesktopNativeStatus;
+  onOpenSettings: () => void;
+}) {
+  const desktopState = preferenceStatus === 'loading'
+    ? 'loading'
+    : preferenceStatus === 'error'
+      ? 'unavailable'
+      : !preferences.desktopEnabled
+        ? 'disabled'
+        : nativeStatus.notificationPermission === 'granted'
+          ? 'ready'
+          : `permission ${nativeStatus.notificationPermission}`;
+  return (
+    <Card title="Reminder State" subtitle="Policy and native permission">
+      <div className="space-y-2 text-xs" data-testid="today-reminder-state">
+        <Row label="Desktop" value={desktopState} highlight={desktopState === 'ready'} />
+        <Row
+          label="Before block"
+          value={preferences.reminderOffsetsMinutes.map((minutes) => `${minutes}m`).join(', ')}
+        />
+        <Row label="At start" value={preferences.atStartEnabled ? 'enabled' : 'disabled'} />
+        <Row
+          label="Missed start"
+          value={preferences.missedStart.enabled
+            ? `after ${preferences.missedStart.afterMinutes}m`
+            : 'disabled'}
+        />
+        <Row
+          label="Quiet hours"
+          value={preferences.quietHours.enabled
+            ? `${preferences.quietHours.start}–${preferences.quietHours.end}`
+            : 'disabled'}
+        />
+        <div className="flex flex-wrap gap-1 pt-1 text-[10px]">
+          <ChannelChip label="WhatsApp" enabled={preferences.whatsappEnabled} />
+          <ChannelChip label="Email" enabled={preferences.emailEnabled} />
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+            {preferences.timezone}
+          </span>
+        </div>
+        {preferenceStatus === 'error' && (
+          <p className="text-[11px] text-amber-700">
+            Preferences could not be read; shown values are fallback only.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="pt-1 text-xs font-medium text-blue-700 hover:text-blue-900"
+        >
+          Open reminder settings →
+        </button>
+      </div>
+    </Card>
+  );
 }
 
-function QuickActions({ onOpenTab, projectsCount, goalsCount }: QuickActionsProps) {
+function ChannelChip({ label, enabled }: { label: string; enabled: boolean }) {
+  return (
+    <span className={enabled
+      ? 'rounded-full bg-emerald-50 px-2 py-1 text-emerald-700'
+      : 'rounded-full bg-slate-100 px-2 py-1 text-slate-500'}>
+      {label} {enabled ? 'on' : 'off'}
+    </span>
+  );
+}
+
+function QuickCaptureCard({
+  onCapture,
+  onOpenNotes,
+}: {
+  onCapture: (text: string) => Promise<void>;
+  onOpenNotes: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!text.trim() || status === 'saving') return;
+    setStatus('saving');
+    try {
+      await onCapture(text);
+      setText('');
+      setStatus('saved');
+    } catch {
+      setStatus('error');
+    }
+  };
+  return (
+    <Card title="Quick Capture" subtitle="Save an untrusted note, never an instruction">
+      <form onSubmit={submit} className="space-y-2">
+        <label htmlFor="today-quick-capture" className="sr-only">Quick capture note</label>
+        <textarea
+          id="today-quick-capture"
+          aria-label="Quick capture note"
+          value={text}
+          maxLength={1_000}
+          rows={3}
+          onChange={(event) => {
+            setText(event.target.value);
+            if (status !== 'saving') setStatus('idle');
+          }}
+          placeholder="Capture a thought or commitment…"
+          className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+        />
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={onOpenNotes}
+            className="text-xs font-medium text-blue-700 hover:text-blue-900"
+          >
+            Open notes
+          </button>
+          <button
+            type="submit"
+            disabled={!text.trim() || status === 'saving'}
+            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {status === 'saving' ? 'Saving…' : 'Capture'}
+          </button>
+        </div>
+        {status === 'saved' && <p role="status" className="text-[11px] text-emerald-700">Captured in Notes.</p>}
+        {status === 'error' && (
+          <p role="alert" className="text-[11px] text-rose-700">
+            Capture failed safely. Tracking data was not changed.
+          </p>
+        )}
+      </form>
+    </Card>
+  );
+}
+
+function ExecutionSnapshot({
+  plannedMinutes,
+  actualMinutes,
+  actualAvailability,
+  onOpenTab,
+}: {
+  plannedMinutes: number;
+  actualMinutes: number | null;
+  actualAvailability: ReturnType<typeof computeTodayExecutionMetrics>['actualAvailability'];
+  onOpenTab: (tabId: string) => void;
+}) {
+  return (
+    <Card title="Execution Snapshot" subtitle="Today, before the scientific report">
+      <div className="space-y-2 text-xs">
+        <Row label="Planned" value={minutesLabel(plannedMinutes)} />
+        <Row
+          label={actualAvailability === 'complete' ? 'Tracked actual' : 'Known actual'}
+          value={actualMinutes === null ? 'Unavailable' : minutesLabel(actualMinutes)}
+          highlight
+        />
+        <button
+          type="button"
+          onClick={() => onOpenTab('reports')}
+          className="mt-1 inline-flex items-center gap-2 text-xs font-medium text-blue-700 hover:text-blue-900"
+          data-testid="today-open-reports"
+        >
+          Open scientific reports →
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function QuickActions({
+  onOpenTab,
+  onOpenAskAI,
+  projectsCount,
+  goalsCount,
+}: {
+  onOpenTab: (tabId: string) => void;
+  onOpenAskAI: () => void;
+  projectsCount: number;
+  goalsCount: number;
+}) {
   return (
     <Card title="Quick Actions" subtitle="Jump to what you need">
-      <div
-        className="grid grid-cols-1 sm:grid-cols-2 gap-2"
-        data-testid="today-quick-actions"
-      >
-        <ActionTile
-          icon="🏗️"
-          label="Create Goal"
-          subtitle="Use Goal Architect"
-          onClick={() => onOpenTab('goal_architect')}
-        />
-        <ActionTile
-          icon="🧭"
-          label="Plan Week"
-          subtitle="Weekly Intelligence"
-          onClick={() => onOpenTab('weekly_intel')}
-        />
-        <ActionTile
-          icon="📅"
-          label="Time Planner"
-          subtitle="Add a time block"
-          onClick={() => onOpenTab('planner')}
-        />
-        <ActionTile
-          icon="📈"
-          label="Review Week"
-          subtitle="Weekly Execution"
-          onClick={() => onOpenTab('weekly')}
-        />
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="today-quick-actions">
+        <ActionTile icon="✨" label="Ask AI" subtitle="Secure assistant" onClick={onOpenAskAI} />
+        <ActionTile icon="🏗️" label="Create Goal" subtitle="Goal Architect" onClick={() => onOpenTab('goal_architect')} />
+        <ActionTile icon="🧭" label="Plan Week" subtitle="Weekly Intelligence" onClick={() => onOpenTab('weekly_intel')} />
+        <ActionTile icon="📅" label="Time Planner" subtitle="Add a TimeBlock" onClick={() => onOpenTab('planner')} />
+        <ActionTile icon="📈" label="Review Week" subtitle="Weekly Execution" onClick={() => onOpenTab('weekly')} />
+        <ActionTile icon="⚙️" label="Settings" subtitle="Reminders and reports" onClick={() => onOpenTab('settings')} />
       </div>
       <p className="mt-3 text-[11px] text-gray-400">
-        {goalsCount} active goal{goalsCount === 1 ? '' : 's'} · {projectsCount}{' '}
-        project{projectsCount === 1 ? '' : 's'}.
+        {goalsCount} goal{goalsCount === 1 ? '' : 's'} · {projectsCount} project{projectsCount === 1 ? '' : 's'}.
       </p>
     </Card>
   );
@@ -392,20 +649,16 @@ function ActionTile({
     <button
       type="button"
       onClick={onClick}
-      className="text-left rounded-lg border border-gray-100 bg-white px-3 py-2.5 hover:border-blue-200 hover:bg-blue-50/40 transition"
+      className="rounded-lg border border-gray-100 bg-white px-3 py-2.5 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
     >
       <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
         <span>{icon}</span>
         <span>{label}</span>
       </div>
-      <p className="text-[11px] text-gray-500 mt-0.5">{subtitle}</p>
+      <p className="mt-0.5 text-[11px] text-gray-500">{subtitle}</p>
     </button>
   );
 }
-
-// ============================================================================
-// SHARED PRIMITIVES
-// ============================================================================
 
 function Card({
   title,
@@ -417,12 +670,10 @@ function Card({
   children: ReactNode;
 }) {
   return (
-    <article className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-      <header className="px-4 py-3 border-b border-gray-100">
+    <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <header className="border-b border-gray-100 px-4 py-3">
         <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        {subtitle && (
-          <p className="text-[11px] text-gray-500 mt-0.5">{subtitle}</p>
-        )}
+        {subtitle && <p className="mt-0.5 text-[11px] text-gray-500">{subtitle}</p>}
       </header>
       <div className="px-4 py-3">{children}</div>
     </article>
@@ -439,15 +690,11 @@ function Row({
   highlight?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between gap-3">
       <span className="text-gray-500">{label}</span>
-      <span
-        className={
-          highlight
-            ? 'font-semibold text-gray-900 tabular-nums'
-            : 'text-gray-700 tabular-nums'
-        }
-      >
+      <span className={highlight
+        ? 'text-right font-semibold tabular-nums text-gray-900'
+        : 'text-right tabular-nums text-gray-700'}>
         {value}
       </span>
     </div>
@@ -469,7 +716,7 @@ function EmptyHint({
       <button
         type="button"
         onClick={onCta}
-        className="mt-1.5 inline-flex items-center gap-1 text-blue-700 font-medium hover:text-blue-900"
+        className="mt-1.5 inline-flex items-center gap-1 font-medium text-blue-700 hover:text-blue-900"
       >
         {ctaLabel} →
       </button>
@@ -477,109 +724,44 @@ function EmptyHint({
   );
 }
 
-// ============================================================================
-// PURE LOGIC
-// ============================================================================
-
-interface TodayMetrics {
-  active: TimeBlock | undefined;
-  next: TimeBlock | undefined;
-  plannedMinutes: number;
-  completedMinutes: number;
-  completionPct: number;
-}
-
-function computeTodayMetrics(
-  now: Date,
-  timeBlocks: ReadonlyArray<TimeBlock>,
-): TodayMetrics {
-  const todayKey = now.toDateString();
-  const todayBlocks = timeBlocks.filter(
-    (b) => !b.deleted && new Date(b.startTime).toDateString() === todayKey,
-  );
-
-  const active = todayBlocks.find((b) => {
-    const start = new Date(b.startTime).getTime();
-    const end = new Date(b.endTime).getTime();
-    return (
-      start <= now.getTime() && end >= now.getTime() && b.status !== 'completed'
-    );
-  });
-  const next = todayBlocks
-    .filter((b) => new Date(b.startTime).getTime() > now.getTime())
-    .sort(
-      (a, b) =>
-        new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
-    )[0];
-
-  const plannedMinutes = todayBlocks.reduce(
-    (sum, b) =>
-      sum +
-      Math.max(
-        0,
-        (new Date(b.endTime).getTime() - new Date(b.startTime).getTime()) /
-          (1000 * 60),
-      ),
-    0,
-  );
-  const completedMinutes = todayBlocks
-    .filter((b) => b.status === 'completed')
-    .reduce(
-      (sum, b) =>
-        sum +
-        Math.max(
-          0,
-          (new Date(b.actualEndTime ?? b.endTime).getTime() -
-            new Date(b.actualStartTime ?? b.startTime).getTime()) /
-            (1000 * 60),
-        ),
-      0,
-    );
-  const completionPct =
-    plannedMinutes > 0 ? (completedMinutes / plannedMinutes) * 100 : 0;
-
-  return {
-    active,
-    next,
-    plannedMinutes: Math.round(plannedMinutes),
-    completedMinutes: Math.round(completedMinutes),
-    completionPct,
-  };
-}
-
 function pickTopTasks(tasks: ReadonlyArray<Task>): Task[] {
-  const PRIORITY_WEIGHT: Record<NonNullable<Task['priority']>, number> = {
+  const weights: Record<NonNullable<Task['priority']>, number> = {
     critical: 4,
     high: 3,
     medium: 2,
     low: 1,
   };
   return tasks
-    .filter((t) => !t.deleted && t.status !== 'completed' && t.status !== 'cancelled')
+    .filter((task) => !task.deleted && task.status !== 'completed' && task.status !== 'cancelled')
     .slice()
-    .sort((a, b) => {
-      const wa = a.priority ? PRIORITY_WEIGHT[a.priority] : 0;
-      const wb = b.priority ? PRIORITY_WEIGHT[b.priority] : 0;
-      return wb - wa;
-    })
+    .sort((left, right) => weights[right.priority] - weights[left.priority])
     .slice(0, 3);
 }
 
 interface GoalsView {
-  active: ReadonlyArray<Goal>;
-  atRiskCount: number;
+  readonly active: ReadonlyArray<Goal>;
+  readonly atRiskCount: number;
 }
 
 function summarizeGoals(goals: ReadonlyArray<Goal>): GoalsView {
-  const live = goals.filter((g) => !g.deleted);
-  const active = live.filter((g) => g.status === 'active');
-  const atRiskCount = live.filter((g) => g.status === 'at_risk').length;
-  return { active, atRiskCount };
+  const live = goals.filter((goal) => !goal.deleted);
+  return {
+    active: live.filter((goal) => goal.status === 'active'),
+    atRiskCount: live.filter((goal) => goal.status === 'at_risk').length,
+  };
 }
 
-function minutesLabel(m: number): string {
-  if (!Number.isFinite(m) || m < 0) return '0 min';
-  if (m < 60) return `${m} min`;
-  const h = m / 60;
-  return Number.isInteger(h) ? `${h} h` : `${h.toFixed(1)} h`;
+function formatTime(date: Date, locale: string, timezone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function minutesLabel(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes < 0) return '0 min';
+  if (minutes < 60) return `${minutes} min`;
+  const hours = minutes / 60;
+  return Number.isInteger(hours) ? `${hours} h` : `${hours.toFixed(1)} h`;
 }

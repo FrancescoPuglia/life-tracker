@@ -142,8 +142,11 @@ export class SessionManager {
       throw new Error('userId is required to start a session');
     }
 
-    if (this.currentSession && this.currentSession.status === 'active') {
-      throw new Error('A session is already active. Stop or pause the current session first.');
+    if (
+      this.currentSession
+      && (this.currentSession.status === 'active' || this.currentSession.status === 'paused')
+    ) {
+      throw new Error('A session is already in progress. Resume or stop it before starting another.');
     }
 
     // 🎯 INTELLIGENCE: Auto-detect domain from timeblock
@@ -309,6 +312,25 @@ export class SessionManager {
   }
 
   getCurrentSession(): Session | null {
+    return this.currentSession;
+  }
+
+  restoreCurrentSession(session: Session | null, ownerUid: string): Session | null {
+    if (!ownerUid) throw new Error('Authenticated owner is required to restore a session.');
+    if (session === null) {
+      this.currentSession = null;
+      return null;
+    }
+    if (
+      session.userId !== ownerUid
+      || session.deleted === true
+      || (session.status !== 'active' && session.status !== 'paused')
+      || !(session.startTime instanceof Date)
+      || !Number.isFinite(session.startTime.getTime())
+    ) {
+      throw new Error('Persisted session cannot be restored for this owner.');
+    }
+    this.currentSession = session;
     return this.currentSession;
   }
 

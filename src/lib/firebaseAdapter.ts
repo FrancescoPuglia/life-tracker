@@ -152,7 +152,6 @@ export class FirebaseAdapter implements DatabaseAdapter {
       dataId: data.id,
       firestore: !!firestore,
       isInitialized: this.isInitialized,
-      data
     });
     
     if (!firestore || !this.isInitialized) {

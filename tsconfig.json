@@ -37,6 +37,9 @@
   "exclude": [
     "node_modules",
     "worktrees",
-    "functions"
+    "functions",
+    "functions-mcp",
+    "functions-reminders",
+    "functions-reports"
   ]
 }

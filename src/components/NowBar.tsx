@@ -6,7 +6,9 @@ import { Session, TimeBlock } from '@/types';
 interface NowBarProps {
   currentSession?: Session | null;
   currentTimeBlock?: TimeBlock | null;
-  onStartSession: (taskId?: string) => void;
+  nextTimeBlock?: TimeBlock | null;
+  sessionStateReady?: boolean;
+  onStartSession: (taskId?: string, timeBlockId?: string) => void;
   onPauseSession: () => void;
   onStopSession: () => void;
 }
@@ -14,6 +16,8 @@ interface NowBarProps {
 export default function NowBar({ 
   currentSession, 
   currentTimeBlock, 
+  nextTimeBlock,
+  sessionStateReady = true,
   onStartSession, 
   onPauseSession, 
   onStopSession 
@@ -63,11 +67,6 @@ export default function NowBar({
       minute: '2-digit',
       second: '2-digit'
     });
-  };
-
-  const getNextBlock = (): TimeBlock | null => {
-    // This would typically come from props or context
-    return null; // Placeholder
   };
 
   return (
@@ -147,11 +146,12 @@ export default function NowBar({
           <div className="flex items-center space-x-3">
             {!currentSession ? (
               <button
-                onClick={() => onStartSession()}
-                className="btn-futuristic bg-gradient-to-r from-green-500 to-emerald-600 flex items-center space-x-2 pulse-glow"
+                onClick={() => onStartSession(currentTimeBlock?.taskId, currentTimeBlock?.id)}
+                disabled={!sessionStateReady}
+                className="btn-futuristic bg-gradient-to-r from-green-500 to-emerald-600 flex items-center space-x-2 pulse-glow disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span>▶️</span>
-                <span>START POWER</span>
+                <span>{sessionStateReady ? 'START POWER' : 'CHECKING SESSIONS'}</span>
               </button>
             ) : currentSession.status === 'active' ? (
               <>
@@ -182,7 +182,7 @@ export default function NowBar({
           <div className="text-sm">
             <div className="text-xs font-medium text-gray-500 mb-1">NEXT UP:</div>
             <div className="text-gray-900">
-              {getNextBlock()?.title || 'No upcoming blocks'}
+              {nextTimeBlock?.title || 'No upcoming blocks'}
             </div>
           </div>
         </div>

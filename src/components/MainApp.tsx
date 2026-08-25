@@ -25,6 +25,21 @@ import BlockCountdown from '@/components/BlockCountdown';
 import { audioManager } from '@/lib/audioManager';
 import { calculateStreak, StreakData } from '@/lib/streakCalculator';
 import { getVoiceService } from '@/lib/voice/voiceService';
+import {
+  defaultNotificationPreferences,
+  notificationPreferencesStore,
+  type EditableNotificationPreferences,
+} from '@/lib/notifications/preferences';
+import {
+  desktopNativeBridge,
+  type DesktopNativeStatus,
+} from '@/lib/desktop/nativeBridge';
+import { DESKTOP_REMINDER_REFRESH_EVENT } from '@/lib/desktop/reminderCoordinator';
+import {
+  buildQuickCaptureNote,
+  completedSessionNetMinutes,
+  type TodaySessionCoverage,
+} from '@/lib/todayExecution';
 
 // Lazy-loaded heavy components (loaded on demand by tab)
 // This reduces initial bundle size by ~400KB
@@ -64,6 +79,12 @@ interface MainAppProps {
   buildId: string;
 }
 
+const UNAVAILABLE_NATIVE_STATUS: DesktopNativeStatus = Object.freeze({
+  available: false,
+  notificationPermission: 'unavailable',
+  autostartEnabled: null,
+});
+
 // ============================================================================
 // MAIN APP COMPONENT
 // ============================================================================
@@ -80,11 +101,21 @@ export default function MainApp({ buildId }: MainAppProps) {
   const [selectedGoalId, setSelectedGoalId] = useState<string | undefined>();
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('90d'); // Changed to 90 days to capture all data
   const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
+  const [sessionActionError, setSessionActionError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(() => audioManager.isEnabled());
   
   // Session state
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [currentTimeBlock, setCurrentTimeBlock] = useState<TimeBlock | null>(null);
+  const [nextTimeBlock, setNextTimeBlock] = useState<TimeBlock | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionCoverage, setSessionCoverage] = useState<TodaySessionCoverage>('loading');
+  const [notificationPreferences, setNotificationPreferences] =
+    useState<EditableNotificationPreferences>(defaultNotificationPreferences);
+  const [preferenceStatus, setPreferenceStatus] =
+    useState<'loading' | 'ready' | 'error'>('loading');
+  const [nativeStatus, setNativeStatus] =
+    useState<DesktopNativeStatus>(UNAVAILABLE_NATIVE_STATUS);
   
   // Analytics (loaded separately, after main data)
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
@@ -113,18 +144,90 @@ export default function MainApp({ buildId }: MainAppProps) {
 
   const sessionManager = SessionManager.getInstance();
 
+  const reloadSessions = useCallback(async () => {
+    setSessionCoverage('loading');
+    try {
+      const raw = await db.getByIndex<Session>('sessions', 'userId', data.userId);
+      const ownerSessions = raw.filter((session) => session.userId === data.userId && !session.deleted);
+      const resumable = ownerSessions
+        .filter((session) => (
+          (session.status === 'active' || session.status === 'paused')
+          && session.startTime instanceof Date
+          && Number.isFinite(session.startTime.getTime())
+        ))
+        .slice()
+        .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+      const restored = sessionManager.restoreCurrentSession(resumable[0] ?? null, data.userId);
+      setSessions(ownerSessions);
+      setCurrentSession(restored);
+      setSessionCoverage('ready');
+    } catch {
+      const existing = sessionManager.getCurrentSession();
+      const safeExisting = existing
+        && existing.userId === data.userId
+        && !existing.deleted
+        && (existing.status === 'active' || existing.status === 'paused')
+          ? existing
+          : sessionManager.restoreCurrentSession(null, data.userId);
+      setSessions([]);
+      setCurrentSession(safeExisting);
+      setSessionCoverage('error');
+    }
+  }, [data.userId, sessionManager]);
+
+  const reloadTodayRuntimeStatus = useCallback(async () => {
+    setPreferenceStatus('loading');
+    const [preferencesResult, nativeResult] = await Promise.allSettled([
+      notificationPreferencesStore.load(data.userId),
+      desktopNativeBridge.readStatus(),
+    ]);
+    if (preferencesResult.status === 'fulfilled') {
+      setNotificationPreferences(preferencesResult.value);
+      setPreferenceStatus('ready');
+    } else {
+      setNotificationPreferences(defaultNotificationPreferences());
+      setPreferenceStatus('error');
+    }
+    setNativeStatus(
+      nativeResult.status === 'fulfilled'
+        ? nativeResult.value
+        : UNAVAILABLE_NATIVE_STATUS,
+    );
+  }, [data.userId]);
+
   // ========== EFFECTS ==========
+
+  useEffect(() => {
+    if (data.status !== 'ready') return;
+    void reloadSessions();
+  }, [data.status, reloadSessions]);
+
+  useEffect(() => {
+    if (data.status !== 'ready') return undefined;
+    void reloadTodayRuntimeStatus();
+    const refresh = () => { void reloadTodayRuntimeStatus(); };
+    window.addEventListener(DESKTOP_REMINDER_REFRESH_EVENT, refresh);
+    return () => window.removeEventListener(DESKTOP_REMINDER_REFRESH_EVENT, refresh);
+  }, [data.status, reloadTodayRuntimeStatus]);
   
   // Update current time block
   useEffect(() => {
     const updateCurrentTimeBlock = () => {
       const now = new Date();
-      const activeBlock = data.timeBlocks.find(block => 
-        block.startTime <= now && 
-        block.endTime >= now && 
-        block.status !== 'completed'
+      const liveBlocks = data.timeBlocks
+        .filter((block) => (
+          !block.deleted
+          && block.status !== 'completed'
+          && block.status !== 'cancelled'
+        ))
+        .slice()
+        .sort((left, right) => left.startTime.getTime() - right.startTime.getTime());
+      const activeBlock = liveBlocks.find((block) =>
+        block.startTime <= now && block.endTime > now,
       );
+      const upcomingBlock = liveBlocks.find((block) => block.startTime > now);
       setCurrentTimeBlock(activeBlock || null);
+      setNextTimeBlock(upcomingBlock || null);
     };
 
     updateCurrentTimeBlock();
@@ -187,42 +290,55 @@ export default function MainApp({ buildId }: MainAppProps) {
     return () => clearTimeout(timeout);
   }, [timeRange, data.userId, data.status]);
 
-  // Compute real user stats from actual data for badges
+  // Badge execution stats use persisted completed Sessions only. Missing or
+  // unavailable Sessions never fall back to planned TimeBlock windows.
   useEffect(() => {
-    if (data.status !== 'ready') return;
-
-    const completedBlocks = data.timeBlocks.filter(b => b.status === 'completed' && !b.deleted);
-    const totalFocusMinutes = completedBlocks.reduce((sum, b) => {
-      const start = b.actualStartTime || b.startTime;
-      const end = b.actualEndTime || b.endTime;
-      return sum + (end.getTime() - start.getTime()) / (1000 * 60);
-    }, 0);
-
-    const activeDays = new Set(completedBlocks.map(b => new Date(b.startTime).toDateString()));
+    if (data.status !== 'ready' || sessionCoverage !== 'ready') return;
+    const completedSessions = sessions
+      .map((session) => ({ session, minutes: completedSessionNetMinutes(session) }))
+      .filter((item): item is { session: Session; minutes: number } => item.minutes !== null);
+    const totalFocusMinutes = completedSessions.reduce((sum, item) => sum + item.minutes, 0);
+    const dayFormatter = new Intl.DateTimeFormat('en-CA-u-ca-iso8601-nu-latn', {
+      timeZone: notificationPreferences.timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const hourFormatter = new Intl.DateTimeFormat('en-US-u-nu-latn', {
+      timeZone: notificationPreferences.timezone,
+      hour: '2-digit',
+      hourCycle: 'h23',
+    });
+    const activeDays = new Set(
+      completedSessions.map(({ session }) => dayFormatter.format(session.startTime)),
+    );
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    const weeklyFocusMinutes = completedBlocks
-      .filter(b => new Date(b.startTime) >= oneWeekAgo)
-      .reduce((sum, b) => {
-        const start = b.actualStartTime || b.startTime;
-        const end = b.actualEndTime || b.endTime;
-        return sum + (end.getTime() - start.getTime()) / (1000 * 60);
-      }, 0);
-
-    const earlyBlocks = completedBlocks.filter(b => new Date(b.startTime).getHours() < 8);
-    const eveningBlocks = completedBlocks.filter(b => new Date(b.startTime).getHours() >= 20);
+    const weeklyFocusMinutes = completedSessions
+      .filter(({ session }) => session.startTime >= oneWeekAgo)
+      .reduce((sum, item) => sum + item.minutes, 0);
+    const localHour = (session: Session) => Number(hourFormatter.format(session.startTime));
+    const earlySessions = completedSessions.filter(({ session }) => localHour(session) < 8);
+    const eveningSessions = completedSessions.filter(({ session }) => localHour(session) >= 20);
 
     setUserStats(prev => ({
       maxStreak: Math.max(prev.maxStreak, streakData.bestStreak),
       totalFocusMinutes: Math.round(totalFocusMinutes),
       goalsCompleted: data.goals.filter(g => g.status === 'completed').length,
-      totalSessions: completedBlocks.length,
+      totalSessions: completedSessions.length,
       daysTracked: activeDays.size,
-      earlySessionsCount: earlyBlocks.length,
-      eveningSessionsCount: eveningBlocks.length,
+      earlySessionsCount: earlySessions.length,
+      eveningSessionsCount: eveningSessions.length,
       weeklyFocusMinutes: Math.round(weeklyFocusMinutes),
     }));
-  }, [data.status, data.timeBlocks, data.goals, streakData.bestStreak]);
+  }, [
+    data.status,
+    data.goals,
+    notificationPreferences.timezone,
+    sessionCoverage,
+    sessions,
+    streakData.bestStreak,
+  ]);
 
   // Calculate streak from real activity data
   useEffect(() => {
@@ -268,37 +384,59 @@ export default function MainApp({ buildId }: MainAppProps) {
   }, []);
 
   // ========== SESSION HANDLERS ==========
+  const refreshExecutionState = async () => {
+    await Promise.allSettled([
+      reloadSessions(),
+      data.refreshTimeBlocks(),
+    ]);
+  };
+
   const handleStartSession = async (taskId?: string, timeBlockId?: string) => {
+    setSessionActionError(null);
     try {
-      const session = await sessionManager.startSession(taskId, timeBlockId, 'default', data.userId);
+      const session = currentSession?.status === 'paused'
+        ? await sessionManager.resumeSession()
+        : await sessionManager.startSession(taskId, timeBlockId, 'default', data.userId);
+      if (!session) throw new Error('Session did not start.');
       setCurrentSession(session);
       audioManager.buttonFeedback();
-    } catch (error) {
-      console.error('Failed to start session:', error);
+      await refreshExecutionState();
+    } catch {
+      setSessionActionError('The Session could not be started safely. No completion was recorded.');
     }
   };
 
   const handlePauseSession = async () => {
+    setSessionActionError(null);
     try {
       const session = await sessionManager.pauseSession();
       setCurrentSession(session);
-    } catch (error) {
-      console.error('Failed to pause session:', error);
+      await refreshExecutionState();
+    } catch {
+      setSessionActionError('The Session could not be paused. Its persisted state was not assumed.');
     }
   };
 
   const handleStopSession = async () => {
+    setSessionActionError(null);
     try {
       const completedSession = await sessionManager.stopSession();
       setCurrentSession(null);
       
       if (completedSession) {
-        data.refreshKPIs();
+        await refreshExecutionState();
+        void data.refreshKPIs();
       }
-    } catch (error) {
-      console.error('Failed to stop session:', error);
+    } catch {
+      setSessionActionError('The Session could not be stopped safely. Reload before trying again.');
     }
   };
+
+  const handleQuickCapture = useCallback(async (text: string) => {
+    const note = buildQuickCaptureNote(text);
+    const noteId = await data.createNote(note);
+    if (!noteId) throw new Error('Quick capture was not persisted.');
+  }, [data]);
 
   // ========== TIMEBLOCK WRAPPER (adds error handling) ==========
   const handleCreateTimeBlock = useCallback(async (blockData: Partial<TimeBlock>) => {
@@ -420,6 +558,8 @@ export default function MainApp({ buildId }: MainAppProps) {
             <NowBar
               currentSession={currentSession}
               currentTimeBlock={currentTimeBlock}
+              nextTimeBlock={nextTimeBlock}
+              sessionStateReady={sessionCoverage === 'ready'}
               onStartSession={handleStartSession}
               onPauseSession={handlePauseSession}
               onStopSession={handleStopSession}
@@ -481,14 +621,33 @@ export default function MainApp({ buildId }: MainAppProps) {
                 
                 {/* Content */}
                 {activeTab === 'today' && (
-                  <TodayCommandCenter
-                    timeBlocks={data.timeBlocks}
-                    tasks={data.tasks}
-                    goals={data.goals}
-                    projects={data.projects}
-                    streakData={streakData}
-                    onOpenTab={(id) => setActiveTab(id as ActiveTab)}
-                  />
+                  <>
+                    {sessionActionError && (
+                      <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+                        {sessionActionError}
+                      </div>
+                    )}
+                    <TodayCommandCenter
+                      ownerUid={data.userId}
+                      timezone={notificationPreferences.timezone}
+                      locale={notificationPreferences.locale}
+                      preferenceStatus={preferenceStatus}
+                      reminderPreferences={notificationPreferences}
+                      nativeStatus={nativeStatus}
+                      timeBlocks={data.timeBlocks}
+                      sessions={sessions}
+                      sessionCoverage={sessionCoverage}
+                      currentSessionStatus={currentSession?.status ?? null}
+                      tasks={data.tasks}
+                      goals={data.goals}
+                      projects={data.projects}
+                      streakData={streakData}
+                      onOpenTab={(id) => setActiveTab(id as ActiveTab)}
+                      onOpenAskAI={() => setAiDrawerOpen(true)}
+                      onStartFocus={handleStartSession}
+                      onQuickCapture={handleQuickCapture}
+                    />
+                  </>
                 )}
 
                 {activeTab === 'planner' && (

@@ -227,6 +227,7 @@ interface DataContextValue {
   
   // Utils
   loadTimeBlocksForDate: (date: Date) => Promise<void>;
+  refreshTimeBlocks: () => Promise<void>;
   refreshKPIs: () => Promise<void>;
 }
 
@@ -1075,6 +1076,15 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     }
   }, [userId]);
 
+  const refreshTimeBlocks = useCallback(async () => {
+    const rawTimeBlocks = await db.getAll<TimeBlock>('timeBlocks');
+    setTimeBlocks(
+      rawTimeBlocks
+        .map(deserializeTimeBlock)
+        .filter((block) => block.userId === userId),
+    );
+  }, [userId]);
+
 
   // ========== NOTE CRUD ==========
   const createNote = useCallback(async (data: Partial<Note>): Promise<string | undefined> => {
@@ -1276,6 +1286,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     deleteGoalRoadmap,
     getOrCreateRoadmapForGoal,
     loadTimeBlocksForDate,
+    refreshTimeBlocks,
     refreshKPIs,
   }), [
     status, userId, timeBlocks, goals, keyResults, projects, tasks, habits, habitLogs, kpis,
@@ -1289,7 +1300,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     createNote, updateNote, deleteNote, getNotesForEntity,
     createNoteTemplate, updateNoteTemplate, deleteNoteTemplate,
     createGoalRoadmap, updateGoalRoadmap, deleteGoalRoadmap, getOrCreateRoadmapForGoal,
-    loadTimeBlocksForDate, refreshKPIs,
+    loadTimeBlocksForDate, refreshTimeBlocks, refreshKPIs,
 
   ]);
 
