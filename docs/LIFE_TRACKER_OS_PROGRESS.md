@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `318d7a6384fe6e313412e4d216ebbeea32d7cbc7`
+- Current implementation checkpoint SHA: `3238e217d956229648175034861f27e88c7c1d04`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -505,6 +505,46 @@ slice changes one of those trust boundaries.
   terminated or overwritten. No Function, Rules, index, API, IAM, billing,
   provider, message, production resource, or Firebase data changed.
 
+### R4 deterministic scientific metric and report domain
+
+- Green implementation commit: `3238e217d956229648175034861f27e88c7c1d04`.
+- Added versioned deterministic metric, report, formula, and chart-data
+  contracts for Daily and Weekly execution reports. Every metric carries its
+  availability, numerator, denominator, sample size, missing count, exact
+  formula, and source. Partial known values are distinguishable from complete
+  totals; unavailable values remain `null`.
+- Report periods use the persisted planning timezone and the sole product
+  fallback `Europe/Rome`. Daily/weekly half-open instants are Temporal-derived,
+  Monday-first, and proven across 23-hour and 25-hour Europe/Rome DST days.
+- Actual time uses completed persisted Sessions (`duration` is seconds) and
+  explicit block actual intervals only when no valid linked Session exists.
+  Planned windows never become actual-time fallback. Open Sessions,
+  contradictory durations, completed blocks without actual evidence, missing
+  Sessions, and truncated inputs are explicit data-quality conditions; missing
+  Sessions are never silently reported as zero productivity.
+- Implemented planned/actual/adherence/variance, Task and TimeBlock completion,
+  Goal target/planned/actual allocation, Goal Alignment Index, deep work,
+  cadence-bounded habit adherence, carryover, start delay, measured overrun,
+  block estimation error, time-of-day/weekday completion, capacity utilization,
+  four-week trends, and a versioned Weekly Execution Index. Schedule volatility
+  remains explicitly unavailable because the current schema has no defensible
+  reschedule history; `updatedAt` is not misused as schedule evidence.
+- Daily and Weekly deterministic fallback reports classify statements as
+  OBSERVED/DERIVED/INFERENCE/RECOMMENDATION with period, N, missing count,
+  baseline, confidence, and uncertainty. Time-of-day inference requires bounded
+  sample/effect thresholds, says association rather than causation, and proposes
+  only a two-week experiment. Hostile user labels remain bounded untrusted
+  display data and cannot change formulas or statement authority.
+- Chart data is derived only from the immutable metric bundle. Each chart binds
+  the exact metric SHA-256 and its own canonical data SHA-256, so a renderer or
+  model cannot invent/recalculate values. Report identity is owner-bound and
+  retry-stable over owner/type/local-period without exposing the UID.
+- Added `docs/SCIENTIFIC_REPORT_METRICS.md` as the formula/denominator source of
+  truth. This slice performs no Firestore read/write, archive mutation,
+  scheduler registration, chart rendering, LLM/provider call, email send,
+  secret access, deployment, API/IAM/billing change, or production action. It
+  does not export a new runtime endpoint.
+
 ## Evidence
 
 | Check | Result |
@@ -604,13 +644,17 @@ slice changes one of those trust boundaries.
 | New NSIS installer | 2,380,685 bytes; SHA-256 `e2a69bdea9ad6b3e93be6e8455f97f619aaefb33ae61329385eeeeb9d640bd3d` |
 | New binary credential scan | PASS; bounded OpenAI/Resend/private-key signatures absent in executable and installer |
 | New current-user install/notification acceptance | NOT RUN; WSL/Windows interop timed out after build, and the staging backend changes are not deployed |
+| Scientific report focused domain tests | PASS; 16/16 DST, Session precedence, explicit actual, missing-data, goal alignment, Task/Habit denominator, hostile text, chart-hash, report identity, tomorrow-risk, order-stability, and bound tests |
+| Functions regression after report domain | PASS; 27 files / 319 unit tests; 5 emulator files / 63 tests intentionally skipped outside explicit emulator gates |
+| Scientific report type/build gate | PASS; strict Functions typecheck and production bundle; existing 511.3 kB runtime surface unchanged because no report endpoint is exported |
+| Scientific report security/hygiene | PASS; static security, high-confidence changed-material credential scan, `git diff --check`, cached diff check, and exact nine-file staged review |
 
 ## Release status
 
 - R1 Desktop Beta using verified staging: IN PROGRESS
 - R2 Production Desktop: READ-ONLY AUDIT COMPLETE; PROMOTION NOT STARTED
 - R3 Native and cloud reminders: IN PROGRESS — deterministic domain, persistence, reconciliation, task adapter, at-most-once service, Firestore delivery claims/receipts/status, named private worker, authoritative triggers/refill, Twilio adapter/signed callback, and authenticated native coordinator/policy are green; staging deployment and installed/live delivery remain pending
-- R4 Daily and weekly reports: NOT STARTED
+- R4 Daily and weekly reports: IN PROGRESS — deterministic metrics, Daily/Weekly fallback contracts, chart data/hashes, formula specification, and scientific statement discipline are green; owner-scoped source/archive persistence, rendering, scheduling, email provider, and live delivery remain pending
 - R5 WhatsApp Sandbox and production-ready path: IN PROGRESS — provider, signed delivery-status persistence, disabled-by-default runtime binding, and named worker/callback are green locally/emulator; Sandbox join/configuration, cloud deployment, and real delivery pending
 - R6 ChatGPT read integration: NOT STARTED
 - R7 Pages removal and repository privacy conversion: NOT STARTED
@@ -638,14 +682,16 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Continue independent local/emulator work with R4: implement the deterministic,
-versioned Daily/Weekly scientific metric and report domain first, including
-explicit missing-data semantics, formula/denominator documentation, timezone
-boundaries, data-quality flags, idempotency, and chart data contracts. Do not
-call an LLM, email provider, chart SaaS, scheduler, or Firebase project in that
-slice. Keep cloud/provider configuration disabled; do not read secret values,
-enable APIs/billing, create provider secrets, send messages, or deploy any
-resource.
+Continue independent local/emulator R4 work with the owner-scoped report data
+and archive boundary. Add bounded complete source reads for the report,
+four-week, and tomorrow horizons; server-authored versioned report artifacts;
+atomic user/type/local-period idempotency; provider-independent delivery state;
+and Firestore Rules proving clients cannot forge archives/delivery metadata.
+Expose only the minimally necessary owner-readable report history contract.
+Keep rendering, scheduler registration, email/LLM providers, and all cloud
+deployment disabled in that slice. Do not read secret values, enable
+APIs/billing, create provider secrets, send messages, or mutate any Firebase
+project.
 
 After exact human approval, separately deploy only `lifeTrackerAiApi` to the
 explicit `life-tracker-staging` project, verify runtime attestation and exact
