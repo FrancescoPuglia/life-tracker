@@ -337,6 +337,20 @@ service cloud.firestore {
           && resource.data.userId == uid;
       }
 
+      // Generated scientific reports are immutable client-side. Owners may
+      // read their own artifacts and query history only when the embedded
+      // owner is constrained, preventing a corrupt/misplaced document leak.
+      match /reportArchives/{documentId} {
+        allow get: if ownsPath(uid)
+          && resource.data.userId == uid
+          && resource.data.id == documentId;
+
+        allow list: if ownsPath(uid)
+          && resource.data.userId == uid;
+
+        allow create, update, delete: if false;
+      }
+
       // Defense in depth: these resources are written only by the backend via
       // the Admin SDK, which bypasses Firestore Security Rules.
       match /aiChangePlans/{document=**} {
@@ -381,6 +395,12 @@ service cloud.firestore {
       match /providerDeliveryStatuses/{document=**} {
         allow read, write: if false;
       }
+      match /reportIdempotency/{document=**} {
+        allow read, write: if false;
+      }
+      match /reportDeliveryAttempts/{document=**} {
+        allow read, write: if false;
+      }
     }
 
     match /aiChangePlans/{document=**} {
@@ -408,6 +428,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /reminderApiRateLimits/{document=**} {
+      allow read, write: if false;
+    }
+    match /reportArchives/{document=**} {
+      allow read, write: if false;
+    }
+    match /reportIdempotency/{document=**} {
+      allow read, write: if false;
+    }
+    match /reportDeliveryAttempts/{document=**} {
       allow read, write: if false;
     }
 

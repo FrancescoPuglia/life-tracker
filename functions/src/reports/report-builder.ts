@@ -15,23 +15,14 @@ import type {
   WeeklyExecutionReport,
 } from './types';
 import {
+  REPORT_DATASET_LIMITS,
   REPORT_FORMULA_VERSION,
   REPORT_METRIC_SCHEMA_VERSION,
   REPORT_SCHEMA_VERSION,
 } from './types';
 
-const REPORT_DATASET_LIMITS = Object.freeze({
-  goals: 1_000,
-  projects: 2_000,
-  tasks: 5_000,
-  timeBlocks: 5_000,
-  sessions: 5_000,
-  habits: 1_000,
-  habitLogs: 5_000,
-});
-
 function assertUid(uid: string): void {
-  if (uid.length < 1 || uid.length > 128 || /[\u0000-\u001f\u007f]/.test(uid)) {
+  if (!/^[A-Za-z0-9:_-]{1,128}$/.test(uid)) {
     throw new Error('Invalid authenticated report owner.');
   }
 }
@@ -67,7 +58,8 @@ function normalizeLocale(value: string): string {
   }
 }
 
-function ownerHash(uid: string): string {
+export function reportOwnerHash(uid: string): string {
+  assertUid(uid);
   return createHash('sha256').update(`life-tracker-report-owner-v1\0${uid}`).digest('hex');
 }
 
@@ -172,7 +164,7 @@ function commonReport(
   return {
     schemaVersion: REPORT_SCHEMA_VERSION,
     id: reportIdempotencyKey(input.uid, input.reportType, metrics.period.localStartDate),
-    ownerHash: ownerHash(input.uid),
+    ownerHash: reportOwnerHash(input.uid),
     generatedAt: normalizedGeneratedAt(input.generatedAt),
     locale: normalizeLocale(input.locale),
     period: metrics.period,

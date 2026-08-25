@@ -13,6 +13,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
   setDoc,
   updateDoc,
@@ -66,6 +68,8 @@ const SERVER_ONLY_COLLECTIONS = [
   'providerDeliveryStatuses',
   'reminderProviderCallbackRoutes',
   'reminderApiRateLimits',
+  'reportIdempotency',
+  'reportDeliveryAttempts',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [
@@ -138,6 +142,19 @@ function notificationPreferences(uid: string, extra: Record<string, unknown> = {
     weeklyReport: { enabled: false, isoWeekday: 7, localTime: '20:30' },
     createdAt: new Date('2026-08-10T08:00:00.000Z'),
     updatedAt: new Date('2026-08-10T08:00:00.000Z'),
+    ...extra,
+  };
+}
+
+function reportArchive(uid: string, id: string, extra: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 'scientific-report-archive-v1',
+    id,
+    userId: uid,
+    type: 'daily',
+    localStartDate: '2026-08-10',
+    localEndDate: '2026-08-11',
+    generatedAt: new Date('2026-08-10T20:30:00.000Z'),
     ...extra,
   };
 }
@@ -495,6 +512,56 @@ describe('Firestore user isolation rules', () => {
       doc(bobDb, 'users/alice/notificationPreferences/default'),
       { desktopEnabled: false },
     ));
+  });
+
+  it('allows only immutable owner-scoped report archive reads and constrained history', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(
+        doc(db, 'users/alice/reportArchives/report_alice'),
+        reportArchive('alice', 'report_alice'),
+      );
+      await setDoc(
+        doc(db, 'users/bob/reportArchives/report_bob'),
+        reportArchive('bob', 'report_bob'),
+      );
+      await setDoc(
+        doc(db, 'users/alice/reportArchives/report_forged'),
+        reportArchive('bob', 'report_forged'),
+      );
+    });
+
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    const bobDb = testEnv.authenticatedContext('bob').firestore();
+    const ownArchive = doc(aliceDb, 'users/alice/reportArchives/report_alice');
+
+    await assertSucceeds(getDoc(ownArchive));
+    await assertSucceeds(getDocs(query(
+      collection(aliceDb, 'users/alice/reportArchives'),
+      where('userId', '==', 'alice'),
+      orderBy('generatedAt', 'desc'),
+      limit(20),
+    )));
+    await assertFails(getDocs(collection(aliceDb, 'users/alice/reportArchives')));
+    await assertFails(getDocs(query(
+      collection(aliceDb, 'users/alice/reportArchives'),
+      where('userId', '==', 'bob'),
+    )));
+    await assertFails(getDoc(doc(
+      aliceDb,
+      'users/alice/reportArchives/report_forged',
+    )));
+    await assertFails(getDoc(doc(
+      bobDb,
+      'users/alice/reportArchives/report_alice',
+    )));
+    await assertFails(setDoc(
+      doc(aliceDb, 'users/alice/reportArchives/report_client'),
+      reportArchive('alice', 'report_client'),
+    ));
+    await assertFails(updateDoc(ownArchive, { metricHash: 'client-forgery' }));
+    await assertFails(deleteDoc(ownArchive));
+    await assertFails(getDoc(doc(aliceDb, 'reportArchives/report_alice')));
   });
 
   it.each(SERVER_ONLY_COLLECTIONS)(

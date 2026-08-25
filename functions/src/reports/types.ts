@@ -4,6 +4,15 @@ export const REPORT_METRIC_SCHEMA_VERSION = 'life-tracker-scientific-metrics-v1'
 export const REPORT_SCHEMA_VERSION = 'life-tracker-scientific-report-v1' as const;
 export const REPORT_CHART_SCHEMA_VERSION = 'life-tracker-report-chart-v1' as const;
 export const REPORT_FORMULA_VERSION = 'life-tracker-report-formulas-2026-08-25' as const;
+export const REPORT_DATASET_LIMITS = Object.freeze({
+  goals: 1_000,
+  projects: 2_000,
+  tasks: 5_000,
+  timeBlocks: 5_000,
+  sessions: 5_000,
+  habits: 1_000,
+  habitLogs: 5_000,
+});
 
 export type ScientificReportType = 'daily' | 'weekly';
 export type DatasetCoverage = 'complete' | 'truncated' | 'unavailable';

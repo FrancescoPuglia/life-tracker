@@ -31,6 +31,14 @@
         { "fieldPath": "state", "order": "ASCENDING" },
         { "fieldPath": "scheduledFor", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "reportArchives",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "generatedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -122,6 +130,11 @@
       "collectionGroup": "reminderApiRateLimits",
       "fieldPath": "expiresAt",
       "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "reportArchives",
+      "fieldPath": "report",
       "indexes": []
     }
   ]
