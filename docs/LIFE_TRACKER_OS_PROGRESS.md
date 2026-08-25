@@ -7,7 +7,7 @@ Last updated: 2026-08-25 (Europe/Rome)
 - Repository: `FrancescoPuglia/life-tracker`
 - Working branch: `codex/life-tracker-os`
 - Master starting SHA: `df99a6c2e1f06beb4fd9a6cb18e6565c5b25400b`
-- Current implementation checkpoint SHA: `be60085a9b6b01fd842e90eebea4e6a548e23ba4`
+- Current implementation checkpoint SHA: `be068153dac3569dc68ba9634679bad7c66ab1d7`
 - Remote master branch: `origin/codex/life-tracker-os` (established)
 - Worktree at checkpoint start: clean
 
@@ -1250,6 +1250,40 @@ slice changes one of those trust boundaries.
   data, or installed Desktop artifact. The exact approved R1 staging Function
   deployment still has not executed.
 
+### Daily Driver persisted Session lifecycle correctness
+
+- Green implementation commit:
+  `be068153dac3569dc68ba9634679bad7c66ab1d7`.
+- Pause and resume now update one durable Session identity instead of creating a
+  second active document and stranding the paused segment. Net duration
+  accumulates only active segments, preserves the original start/final end
+  interval, and excludes paused wall time.
+- Session lifecycle transitions are immutable in memory until their Firestore
+  write succeeds. A failed pause/stop cannot silently advance local authority.
+  Session creation/completion remains primary execution evidence if a secondary
+  TimeBlock status synchronization fails.
+- Restart restoration is owner-scoped, suppresses the specific superseded
+  paused record produced by the legacy same-TimeBlock resume flow, and fails
+  closed when two independent resumable Sessions remain ambiguous.
+- Linked TimeBlock identity/domain/task are reread from the authenticated
+  owner's persisted record. Terminal cancelled/completed blocks are not
+  overwritten. A short stopped Session leaves the block `in_progress`, 80% of
+  plan may complete it, and only execution beyond plan is labelled `overrun`.
+- The NowBar shows accumulated net time for active and paused Sessions. Idle
+  subtraction now pauses at the detected idle boundary and resumes the same
+  durable Session instead of writing an inconsistent active record.
+- Focused proof passed 4 files / 17 tests; focused TypeScript validation
+  (`npx tsc --noEmit --incremental false`) exited 0; staged diff check and the
+  exact changed-file high-confidence credential scan passed.
+- The first two sandboxed test attempts collected zero tests because the
+  managed read-only filesystem denied Vitest transform-cache creation. The same
+  exact serial command with temporary-cache write access produced the green
+  17/17 result. One initial real assertion failure was only an incorrect test
+  expectation that an absent optional key match `duration: undefined`; the
+  identity/status assertions and implementation were already correct.
+- No Firebase project, installed Desktop artifact, provider, secret, billing,
+  GitHub setting, or production data changed in this slice.
+
 ### R1 approved deployment revalidation and ready checkpoint
 
 - Re-ran the fixed public staging acceptance profiles after the exact
@@ -1493,6 +1527,8 @@ slice changes one of those trust boundaries.
 | Session-authoritative analytics regression | PASS; full frontend 70 files / 735 tests, then final affected 4 files / 70 tests after the last two causal assertions |
 | Session-authoritative type/build/security | PASS; canonical typecheck, final Next.js 15.5.23 static build (4 pages; root 238 kB / 341 kB first load), 8/8 Desktop config scripts, output-inclusive static security, Desktop security, changed/staged credential scans, and diff hygiene |
 | Planned-as-actual source audit | PASS; no remaining frontend planned-window fallback or manual planned-timestamp manufacture; the sole `sessionManager` start preservation uses the authoritative current Session start |
+| Persisted Session lifecycle focused proof | PASS at `be06815`; 4 files / 17 tests for one-ID pause/resume/stop, net active duration, legacy zombie suppression, owner/ambiguity failure, persistence failure, NowBar, and Today controls |
+| Persisted Session lifecycle static/hygiene | PASS; focused TypeScript check exit 0, `git diff --check`, staged diff check, and exact seven-file high-confidence credential scan |
 | Firebase CLI credential containment | PASS for containment, deployment NOT RUN; credential-bearing JSON output was not reused or reproduced, CLI logout/revocation exited 0, safe non-JSON follow-up confirmed no authorized accounts, and fresh interactive login remains required |
 
 ## Release status
@@ -1588,8 +1624,16 @@ block independent local/emulator implementation.
 
 ## Exact next step
 
-Push this progress checkpoint. Then verify the public live staging fingerprint
-and safe CLI authentication state. If the CLI remains logged out, the sole
+Master Goal execution is under a human-requested controlled stop after green
+implementation SHA `be06815`. Do not begin another implementation, audit,
+deployment, provider, release, or privacy slice until Francesco gives a new
+release decision. The exact R1 Function-only approval remains recorded and
+valid but does not override this controlled stop.
+
+When explicitly resumed, the shortest Daily Driver dependency remains:
+
+Verify the public live staging fingerprint and safe CLI authentication state.
+If the CLI remains logged out, the sole
 immediate human action is a fresh Firebase CLI login in Francesco's own terminal
 from the repository:
 
