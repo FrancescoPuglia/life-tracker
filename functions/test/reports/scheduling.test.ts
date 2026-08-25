@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeNotificationPreferences } from '../../src/notifications/domain';
 import {
+  authorizeScientificReportScheduleCandidate,
   deriveScientificReportSchedulePolicy,
   planDueScientificReportRuns,
   reportScheduleVersion,
@@ -40,6 +41,33 @@ describe('scientific report schedule policy', () => {
       '2026-08-25T21:00:00.000Z',
     )).toThrow(/owner/i);
     expect(() => planDueScientificReportRuns(enabled, 'not-an-instant')).toThrow(/instant/i);
+  });
+
+  it('distinguishes disabled, recipient-stale, schedule-stale, and forged candidates', () => {
+    const candidate = planDueScientificReportRuns(
+      dailyPolicy(),
+      '2026-08-25T21:00:00.000Z',
+    )[0]!;
+    expect(authorizeScientificReportScheduleCandidate(dailyPolicy(), candidate).action)
+      .toBe('allow');
+    expect(authorizeScientificReportScheduleCandidate(
+      policy({ reportRecipient: 'francesco@example.com' }),
+      candidate,
+    )).toEqual({ action: 'suppress', reason: 'email_disabled' });
+    expect(authorizeScientificReportScheduleCandidate(policy({
+      emailEnabled: true,
+      reportRecipient: 'other@example.com',
+      dailyReport: { enabled: true, localTime: '22:30' },
+    }), candidate)).toEqual({ action: 'suppress', reason: 'recipient_changed' });
+    expect(authorizeScientificReportScheduleCandidate(policy({
+      emailEnabled: true,
+      reportRecipient: 'francesco@example.com',
+      dailyReport: { enabled: true, localTime: '21:30' },
+    }), candidate)).toEqual({ action: 'suppress', reason: 'schedule_changed' });
+    expect(() => authorizeScientificReportScheduleCandidate(dailyPolicy(), {
+      ...candidate,
+      scheduledFor: '2026-08-25T20:31:00.000Z',
+    })).toThrow(/occurrence|identity/i);
   });
 });
 

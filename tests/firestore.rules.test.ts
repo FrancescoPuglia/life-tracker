@@ -71,6 +71,7 @@ const SERVER_ONLY_COLLECTIONS = [
   'reportIdempotency',
   'reportEmailDelivery',
   'reportDeliveryAttempts',
+  'reportRuns',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [

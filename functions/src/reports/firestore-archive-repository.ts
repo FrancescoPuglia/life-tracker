@@ -60,8 +60,8 @@ implements ScientificReportArchiveRepository {
       }
       if (archiveSnapshot.exists) {
         const existing = decodeStoredScientificReportArchiveSnapshot(uid, archiveSnapshot);
-        const existingMarker = decodeIdempotencyMarker(uid, markerSnapshot);
-        assertMarkerCoherence(existing, existingMarker);
+        const existingMarker = decodeReportArchiveIdempotencySnapshot(uid, markerSnapshot);
+        assertReportArchiveMarkerCoherence(existing, existingMarker);
         if (existing.artifactHash !== candidate.artifactHash) {
           throw new DomainError(
             'CONFLICT',
@@ -71,8 +71,8 @@ implements ScientificReportArchiveRepository {
         return Object.freeze({ archive: existing, idempotentReplay: true });
       }
 
-      transaction.create(archiveRef, encodeArchive(candidate));
-      transaction.create(markerRef, encodeIdempotencyMarker(marker));
+      transaction.create(archiveRef, encodeStoredScientificReportArchive(candidate));
+      transaction.create(markerRef, encodeReportArchiveIdempotencyRecord(marker));
       return Object.freeze({ archive: candidate, idempotentReplay: false });
     });
   }
@@ -114,7 +114,10 @@ implements ScientificReportArchiveRepository {
   }
 }
 
-function encodeArchive(archive: StoredScientificReportArchive): DocumentData {
+/** @internal Shared with the server-only report-run transaction adapter. */
+export function encodeStoredScientificReportArchive(
+  archive: StoredScientificReportArchive,
+): DocumentData {
   return {
     schemaVersion: archive.schemaVersion,
     id: archive.id,
@@ -137,7 +140,10 @@ function encodeArchive(archive: StoredScientificReportArchive): DocumentData {
   };
 }
 
-function encodeIdempotencyMarker(marker: ReportArchiveIdempotencyRecord): DocumentData {
+/** @internal Shared with the server-only report-run transaction adapter. */
+export function encodeReportArchiveIdempotencyRecord(
+  marker: ReportArchiveIdempotencyRecord,
+): DocumentData {
   return {
     schemaVersion: marker.schemaVersion,
     id: marker.id,
@@ -236,7 +242,8 @@ export function encodeStoredReportDeliveryState(
   };
 }
 
-function decodeIdempotencyMarker(
+/** @internal Shared with the server-only report-run transaction adapter. */
+export function decodeReportArchiveIdempotencySnapshot(
   uid: string,
   snapshot: DocumentSnapshot,
 ): ReportArchiveIdempotencyRecord {
@@ -263,7 +270,8 @@ function decodeIdempotencyMarker(
   });
 }
 
-function assertMarkerCoherence(
+/** @internal Shared with the server-only report-run transaction adapter. */
+export function assertReportArchiveMarkerCoherence(
   archive: StoredScientificReportArchive,
   marker: ReportArchiveIdempotencyRecord,
 ): void {

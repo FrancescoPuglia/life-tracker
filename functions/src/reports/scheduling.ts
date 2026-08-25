@@ -44,6 +44,20 @@ export interface ScientificReportScheduleCandidate {
   readonly recipientAuthorityHash: string;
 }
 
+export type ScientificReportScheduleSuppressionReason =
+  | 'email_disabled'
+  | 'schedule_disabled'
+  | 'recipient_changed'
+  | 'schedule_changed'
+  | 'outside_catch_up_window';
+
+export type ScientificReportScheduleAuthorization =
+  | Readonly<{ action: 'allow'; recipient: EmailMailbox }>
+  | Readonly<{
+    action: 'suppress';
+    reason: ScientificReportScheduleSuppressionReason;
+  }>;
+
 export function deriveScientificReportSchedulePolicy(
   preferences: NotificationPreferences,
 ): ScientificReportSchedulePolicy {
@@ -119,6 +133,90 @@ export function reportScheduleVersion(
   }));
 }
 
+/**
+ * Delivery/generation-time authority check. Structurally invalid candidates
+ * throw; well-formed stale candidates return an explicit non-mutating reason.
+ */
+export function authorizeScientificReportScheduleCandidate(
+  policy: ScientificReportSchedulePolicy,
+  run: ScientificReportScheduleCandidate,
+): ScientificReportScheduleAuthorization {
+  validatePolicy(policy);
+  validateScientificReportScheduleCandidate(run);
+  if (run.uid !== policy.uid) throw new Error('Scientific report run owner is invalid.');
+  if (!policy.emailEnabled) {
+    return Object.freeze({ action: 'suppress', reason: 'email_disabled' });
+  }
+  const schedule = run.reportType === 'daily' ? policy.dailyReport : policy.weeklyReport;
+  if (!schedule.enabled) {
+    return Object.freeze({ action: 'suppress', reason: 'schedule_disabled' });
+  }
+  if (!policy.recipient) {
+    throw new Error('Scientific report email authority is inconsistent.');
+  }
+  if (run.recipientAuthorityHash !== reportRecipientAuthorityHash(policy.uid, policy.recipient)) {
+    return Object.freeze({ action: 'suppress', reason: 'recipient_changed' });
+  }
+  if (run.expectedScheduleVersion !== reportScheduleVersion(policy, run.reportType)) {
+    return Object.freeze({ action: 'suppress', reason: 'schedule_changed' });
+  }
+
+  const scheduledInstant = normalizedInstant(run.scheduledFor);
+  const scheduledLocal = scheduledInstant.toZonedDateTimeISO(policy.timezone);
+  if (
+    run.reportType === 'weekly'
+    && scheduledLocal.dayOfWeek !== policy.weeklyReport.isoWeekday
+  ) {
+    throw new Error('Scientific report run occurrence is invalid.');
+  }
+  const expectedInstant = occurrenceInstant(
+    scheduledLocal.toPlainDate(),
+    schedule.localTime,
+    policy.timezone,
+  );
+  if (Temporal.Instant.compare(scheduledInstant, expectedInstant) !== 0) {
+    throw new Error('Scientific report run occurrence is invalid.');
+  }
+  const expected = candidate(
+    policy,
+    run.reportType,
+    scheduledLocal.toPlainDate().toString(),
+    scheduledInstant,
+  );
+  if (canonicalJson(expected) !== canonicalJson(run)) {
+    throw new Error('Scientific report run identity is invalid.');
+  }
+  return Object.freeze({ action: 'allow', recipient: policy.recipient });
+}
+
+export function scientificReportRunId(
+  uid: string,
+  reportType: ScientificReportType,
+  localStartDate: string,
+): string {
+  assertUid(uid);
+  if (reportType !== 'daily' && reportType !== 'weekly') {
+    throw new Error('Scientific report type is invalid.');
+  }
+  const parsed = Temporal.PlainDate.from(localStartDate);
+  if (parsed.toString() !== localStartDate) {
+    throw new Error('Scientific report local period is invalid.');
+  }
+  const digest = sha256([
+    REPORT_SCHEDULE_CANDIDATE_SCHEMA_VERSION,
+    uid,
+    reportType,
+    localStartDate,
+  ].join('\0'));
+  return `report_run_${digest.slice(0, 48)}`;
+}
+
+export function reportRecipientAuthorityHash(uid: string, recipient: EmailMailbox): string {
+  assertUid(uid);
+  validateEmailMailbox(recipient, 'Report recipient');
+  return sha256(`life-tracker-report-recipient-v1\0${uid}\0${recipient.email}`);
+}
+
 function candidate(
   policy: ScientificReportSchedulePolicy,
   reportType: ScientificReportType,
@@ -132,25 +230,44 @@ function candidate(
       .toString()
     : deliveryLocalDate;
   const period = resolveReportPeriod(reportType, localDate, policy.timezone);
-  const idDigest = sha256([
-    REPORT_SCHEDULE_CANDIDATE_SCHEMA_VERSION,
-    policy.uid,
-    reportType,
-    period.localStartDate,
-  ].join('\0'));
   return Object.freeze({
     schemaVersion: REPORT_SCHEDULE_CANDIDATE_SCHEMA_VERSION,
-    id: `report_run_${idDigest.slice(0, 48)}`,
+    id: scientificReportRunId(policy.uid, reportType, period.localStartDate),
     uid: policy.uid,
     reportType,
     localDate,
     localStartDate: period.localStartDate,
     scheduledFor: instantString(scheduledInstant),
     expectedScheduleVersion: reportScheduleVersion(policy, reportType),
-    recipientAuthorityHash: sha256(
-      `life-tracker-report-recipient-v1\0${policy.uid}\0${policy.recipient.email}`,
-    ),
+    recipientAuthorityHash: reportRecipientAuthorityHash(policy.uid, policy.recipient),
   });
+}
+
+export function validateScientificReportScheduleCandidate(
+  run: ScientificReportScheduleCandidate,
+): ScientificReportScheduleCandidate {
+  if (
+    !run
+    || run.schemaVersion !== REPORT_SCHEDULE_CANDIDATE_SCHEMA_VERSION
+    || (run.reportType !== 'daily' && run.reportType !== 'weekly')
+    || !/^report_run_[0-9a-f]{48}$/.test(run.id)
+    || !/^[0-9a-f]{64}$/.test(run.expectedScheduleVersion)
+    || !/^[0-9a-f]{64}$/.test(run.recipientAuthorityHash)
+  ) {
+    throw new Error('Scientific report run identity is invalid.');
+  }
+  assertUid(run.uid);
+  const localDate = Temporal.PlainDate.from(run.localDate);
+  const localStartDate = Temporal.PlainDate.from(run.localStartDate);
+  if (
+    localDate.toString() !== run.localDate
+    || localStartDate.toString() !== run.localStartDate
+    || run.id !== scientificReportRunId(run.uid, run.reportType, run.localStartDate)
+    || instantString(normalizedInstant(run.scheduledFor)) !== run.scheduledFor
+  ) {
+    throw new Error('Scientific report run identity is invalid.');
+  }
+  return run;
 }
 
 function mostRecentOccurrence(

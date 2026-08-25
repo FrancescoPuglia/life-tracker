@@ -5,8 +5,10 @@ export * from './email-delivery';
 export * from './email-provider';
 export { FirestoreScientificReportArchiveRepository } from './firestore-archive-repository';
 export { FirestoreScientificReportEmailDeliveryRepository } from './firestore-email-delivery-repository';
+export { FirestoreScientificReportRunRepository } from './firestore-report-run-repository';
 export * from './png-chart-renderer';
 export * from './report-email-template';
+export * from './report-run';
 export * from './resend-email-provider';
 export * from './scheduling';
 export {
