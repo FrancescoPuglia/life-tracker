@@ -146,6 +146,36 @@
       "collectionGroup": "reportArchives",
       "fieldPath": "report",
       "indexes": []
+    },
+    {
+      "collectionGroup": "mcpOAuthPendingAuthorizations",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mcpOAuthAuthorizationCodes",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mcpOAuthAccessTokens",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mcpOAuthRefreshTokens",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mcpReadRateLimits",
+      "fieldPath": "purgeAt",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

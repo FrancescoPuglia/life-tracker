@@ -163,21 +163,30 @@ the Functions emulator may use loopback. Responses requests set `store: false`.
 
 ## MCP boundary
 
-The feature-disabled `ReadOnlyMcpDomainAdapter` reuses the same registry and
-executor. It can expose only authenticated read tools; it has no remote network
-transport in this branch. Official OpenAI plugin documentation describes tools
-that can read information or take actions and requires the server to enforce
-its own authentication and behavior. The public documentation checked for this
-release does not establish availability for the owner's current ChatGPT plan.
-Accordingly, no remote MCP integration is enabled and MCP writes remain
-disabled. A future adapter must reuse this same approval/transaction service
-and must not create a second privileged path.
+The default-off `lifeTrackerMcp` Function reuses the authenticated read registry,
+deterministic analytics, and scientific report archive. It exposes 12 explicitly
+allowlisted, bounded read tools over Streamable HTTP and exactly zero write
+tools. Notes, raw Firestore paths, arbitrary queries, approval capabilities,
+apply, and rollback are absent.
+
+Firebase Auth remains identity authority. A private OAuth 2.1 authorization-code
+flow verifies a revoked-checked Firebase ID token, allows only the configured
+owner, uses S256 PKCE and issuer identification, hashes opaque codes/tokens at
+rest, rotates refresh tokens once, and rechecks the Firebase account on every
+MCP request. Client Rules deny all OAuth/rate-control state. The runtime has no
+OpenAI, Twilio, or email secret and remains exact default-off.
+
+The implementation is locally/unit/emulator verified but is not deployed and no
+real ChatGPT account is connected. The exact URL, cost, promotion, acceptance,
+and recovery gate is in `docs/MCP_RUNTIME_PREDEPLOY.md`. MCP writes remain zero;
+any future write support must call the existing approval/transaction service and
+must not create a second privileged mutation path.
 
 References:
 
-- [OpenAI MCP server concepts](https://developers.openai.com/plugins/concepts/mcp-server)
+- [OpenAI MCP server guide](https://developers.openai.com/plugins/build/mcp-server)
 - [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth)
-- [OpenAI Responses API MCP and connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
+- [OpenAI ChatGPT connection guide](https://developers.openai.com/plugins/deploy/connect-chatgpt)
 - [OpenAI API data controls](https://developers.openai.com/api/docs/guides/your-data#default-usage-policies-by-endpoint)
 - [Firebase parameterized configuration and secrets](https://firebase.google.com/docs/functions/config-env)
 - [Firebase function deployment](https://firebase.google.com/docs/functions/manage-functions)

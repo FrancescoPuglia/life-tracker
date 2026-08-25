@@ -74,6 +74,11 @@ const SERVER_ONLY_COLLECTIONS = [
   'reportRuns',
   'reportScheduleManifests',
   'reportInterpretations',
+  'mcpOAuthPendingAuthorizations',
+  'mcpOAuthAuthorizationCodes',
+  'mcpOAuthAccessTokens',
+  'mcpOAuthRefreshTokens',
+  'mcpReadRateLimits',
 ] as const;
 
 const FORBIDDEN_CLIENT_FIELDS = [

@@ -444,6 +444,21 @@ service cloud.firestore {
       match /reportInterpretations/{document=**} {
         allow read, write: if false;
       }
+      match /mcpOAuthPendingAuthorizations/{document=**} {
+        allow read, write: if false;
+      }
+      match /mcpOAuthAuthorizationCodes/{document=**} {
+        allow read, write: if false;
+      }
+      match /mcpOAuthAccessTokens/{document=**} {
+        allow read, write: if false;
+      }
+      match /mcpOAuthRefreshTokens/{document=**} {
+        allow read, write: if false;
+      }
+      match /mcpReadRateLimits/{document=**} {
+        allow read, write: if false;
+      }
     }
 
     match /aiChangePlans/{document=**} {
@@ -492,6 +507,21 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /reportInterpretations/{document=**} {
+      allow read, write: if false;
+    }
+    match /mcpOAuthPendingAuthorizations/{document=**} {
+      allow read, write: if false;
+    }
+    match /mcpOAuthAuthorizationCodes/{document=**} {
+      allow read, write: if false;
+    }
+    match /mcpOAuthAccessTokens/{document=**} {
+      allow read, write: if false;
+    }
+    match /mcpOAuthRefreshTokens/{document=**} {
+      allow read, write: if false;
+    }
+    match /mcpReadRateLimits/{document=**} {
       allow read, write: if false;
     }
 
