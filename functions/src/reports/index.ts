@@ -1,8 +1,11 @@
 export { buildReportChartData } from './charts';
 export { computeScientificMetricBundle } from './metrics';
 export * from './archive';
+export * from './email-provider';
 export { FirestoreScientificReportArchiveRepository } from './firestore-archive-repository';
 export * from './png-chart-renderer';
+export * from './report-email-template';
+export * from './resend-email-provider';
 export {
   REPORT_TIMEZONE_FALLBACK,
   enumeratePeriodDates,
