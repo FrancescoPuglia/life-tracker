@@ -5,8 +5,7 @@ import { BUILD_ID } from '@/lib/buildInfo'
 import { AI_BACKEND_BUILD_ID } from '@/lib/ai/backendConfig'
 import { DEPLOYMENT_ENVIRONMENT, RUNTIME_TARGET } from '@/lib/runtimeEnvironment'
 
-// 🔥 FIX: Use system fonts instead of Google Fonts to avoid network dependency in dev
-const systemFont = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+const systemFont = '"Segoe UI Variable", "Segoe UI", Inter, system-ui, sans-serif'
 
 export const metadata: Metadata = {
   title: 'Life Tracker - Know Every Second What To Do',
@@ -21,7 +20,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#3b82f6',
+  themeColor: '#4f46e5',
 }
 
 export default function RootLayout({
@@ -30,15 +29,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="it">
       <head>
-        {/* Google Fonts for Advanced Typography */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Roboto:ital,wght@0,400;0,700;1,400&family=Open+Sans:ital,wght@0,400;0,700;1,400&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap"
-          rel="stylesheet"
-        />
         <link rel="icon" href="./favicon.ico" />
         <link rel="apple-touch-icon" href="./icon-192x192.png" />
         <link rel="manifest" href="./manifest.json" />
