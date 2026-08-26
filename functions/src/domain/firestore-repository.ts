@@ -1378,6 +1378,8 @@ function decodeEntityValue(
     return value.toDate().toISOString();
   }
   if (isEntityTimestampPath(collection, path) && value !== null && value !== undefined) {
+    const legacy = decodeLegacyEntityTimestamp(value);
+    if (legacy !== null) return legacy;
     throw new DomainError('INVALID_ARGUMENT', 'Entity timestamp has an unsupported stored representation.');
   }
   if (Array.isArray(value)) {
@@ -1401,6 +1403,44 @@ function decodeEntityValue(
     throw new DomainError('INVALID_ARGUMENT', 'Entity data contains an unsupported value.');
   }
   return value;
+}
+
+/**
+ * Historical browser releases persisted Date/Timestamp-shaped objects as
+ * ordinary Firestore maps. Decode those values in memory so owner-scoped
+ * reads remain compatible without rewriting production history. A serialized
+ * serverTimestamp sentinel has no recoverable instant; treat it exactly like
+ * the repository's established missing-timestamp fallback.
+ *
+ * @internal Exported only for focused compatibility regression tests.
+ */
+export function decodeLegacyEntityTimestamp(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const keys = Object.keys(record).sort();
+  if (
+    keys.length === 1
+    && keys[0] === '_methodName'
+    && record._methodName === 'serverTimestamp'
+  ) {
+    return EPOCH;
+  }
+  if (
+    keys.length !== 2
+    || keys[0] !== 'nanoseconds'
+    || keys[1] !== 'seconds'
+    || !Number.isSafeInteger(record.seconds)
+    || !Number.isInteger(record.nanoseconds)
+    || (record.nanoseconds as number) < 0
+    || (record.nanoseconds as number) >= 1_000_000_000
+    || (record.nanoseconds as number) % 1_000_000 !== 0
+  ) {
+    return null;
+  }
+  const epochMillis = (record.seconds as number) * 1_000 + (record.nanoseconds as number) / 1_000_000;
+  if (!Number.isSafeInteger(epochMillis)) return null;
+  const date = new Date(epochMillis);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function isEntityTimestampPath(
