@@ -321,35 +321,6 @@ export default function StrategicDopamineSystem({
   return (
     <>
       {children}
-      
-      {/* Dopamine Status Widget */}
-      {dopamineState && (
-        <div className="fixed bottom-8 left-4 bg-gradient-to-r from-gray-900 to-gray-700 backdrop-blur-md border border-gray-600/50 text-white p-6 rounded-2xl shadow-2xl z-50 min-w-[200px]">
-          <div className="text-sm font-bold text-blue-300 mb-3">🎮 Daily Progress</div>
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-300">Daily Reward:</span>
-              <span className="text-lg">{dopamineState.hasReceivedDailyReward ? '✅' : '⏳'}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-300">Blocks:</span>
-              <span className="text-green-400 font-bold">{dopamineState.timeBlocksCompletedToday.length}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-300">Goals Today:</span>
-              <span className="text-purple-400 font-bold">{dopamineState.goalsAchievedToday.length}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-300">Habits:</span>
-              <span className="text-orange-400 font-bold">{dopamineState.habitsCompletedToday?.length || 0}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-gray-300">Pages:</span>
-              <span className="text-cyan-400 font-bold">{(dopamineState.pagesCreatedToday || []).length}</span>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

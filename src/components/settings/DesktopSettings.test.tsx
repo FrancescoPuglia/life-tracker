@@ -101,14 +101,14 @@ describe('Desktop settings', () => {
 
   it('persists a validated recipient and configurable Daily/Weekly schedules', async () => {
     renderSettings();
-    const emailEnabled = await screen.findByRole('checkbox', { name: 'Enable email reports' });
+    const emailEnabled = await screen.findByRole('checkbox', { name: 'Abilita invio email' });
     await waitFor(() => expect(emailEnabled).not.toBeDisabled());
     fireEvent.click(emailEnabled);
     fireEvent.change(screen.getByLabelText('Report recipient'), {
       target: { value: 'francesco@example.com' },
     });
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Daily Report' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Weekly Report' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Review giornaliera' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Weekly Executive Review' }));
     fireEvent.change(screen.getByLabelText('Daily Report time'), { target: { value: '21:45' } });
     fireEvent.change(screen.getByLabelText('Weekly Report day'), { target: { value: '6' } });
     fireEvent.change(screen.getByLabelText('Weekly Report time'), { target: { value: '19:15' } });
@@ -125,7 +125,7 @@ describe('Desktop settings', () => {
 
   it('does not persist enabled email reports without a recipient', async () => {
     renderSettings();
-    const emailEnabled = await screen.findByRole('checkbox', { name: 'Enable email reports' });
+    const emailEnabled = await screen.findByRole('checkbox', { name: 'Abilita invio email' });
     await waitFor(() => expect(emailEnabled).not.toBeDisabled());
     fireEvent.click(emailEnabled);
     fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));

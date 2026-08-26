@@ -253,15 +253,15 @@ export default function AnalyticsDashboard({
     if (data.correlations.length === 0) {
       return (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Pattern Correlations</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Correlazioni esplorative</h3>
           <div className="bg-gray-50 rounded-lg p-8 text-center">
             <TrendingUp className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h4 className="text-lg font-medium text-gray-600 mb-2">No Correlation Data</h4>
+            <h4 className="text-lg font-medium text-gray-600 mb-2">Campione insufficiente</h4>
             <p className="text-sm text-gray-500 mb-4">
-              Track at least 7 pairwise-complete days of mood, energy, and measured focus to see exploratory correlations.
+              Servono almeno 7 giorni completi a coppie di umore, energia e focus misurato.
             </p>
             <div className="text-xs text-gray-400">
-              Missing measurements are excluded. Correlation is not causation.
+              Le misurazioni mancanti sono escluse. Associazione non significa causalità.
             </div>
           </div>
         </div>
@@ -270,7 +270,7 @@ export default function AnalyticsDashboard({
 
     return (
       <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900">Pattern Correlations</h3>
+        <h3 className="text-lg font-semibold text-gray-900">Correlazioni esplorative</h3>
         
         <div className="space-y-3">
           {data.correlations.map((correlation, index) => (
@@ -281,7 +281,7 @@ export default function AnalyticsDashboard({
                     {correlation.factor1} ↔ {correlation.factor2}
                   </div>
                   <div className="text-sm text-gray-600">
-                    {correlation.significance} · correlation is not causation
+                    {correlation.significance} · associazione, non causalità · N={correlation.sampleSize}
                   </div>
                 </div>
                 <div className={`text-lg font-bold ${
@@ -461,14 +461,17 @@ export default function AnalyticsDashboard({
 
   const WeeklyReview = () => (
     <div className="space-y-6">
-      <h3 className="text-lg font-semibold text-gray-900">Weekly Review</h3>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sintesi esecutiva</p>
+        <h3 className="mt-1 text-lg font-semibold text-slate-950">Review settimanale</h3>
+      </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4">
           <div className="bg-green-50 rounded-lg p-4">
             <h4 className="font-medium text-green-800 mb-2 flex items-center">
               <TrendingUp className="w-4 h-4 mr-2" />
-              Highlights
+              Risultati
             </h4>
             <ul className="space-y-1">
               {data.weeklyReview.highlights.map((highlight, index) => (
@@ -480,7 +483,7 @@ export default function AnalyticsDashboard({
           <div className="bg-red-50 rounded-lg p-4">
             <h4 className="font-medium text-red-800 mb-2 flex items-center">
               <Target className="w-4 h-4 mr-2" />
-              Challenges
+              Rischi e frizioni
             </h4>
             <ul className="space-y-1">
               {data.weeklyReview.challenges.map((challenge, index) => (
@@ -494,7 +497,7 @@ export default function AnalyticsDashboard({
           <div className="bg-blue-50 rounded-lg p-4">
             <h4 className="font-medium text-blue-800 mb-2 flex items-center">
               <Brain className="w-4 h-4 mr-2" />
-              Insights
+              Pattern osservati
             </h4>
             <ul className="space-y-1">
               {data.weeklyReview.insights.map((insight, index) => (
@@ -506,7 +509,7 @@ export default function AnalyticsDashboard({
           <div className="bg-purple-50 rounded-lg p-4">
             <h4 className="font-medium text-purple-800 mb-2 flex items-center">
               <Zap className="w-4 h-4 mr-2" />
-              Next Week Goals
+              Decisioni per la prossima settimana
             </h4>
             <ul className="space-y-1">
               {data.weeklyReview.nextWeekGoals.map((goal, index) => (
@@ -520,16 +523,21 @@ export default function AnalyticsDashboard({
   );
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="analytics-v3">
       {/* Header */}
-      <div className="flex items-center justify-between p-6 border-b border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-900">Analytics Dashboard</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 p-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Executive intelligence</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-950">Analytics</h2>
+          <p className="mt-1 text-sm text-slate-600">Pianificato dai TimeBlock. Effettivo misurato dalle Sessioni.</p>
+        </div>
         
         <div className="flex items-center space-x-4">
           {/* Time Range Selector */}
           <div className="flex bg-gray-100 rounded-lg p-1">
             {(['7d', '30d', '90d'] as const).map((range) => (
               <button
+                type="button"
                 key={range}
                 onClick={() => onTimeRangeChange(range)}
                 className={`px-3 py-1 text-sm rounded-md transition-colors ${
@@ -538,7 +546,7 @@ export default function AnalyticsDashboard({
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : '90 Days'}
+                {range === '7d' ? '7 giorni' : range === '30d' ? '30 giorni' : '90 giorni'}
               </button>
             ))}
           </div>
@@ -547,40 +555,39 @@ export default function AnalyticsDashboard({
 
       {/* Analytics Guidance Banner */}
       {(totalPlannedHours === 0 && totalActualHours === 0) && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-400 p-6 mx-6 mt-4 rounded-lg">
+        <div className="mx-5 mt-5 rounded-xl border border-blue-200 bg-blue-50 p-5">
           <div className="flex items-start">
             <div className="flex-shrink-0">
               <Target className="h-6 w-6 text-blue-400" />
             </div>
             <div className="ml-3">
               <h3 className="text-lg font-medium text-blue-800">
-                📊 Start Tracking to See Analytics
+                Dati insufficienti per un’analisi affidabile
               </h3>
               <div className="mt-2 text-sm text-blue-700">
-                <p className="mb-3">Your analytics are empty because you haven't completed any time blocks yet!</p>
+                <p className="mb-3">Nel periodo non risultano tempo pianificato né Sessioni misurate.</p>
                 
-                <div className="bg-white bg-opacity-50 rounded-lg p-4 space-y-3">
-                  <h4 className="font-semibold text-blue-900">🎯 How to populate your analytics:</h4>
+                <div className="space-y-3 rounded-lg border border-blue-100 bg-white/70 p-4">
+                  <h4 className="font-semibold text-blue-950">Per costruire evidenza utile</h4>
                   <ol className="space-y-2 text-sm">
                     <li className="flex items-center space-x-2">
                       <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">1</span>
-                      <span>Create time blocks in the <strong>Time Planner</strong></span>
+                      <span>Pianifica i TimeBlock nel <strong>Time Planner</strong>.</span>
                     </li>
                     <li className="flex items-center space-x-2">
                       <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">2</span>
-                      <span>Click the <span className="bg-gray-200 px-2 py-1 rounded text-xs">⭕</span> circle to mark blocks as completed <span className="bg-green-200 px-2 py-1 rounded text-xs">✅</span></span>
+                      <span>Avvia e chiudi una <strong>Sessione</strong> durante l’esecuzione.</span>
                     </li>
                     <li className="flex items-center space-x-2">
                       <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-                      <span>Completed blocks will automatically appear in your analytics!</span>
+                      <span>Ritorna qui: i valori effettivi saranno calcolati solo dall’evidenza misurata.</span>
                     </li>
                   </ol>
                 </div>
 
-                <div className="mt-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg">
-                  <p className="text-yellow-800 text-xs">
-                    <strong>💡 Pro Tip:</strong> Only completed time blocks (✅) count toward your analytics. 
-                    This follows your "ORE REALI FATTE" principle - tracking actual time spent, not just planned time.
+                <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-900">
+                    <strong>I tuoi dati sono al sicuro.</strong> L’assenza di esecuzione non viene interpretata come zero e il tempo pianificato non sostituisce mai l’effettivo.
                   </p>
                 </div>
               </div>
@@ -593,11 +600,11 @@ export default function AnalyticsDashboard({
       <div className="border-b border-gray-200">
         <nav className="flex space-x-8 px-6">
           {[
-            { id: 'overview', label: 'Overview', icon: Calendar },
-            { id: 'planvsactual', label: 'Plan vs Actual', icon: Target },
-            { id: 'allocation', label: 'Time Allocation', icon: Clock },
-            { id: 'rankings', label: 'Activity Rankings', icon: Trophy },
-            { id: 'correlations', label: 'Correlations', icon: TrendingUp },
+            { id: 'overview', label: 'Sintesi', icon: Calendar },
+            { id: 'planvsactual', label: 'Piano vs effettivo', icon: Target },
+            { id: 'allocation', label: 'Allocazione', icon: Clock },
+            { id: 'rankings', label: 'Attività', icon: Trophy },
+            { id: 'correlations', label: 'Correlazioni', icon: TrendingUp },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}

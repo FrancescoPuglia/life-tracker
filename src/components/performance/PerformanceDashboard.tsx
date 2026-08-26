@@ -189,8 +189,8 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center" role="alert">
         <AlertTriangle className="w-6 h-6 text-red-500 mx-auto mb-2" aria-hidden="true" />
-        <p className="text-sm font-semibold text-red-700">Your data could not be loaded.</p>
-        <p className="text-xs text-red-600 mt-1">Reload the app and try again.</p>
+        <p className="text-sm font-semibold text-red-700">I dati non possono essere caricati.</p>
+        <p className="text-xs text-red-600 mt-1">Ricarica l’app e riprova. Nessun dato è stato modificato.</p>
       </div>
     );
   }
@@ -199,16 +199,16 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center" role="alert">
         <AlertTriangle className="w-6 h-6 text-amber-600 mx-auto mb-2" aria-hidden="true" />
-        <p className="text-sm font-semibold text-amber-900">Actual execution is unavailable.</p>
+        <p className="text-sm font-semibold text-amber-900">L’esecuzione effettiva non è disponibile.</p>
         <p className="text-xs text-amber-800 mt-1">
-          Sessions could not be loaded, so Life Tracker will not present missing work as zero.
+          Le Sessioni non sono state caricate: Life Tracker non presenterà l’evidenza mancante come zero.
         </p>
         <button
           type="button"
           onClick={() => setSessionReloadKey((key) => key + 1)}
           className="mt-3 px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-semibold text-amber-900 hover:bg-amber-100"
         >
-          Retry
+          Riprova
         </button>
       </div>
     );
@@ -219,13 +219,13 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
       return (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center" role="alert">
           <AlertTriangle className="w-6 h-6 text-red-500 mx-auto mb-2" aria-hidden="true" />
-          <p className="text-sm font-semibold text-red-700">The performance metrics could not be computed.</p>
+          <p className="text-sm font-semibold text-red-700">Le metriche Performance non possono essere calcolate.</p>
           <button
             type="button"
             onClick={handleReset}
             className="mt-3 px-3 py-1.5 rounded-lg border border-red-300 bg-white text-xs font-semibold text-red-700 hover:bg-red-50"
           >
-            Reset view
+            Reimposta vista
           </button>
         </div>
       );
@@ -256,6 +256,13 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
 
   return (
     <div className="space-y-4" data-testid="performance-dashboard">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Execution intelligence</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Performance</h2>
+          <p className="mt-1 text-sm text-slate-600">Aderenza, allocazione e accuratezza stimata da evidenza misurata.</p>
+        </div>
+      </header>
       <PerfToolbar
         period={overview.period}
         filters={filters}
@@ -277,12 +284,12 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
           <div className="text-3xl mb-3" aria-hidden="true">
             ⏱️
           </div>
-          <h3 className="text-base font-bold text-slate-900">Nothing planned or tracked in this period</h3>
+          <h3 className="text-base font-bold text-slate-900">Nessun piano o tracking nel periodo</h3>
           <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
-            No time blocks were scheduled and no execution was recorded
+            Non risultano TimeBlock pianificati né Sessioni registrate
             {filters.goalId || filters.projectId || filters.source !== 'all'
-              ? ' for the current filters — try resetting them.'
-              : ' — plan a block or start a session and this page fills itself.'}
+              ? ' con i filtri correnti — prova a reimpostarli.'
+              : ' — pianifica un blocco o avvia una Sessione.'}
           </p>
           <div className="mt-5 flex items-center justify-center gap-2">
             {(filters.goalId || filters.projectId || filters.source !== 'all') && (
@@ -291,7 +298,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
                 onClick={handleReset}
                 className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Reset filters
+                Reimposta filtri
               </button>
             )}
             {onNavigate && (
@@ -302,7 +309,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700"
                 >
                   <CalendarPlus className="w-3.5 h-3.5" aria-hidden="true" />
-                  Open Time Planner
+                  Apri Time Planner
                 </button>
                 <button
                   type="button"
@@ -310,7 +317,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   <PlayCircle className="w-3.5 h-3.5" aria-hidden="true" />
-                  Start from Today
+                  Avvia da Oggi
                 </button>
               </>
             )}

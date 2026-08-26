@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Habit, HabitLog } from '@/types';
 import { formatDateSafe, formatDateStringSafe } from '@/utils/dateUtils';
-import { CheckCircle, Circle, Flame, Calendar, Plus, Edit, Trash2 } from 'lucide-react';
+import { CheckCircle, Circle, Flame, Calendar, Plus, Edit, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { audioManager } from '@/lib/audioManager';
 import { getVoiceService } from '@/lib/voice/voiceService';
 
@@ -115,15 +115,6 @@ export default function HabitsTracker({
     return logsInPeriod.length > 0 ? (completedLogs.length / logsInPeriod.length) * 100 : 0;
   };
 
-  const getStreakEmoji = (streak: number): string => {
-    if (streak >= 100) return '🔥💯';
-    if (streak >= 50) return '🔥🔥';
-    if (streak >= 30) return '🔥';
-    if (streak >= 7) return '✨';
-    if (streak >= 3) return '💪';
-    return '';
-  };
-
   const handleCreateHabit = () => {
     if (!currentUserId) {
       console.error('Cannot create habit: userId not available');
@@ -194,62 +185,64 @@ export default function HabitsTracker({
   const HabitCard = ({ habit }: { habit: Habit }) => {
     const log = getHabitLog(habit.id);
     const streak = calculateStreak(habit);
-    const completionRate = getCompletionRate(habit);
+    const completionRate = getCompletionRate(habit, 7);
     
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+      <article className="rounded-xl border border-slate-200 bg-white p-4 transition-colors hover:border-slate-300">
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center space-x-3">
               <button
+                type="button"
                 onClick={() => handleToggleHabit(habit)}
                 disabled={!isToday}
-                className={`transition-colors ${!isToday ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition-colors ${log?.completed ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:border-emerald-300'} ${!isToday ? 'cursor-not-allowed opacity-50' : ''}`}
+                aria-label={log?.completed ? `Segna ${habit.name} come non completata` : `Completa ${habit.name}`}
               >
                 {log?.completed ? (
-                  <CheckCircle className="w-6 h-6 text-green-600" />
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
                 ) : (
-                  <Circle className="w-6 h-6 text-gray-400 hover:text-green-600" />
+                  <Circle className="h-5 w-5 text-slate-400" />
                 )}
               </button>
               
-              <div>
-                <h3 className="font-medium text-gray-900">{habit.name}</h3>
+              <div className="min-w-0">
+                <h3 className="font-semibold text-slate-950">{habit.name}</h3>
                 {habit.description && (
-                  <p className="text-sm text-gray-600">{habit.description}</p>
+                  <details className="mt-1 text-sm text-slate-600">
+                    <summary className="cursor-pointer text-xs font-medium text-slate-500">Dettagli</summary>
+                    <p className="mt-1 max-w-3xl leading-5">{habit.description}</p>
+                  </details>
                 )}
               </div>
             </div>
 
-            <div className="mt-3 flex items-center space-x-4 text-sm">
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
               {/* Streak */}
               <div className="flex items-center space-x-1">
-                <Flame className="w-4 h-4 text-orange-500" />
+                <Flame className="h-4 w-4 text-amber-600" />
                 <span className="font-medium">{streak}</span>
-                <span className="text-gray-600">day streak</span>
-                {getStreakEmoji(streak) && (
-                  <span className="text-lg">{getStreakEmoji(streak)}</span>
-                )}
+                <span className="text-slate-500">giorni di streak</span>
               </div>
 
               {/* Completion Rate */}
               <div className="flex items-center space-x-1">
-                <Calendar className="w-4 h-4 text-blue-500" />
+                <Calendar className="h-4 w-4 text-blue-600" />
                 <span className="font-medium">{Math.round(completionRate)}%</span>
-                <span className="text-gray-600">this month</span>
+                <span className="text-slate-500">ultimi 7 giorni</span>
               </div>
 
               {/* Frequency */}
-              <div className="text-gray-500 capitalize">
-                {habit.frequency}
+              <div className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                {habit.frequency === 'daily' ? 'Ogni giorno' : habit.frequency === 'weekly' ? 'Settimanale' : 'Mensile'}
               </div>
             </div>
 
             {/* Progress Bar */}
             <div className="mt-3">
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="h-1.5 w-full rounded-full bg-slate-100">
                 <div
-                  className="bg-gradient-to-r from-green-400 to-green-600 h-2 rounded-full transition-all duration-300"
+                  className="h-1.5 rounded-full bg-emerald-500 transition-[width] duration-200"
                   style={{ width: `${completionRate}%` }}
                 ></div>
               </div>
@@ -257,9 +250,9 @@ export default function HabitsTracker({
 
             {/* Value/Notes for today */}
             {log && (log.value !== undefined || log.notes) && (
-              <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
+              <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm">
                 {log.value !== undefined && (
-                  <div>Value: {log.value} {habit.unit}</div>
+                  <div>Valore: {log.value} {habit.unit}</div>
                 )}
                 {log.notes && (
                   <div className="text-gray-600">{log.notes}</div>
@@ -274,19 +267,21 @@ export default function HabitsTracker({
                 setEditingHabit(habit);
                 setNewHabitData(habit);
               }}
-              className="p-1 text-gray-400 hover:text-gray-600"
+              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label={`Modifica ${habit.name}`}
             >
               <Edit className="w-4 h-4" />
             </button>
             <button
               onClick={() => onDeleteHabit(habit.id)}
-              className="p-1 text-gray-400 hover:text-red-600"
+              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-700"
+              aria-label={`Elimina ${habit.name}`}
             >
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
         </div>
-      </div>
+      </article>
     );
   };
 
@@ -321,7 +316,7 @@ export default function HabitsTracker({
           <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">
-                {isEdit ? 'Edit Habit' : 'Create New Habit'}
+                {isEdit ? 'Modifica abitudine' : 'Nuova abitudine'}
               </h3>
               <button
                 onClick={() => {
@@ -338,47 +333,35 @@ export default function HabitsTracker({
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
                 <input
                   ref={nameInputRef}
                   type="text"
                   value={newHabitData.name || ''}
                   onChange={(e) => handleNameChange(e.target.value)}
-                  style={{
-                    color: 'black',
-                    backgroundColor: 'white',
-                    border: '2px solid #007bff',
-                    fontSize: '16px'
-                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="e.g., Morning meditation"
+                  placeholder="Es. Meditazione mattutina"
                   autoFocus
                   autoComplete="off"
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Descrizione</label>
                 <textarea
                   ref={descriptionInputRef}
                   value={newHabitData.description || ''}
                   onChange={(e) => handleDescriptionChange(e.target.value)}
-                  style={{
-                    color: 'black',
-                    backgroundColor: 'white',
-                    border: '2px solid #007bff',
-                    fontSize: '16px'
-                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                   rows={2}
-                  placeholder="Optional description"
+                  placeholder="Dettagli facoltativi"
                   autoComplete="off"
                 />
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Frequency</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Frequenza</label>
                   <select
                     value={newHabitData.frequency || 'daily'}
                     onChange={(e) => handleFrequencyChange(e.target.value)}
@@ -390,14 +373,14 @@ export default function HabitsTracker({
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
                   >
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
+                    <option value="daily">Ogni giorno</option>
+                    <option value="weekly">Settimanale</option>
+                    <option value="monthly">Mensile</option>
                   </select>
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Unit (Optional)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Unità (facoltativa)</label>
                   <input
                     type="text"
                     value={newHabitData.unit || ''}
@@ -408,14 +391,14 @@ export default function HabitsTracker({
                       border: '1px solid #ccc'
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-colors"
-                    placeholder="e.g., minutes, pages"
+                    placeholder="Es. minuti, pagine"
                   />
                 </div>
               </div>
               
               {newHabitData.unit && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Value</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Valore target</label>
                   <input
                     type="number"
                     value={newHabitData.targetValue || ''}
@@ -442,14 +425,14 @@ export default function HabitsTracker({
                 className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
                 type="button"
               >
-                Cancel
+                Annulla
               </button>
               <button
                 onClick={isEdit ? handleEditHabit : handleCreateHabit}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                 type="button"
               >
-                {isEdit ? 'Update' : 'Create'}
+                {isEdit ? 'Salva' : 'Crea'}
               </button>
             </div>
           </div>
@@ -461,45 +444,48 @@ export default function HabitsTracker({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="habits-v3">
       {/* Header */}
-      <div className="flex items-center justify-between p-6 border-b border-gray-200">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 p-5">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Habits Tracker</h2>
-          <p className="text-sm text-gray-600">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Esecuzione ricorrente</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-950">Abitudini</h2>
+          <p className="mt-1 text-sm capitalize text-slate-600">
             {formatDateSafe(selectedDate, { 
               weekday: 'long',
               month: 'long',
               day: 'numeric'
-            }, 'Invalid Date')}
+            }, '—')}
           </p>
         </div>
         
         <div className="flex items-center space-x-2">
           <button
             onClick={() => setSelectedDate(new Date(selectedDate.getTime() - 24 * 60 * 60 * 1000))}
-            className="p-2 text-gray-400 hover:text-gray-600"
+            className="lt-icon-button h-10 w-10"
+            aria-label="Giorno precedente"
           >
-            ←
+            <ChevronLeft size={18} aria-hidden="true" />
           </button>
           <button
             onClick={() => setSelectedDate(new Date())}
-            className="px-3 py-1 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
+            className="lt-button-secondary min-h-[40px] px-3"
           >
-            Today
+            Oggi
           </button>
           <button
             onClick={() => setSelectedDate(new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000))}
-            className="p-2 text-gray-400 hover:text-gray-600"
+            className="lt-icon-button h-10 w-10"
+            aria-label="Giorno successivo"
           >
-            →
+            <ChevronRight size={18} aria-hidden="true" />
           </button>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="ml-4 flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="lt-button-primary ml-2 min-h-[42px] px-4"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Habit</span>
+            <span>Nuova abitudine</span>
           </button>
         </div>
       </div>
@@ -507,13 +493,13 @@ export default function HabitsTracker({
       {/* Habits List */}
       <div className="p-6">
         {habits.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500 mb-4">No habits yet. Start building better habits today!</p>
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-10 text-center">
+            <p className="mb-4 text-slate-600">Nessuna abitudine attiva. Il tracking esistente resta al sicuro.</p>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="lt-button-primary min-h-[42px] px-4"
             >
-              Create Your First Habit
+              Crea la prima abitudine
             </button>
           </div>
         ) : (
@@ -533,25 +519,25 @@ export default function HabitsTracker({
               <div className="text-2xl font-bold text-green-600">
                 {getTodayLogs().filter(log => log.completed).length}
               </div>
-              <div className="text-sm text-gray-600">Completed Today</div>
+              <div className="text-sm text-gray-600">Completate oggi</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">
                 {habits.filter(h => h.streakCount > 0).length}
               </div>
-              <div className="text-sm text-gray-600">Active Streaks</div>
+              <div className="text-sm text-gray-600">Streak attive</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-purple-600">
                 {Math.max(...habits.map(h => h.bestStreak), 0)}
               </div>
-              <div className="text-sm text-gray-600">Best Streak</div>
+              <div className="text-sm text-gray-600">Streak migliore</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-orange-600">
                 {Math.round(habits.reduce((sum, h) => sum + getCompletionRate(h), 0) / habits.length || 0)}%
               </div>
-              <div className="text-sm text-gray-600">Avg Completion</div>
+              <div className="text-sm text-gray-600">Aderenza media</div>
             </div>
           </div>
         </div>

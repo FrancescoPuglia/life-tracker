@@ -3,7 +3,18 @@
 // ⚡ SMART SCHEDULER COMPONENT - AI-Powered Schedule Optimization
 
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import {
+  AlertTriangle,
+  CalendarRange,
+  Check,
+  Clock3,
+  Gauge,
+  Layers3,
+  ShieldCheck,
+  Sparkles,
+  Target,
+} from 'lucide-react';
 import { autoScheduler } from '@/lib/autoScheduler';
 import { SchedulingConstraints, SchedulingResult, SchedulingConflict, AlternativeSchedule } from '@/types/ai-enhanced';
 import { Task, TimeBlock, Goal } from '@/types';
@@ -13,7 +24,6 @@ interface SmartSchedulerProps {
   tasks: Task[];
   existingTimeBlocks: TimeBlock[];
   goals: Goal[];
-  onScheduleGenerated: (schedule: TimeBlock[]) => void;
   onTimeBlocksCreated?: (blocks: TimeBlock[]) => void;
   userPreferences?: any;
 }
@@ -30,20 +40,17 @@ export default function SmartScheduler({
   tasks,
   existingTimeBlocks,
   goals,
-  onScheduleGenerated,
   onTimeBlocksCreated,
   userPreferences = {}
 }: SmartSchedulerProps) {
   const [state, setState] = useState<SchedulingState>({
     isGenerating: false,
     result: null,
-    selectedAlternative: 0,
+    selectedAlternative: -1,
     showAdvanced: false,
     constraints: {}
   });
 
-  const [optimizationMode, setOptimizationMode] = useState<'balanced' | 'deadline' | 'energy' | 'goals'>('balanced');
-  const [schedulingWindow, setSchedulingWindow] = useState<number>(7); // Days
   const [workingHours, setWorkingHours] = useState({ start: '09:00', end: '17:00' });
   const [energyProfile, setEnergyProfile] = useState<Record<string, number>>({
     '9': 0.8, '10': 0.9, '11': 0.9, '12': 0.7,
@@ -75,15 +82,12 @@ export default function SmartScheduler({
         ...prev, 
         result, 
         isGenerating: false,
-        selectedAlternative: 0 
+        selectedAlternative: -1
       }));
 
       // 🎮 SUCCESS FEEDBACK
       audioManager.perfectDay();
       
-      // Auto-apply the primary schedule
-      onScheduleGenerated(result.schedule);
-
     } catch (error) {
       console.error('⚡ SMART SCHEDULER ERROR:', error);
       setState(prev => ({ ...prev, isGenerating: false }));
@@ -155,21 +159,19 @@ export default function SmartScheduler({
 
   // 🔄 ALTERNATIVE SCHEDULE SELECTION
   const selectAlternative = (index: number) => {
-    if (!state.result?.alternatives[index]) return;
+    if (!state.result || (index >= 0 && !state.result.alternatives[index])) return;
     
     setState(prev => ({ ...prev, selectedAlternative: index }));
     audioManager.buttonFeedback();
     
-    const selectedSchedule = index === -1 
-      ? state.result!.schedule 
-      : state.result!.alternatives[index].schedule;
-    
-    onScheduleGenerated(selectedSchedule);
   };
 
   // 📊 SCHEDULE ANALYSIS
   const analyzeScheduleQuality = (schedule: TimeBlock[]): { score: number; insights: string[] } => {
     const insights: string[] = [];
+    if (schedule.length === 0) {
+      return { score: 0, insights: ['Nessun blocco applicabile nella proposta corrente.'] };
+    }
     let score = 0.7; // Base score
 
     // Energy alignment analysis
@@ -182,9 +184,9 @@ export default function SmartScheduler({
     score += energyScore * 0.2;
     
     if (energyScore > 0.7) {
-      insights.push('🔋 Excellent energy alignment - tasks scheduled during peak hours');
+      insights.push('Buon allineamento energetico: i task cadono nelle ore a maggiore capacità.');
     } else if (energyScore < 0.4) {
-      insights.push('⚠️ Poor energy alignment - consider rescheduling for better productivity');
+      insights.push('Allineamento energetico debole: valuta una delle alternative proposte.');
     }
 
     // Goal alignment analysis
@@ -193,7 +195,7 @@ export default function SmartScheduler({
     score += goalScore * 0.15;
     
     if (goalScore > 0.6) {
-      insights.push('🎯 Strong goal alignment - most tasks contribute to objectives');
+      insights.push('La maggior parte dei blocchi contribuisce direttamente agli obiettivi.');
     }
 
     // Deadline compliance
@@ -202,7 +204,7 @@ export default function SmartScheduler({
       return task?.dueDate && new Date(task.dueDate) <= new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     });
     if (urgentBlocks.length > 0) {
-      insights.push(`⏰ ${urgentBlocks.length} urgent tasks scheduled within 3 days`);
+      insights.push(`${urgentBlocks.length} task urgenti pianificati entro tre giorni.`);
     }
 
     // Schedule density
@@ -213,10 +215,10 @@ export default function SmartScheduler({
     const averageBlockSize = totalMinutes / schedule.length;
     
     if (averageBlockSize < 30) {
-      insights.push('⚠️ Very short blocks - may increase context switching');
+      insights.push('Blocchi molto brevi: il cambio di contesto potrebbe aumentare.');
       score -= 0.1;
     } else if (averageBlockSize > 120) {
-      insights.push('🔥 Long focus blocks - great for deep work');
+      insights.push('Blocchi lunghi adatti al lavoro profondo.');
       score += 0.1;
     }
 
@@ -225,167 +227,158 @@ export default function SmartScheduler({
 
   const getConflictSeverityColor = (severity: string): string => {
     switch (severity) {
-      case 'critical': return 'text-red-400 bg-red-900/20 border-red-400';
-      case 'high': return 'text-orange-400 bg-orange-900/20 border-orange-400';
-      case 'medium': return 'text-yellow-400 bg-yellow-900/20 border-yellow-400';
-      case 'low': return 'text-blue-400 bg-blue-900/20 border-blue-400';
-      default: return 'text-gray-400 bg-gray-900/20 border-gray-400';
+      case 'critical': return 'border-red-200 bg-red-50 text-red-900';
+      case 'high': return 'border-orange-200 bg-orange-50 text-orange-900';
+      case 'medium': return 'border-amber-200 bg-amber-50 text-amber-900';
+      case 'low': return 'border-blue-200 bg-blue-50 text-blue-900';
+      default: return 'border-slate-200 bg-slate-50 text-slate-800';
     }
   };
 
   const getConfidenceColor = (confidence: number): string => {
-    if (confidence >= 0.8) return 'text-green-400';
-    if (confidence >= 0.6) return 'text-yellow-400';
-    return 'text-red-400';
+    if (confidence >= 0.8) return 'text-emerald-700';
+    if (confidence >= 0.6) return 'text-amber-700';
+    return 'text-red-700';
   };
 
-  // Auto-run when tasks change
-  useEffect(() => {
-    if (tasks.length > 0 && !state.isGenerating) {
-      // Auto-generate schedule when tasks are available
-      const timer = setTimeout(generateOptimalSchedule, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [tasks.length]); // Only depend on task count to avoid infinite loops
+  const previewSchedule = state.result
+    ? state.selectedAlternative === -1
+      ? state.result.schedule
+      : state.result.alternatives[state.selectedAlternative]?.schedule ?? state.result.schedule
+    : [];
 
   return (
-    <div className="smart-scheduler space-y-6">
-      {/* 🎮 HEADER & CONTROLS */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-5" data-testid="smart-scheduler-v3">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <h2 className="text-2xl font-bold holographic-text flex items-center space-x-3">
-            <span>⚡</span>
-            <span>PIANIFICATORE INTELLIGENTE</span>
-            <span className="text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-1 rounded-full animate-pulse">
-              MODALITÀ SUPREMA
-            </span>
-          </h2>
-          <p className="text-gray-300 text-sm mt-1">
-            Ottimizzazione AI con pianificazione basata sui tuoi dati reali
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">
+            Precision Performance OS
+          </p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Pianificatore intelligente</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+            Genera una proposta vincolata da disponibilità, scadenze, energia e Goal. Nulla viene
+            salvato prima della tua verifica e dell’azione Applica.
           </p>
         </div>
-
         <button
+          type="button"
           onClick={generateOptimalSchedule}
           disabled={state.isGenerating || tasks.length === 0}
-          onMouseEnter={() => audioManager.buttonHover()}
-          className="btn-gaming px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="lt-button-primary min-h-[44px] px-5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {state.isGenerating ? (
-            <div className="flex items-center space-x-2">
-              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              <span>Ottimizzazione...</span>
-            </div>
+            <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Generazione…</>
           ) : (
-            <span>⚡ Genera Programma Ottimale</span>
+            <><Sparkles size={17} aria-hidden="true" /> Genera proposta</>
           )}
         </button>
-      </div>
+      </header>
 
-      {/* 🔧 OPTIMIZATION CONTROLS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass-card p-4">
-          <label className="block text-sm font-bold text-cyan-400 mb-2">Modalità Ottimizzazione</label>
-          <select
-            value={optimizationMode}
-            onChange={(e) => setOptimizationMode(e.target.value as any)}
-            className="w-full bg-gray-900 border border-cyan-400/30 rounded text-white p-2"
-          >
-            <option value="balanced">🎯 Bilanciato</option>
-            <option value="deadline">⏰ Focalizzato su Scadenze</option>
-            <option value="energy">⚡ Ottimizzato per Energia</option>
-            <option value="goals">🎖️ Allineato agli Obiettivi</option>
-          </select>
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="scheduler-config-title">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Configurazione</p>
+            <h3 id="scheduler-config-title" className="mt-1 text-lg font-semibold text-slate-950">Vincoli della proposta</h3>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+            {tasks.length} task eleggibili
+          </span>
         </div>
-
-        <div className="glass-card p-4">
-          <label className="block text-sm font-bold text-cyan-400 mb-2">Finestra Temporale</label>
-          <select
-            value={schedulingWindow}
-            onChange={(e) => setSchedulingWindow(Number(e.target.value))}
-            className="w-full bg-gray-900 border border-cyan-400/30 rounded text-white p-2"
-          >
-            <option value={3}>3 Giorni</option>
-            <option value={7}>1 Settimana</option>
-            <option value={14}>2 Settimane</option>
-            <option value={30}>1 Mese</option>
-          </select>
-        </div>
-
-        <div className="glass-card p-4">
-          <label className="block text-sm font-bold text-cyan-400 mb-2">Orario di Lavoro</label>
-          <div className="flex space-x-2">
-            <input
-              type="time"
-              value={workingHours.start}
-              onChange={(e) => setWorkingHours(prev => ({ ...prev, start: e.target.value }))}
-              className="flex-1 bg-gray-900 border border-cyan-400/30 rounded text-white p-2"
-            />
-            <input
-              type="time"
-              value={workingHours.end}
-              onChange={(e) => setWorkingHours(prev => ({ ...prev, end: e.target.value }))}
-              className="flex-1 bg-gray-900 border border-cyan-400/30 rounded text-white p-2"
-            />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><Target size={14} /> Strategia</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">Bilanciata multi-vincolo</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Scadenze, energia, Goal e preferenze.</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><CalendarRange size={14} /> Periodo</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">Prossimi 14 giorni</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Orizzonte deterministico del motore attuale.</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2 xl:col-span-1">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><Clock3 size={14} /> Disponibilità</p>
+            <div className="mt-2 flex items-center gap-2">
+              <input aria-label="Disponibilità dalle" type="time" value={workingHours.start} onChange={(event) => setWorkingHours((current) => ({ ...current, start: event.target.value }))} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm" />
+              <span className="text-slate-400">–</span>
+              <input aria-label="Disponibilità alle" type="time" value={workingHours.end} onChange={(event) => setWorkingHours((current) => ({ ...current, end: event.target.value }))} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500"><ShieldCheck size={14} /> Vincoli</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">{existingTimeBlocks.length} blocchi protetti</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Buffer e conflitti restano visibili.</p>
           </div>
         </div>
-      </div>
+      </section>
+
+      {tasks.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+          <h3 className="text-base font-semibold text-slate-900">Nessun task da pianificare</h3>
+          <p className="mx-auto mt-1 max-w-lg text-sm leading-6 text-slate-600">
+            I dati esistenti sono al sicuro. Crea o riapri un task e torna qui per generare una Preview.
+          </p>
+        </div>
+      )}
 
       {/* 📊 SCHEDULING RESULT */}
       {state.result && (
         <div className="space-y-6">
           {/* PRIMARY SCHEDULE */}
-          <div className="glass-card p-6">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="scheduler-proposal-title">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold neon-text">Programma Generato</h3>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Proposta</p>
+                <h3 id="scheduler-proposal-title" className="mt-1 text-xl font-semibold text-slate-950">Anteprima del piano</h3>
+              </div>
               <div className="flex items-center space-x-4">
-                <div className={`text-sm font-mono ${getConfidenceColor(state.result.confidence)}`}>
+                <div className={`text-sm font-semibold ${getConfidenceColor(state.result.confidence)}`}>
                   {Math.round(state.result.confidence * 100)}% confidenza
                 </div>
                 <button
-                  onClick={() => onTimeBlocksCreated?.(state.result!.schedule)}
-                  onMouseEnter={() => audioManager.buttonHover()}
-                  className="btn-gaming px-4 py-2 text-sm bg-gradient-to-r from-green-600 to-green-700"
+                  type="button"
+                  onClick={() => onTimeBlocksCreated?.(previewSchedule)}
+                  disabled={previewSchedule.length === 0}
+                  className="lt-button-primary min-h-[42px] px-4 disabled:opacity-50"
                 >
-                  ✅ Applica Programma
+                  <Check size={16} aria-hidden="true" /> Applica piano
                 </button>
               </div>
             </div>
 
             {/* SCHEDULE OVERVIEW */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div className="bg-blue-900/20 border border-blue-400/30 rounded-lg p-4">
-                <div className="text-2xl font-bold text-blue-400">{state.result.schedule.length}</div>
-                <div className="text-sm text-gray-300">Blocchi Temporali</div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <div className="text-2xl font-semibold text-blue-800">{previewSchedule.length}</div>
+                <div className="text-sm text-blue-700">Blocchi proposti</div>
               </div>
-              <div className="bg-green-900/20 border border-green-400/30 rounded-lg p-4">
-                <div className="text-2xl font-bold text-green-400">
+              <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-4">
+                <div className="text-2xl font-semibold text-cyan-800">
                   {Math.round(
-                    state.result.schedule.reduce((sum, block) => {
+                    previewSchedule.reduce((sum, block) => {
                       const duration = new Date(block.endTime).getTime() - new Date(block.startTime).getTime();
                       return sum + duration / (1000 * 60 * 60);
                     }, 0) * 10
                   ) / 10}h
                 </div>
-                <div className="text-sm text-gray-300">Tempo Totale</div>
+                <div className="text-sm text-cyan-700">Ore pianificate</div>
               </div>
-              <div className="bg-purple-900/20 border border-purple-400/30 rounded-lg p-4">
-                <div className="text-2xl font-bold text-purple-400">{state.result.conflicts.length}</div>
-                <div className="text-sm text-gray-300">Conflitti</div>
+              <div className={`rounded-xl border p-4 ${state.result.conflicts.length > 0 ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50'}`}>
+                <div className={`text-2xl font-semibold ${state.result.conflicts.length > 0 ? 'text-amber-800' : 'text-emerald-800'}`}>{state.result.conflicts.length}</div>
+                <div className={`text-sm ${state.result.conflicts.length > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>Conflitti rilevati</div>
               </div>
             </div>
 
             {/* SCHEDULE QUALITY ANALYSIS */}
             {(() => {
-              const analysis = analyzeScheduleQuality(state.result.schedule);
+              const analysis = analyzeScheduleQuality(previewSchedule);
               return (
-                <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-4 mb-6">
+                <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-bold text-cyan-400">Analisi Qualità Programma</h4>
+                    <h4 className="font-semibold text-slate-900">Qualità della proposta</h4>
                     <div className="flex items-center space-x-2">
-                      <div className="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
+                      <div className="h-2 w-20 overflow-hidden rounded-full bg-slate-200">
                         <div
-                          className="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500"
+                          className="h-full rounded-full bg-indigo-600"
                           style={{ width: `${analysis.score * 100}%` }}
                         ></div>
                       </div>
@@ -396,8 +389,8 @@ export default function SmartScheduler({
                   </div>
                   <div className="space-y-1">
                     {analysis.insights.map((insight, index) => (
-                      <div key={index} className="text-sm text-gray-300">
-                        {insight}
+                      <div key={index} className="flex gap-2 text-sm text-slate-700">
+                        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-500" /> {insight}
                       </div>
                     ))}
                   </div>
@@ -406,15 +399,15 @@ export default function SmartScheduler({
             })()}
 
             {/* REASONING */}
-            <div className="bg-blue-900/10 border border-blue-400/20 rounded-lg p-4 mb-4">
-              <h4 className="font-bold text-blue-400 mb-2">🧠 Ragionamento AI</h4>
-              <p className="text-gray-300 text-sm">{state.result.reasoning}</p>
+            <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+              <h4 className="mb-2 flex items-center gap-2 font-semibold text-indigo-950"><Gauge size={16} /> Criterio della proposta</h4>
+              <p className="text-sm leading-6 text-indigo-900">{state.result.reasoning}</p>
             </div>
 
             {/* CONFLICTS */}
             {state.result.conflicts.length > 0 && (
               <div className="space-y-3">
-                <h4 className="font-bold text-red-400">⚠️ Conflitti di Pianificazione</h4>
+                <h4 className="flex items-center gap-2 font-semibold text-slate-950"><AlertTriangle size={16} className="text-amber-600" /> Conflitti da risolvere</h4>
                 {state.result.conflicts.map((conflict, index) => (
                   <div key={index} className={`border rounded-lg p-3 ${getConflictSeverityColor(conflict.severity)}`}>
                     <div className="font-medium">{conflict.description}</div>
@@ -428,88 +421,92 @@ export default function SmartScheduler({
                 ))}
               </div>
             )}
-          </div>
+          </section>
 
           {/* ALTERNATIVE SCHEDULES */}
           {state.result.alternatives.length > 0 && (
-            <div className="glass-card p-6">
-              <h3 className="text-xl font-bold neon-text mb-4">Programmi Alternativi</h3>
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="scheduler-alternatives-title">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Alternative</p>
+                  <h3 id="scheduler-alternatives-title" className="mt-1 text-lg font-semibold text-slate-950">Confronta prima di applicare</h3>
+                </div>
+                <button type="button" onClick={() => selectAlternative(-1)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${state.selectedAlternative === -1 ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 text-slate-700'}`}>Piano principale</button>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {state.result.alternatives.map((alt, index) => (
                   <div
                     key={index}
-                    className={`border rounded-lg p-4 cursor-pointer transition-all duration-300 ${
+                    className={`cursor-pointer rounded-xl border p-4 transition-colors ${
                       state.selectedAlternative === index
-                        ? 'border-cyan-400 bg-cyan-900/20'
-                        : 'border-gray-600/30 hover:border-cyan-400/50'
+                        ? 'border-indigo-300 bg-indigo-50'
+                        : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'
                     }`}
                     onClick={() => selectAlternative(index)}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-bold text-cyan-400">{alt.name}</h4>
+                      <h4 className="font-semibold text-slate-950">{alt.name}</h4>
                       <div className={`text-sm ${getConfidenceColor(alt.confidence)}`}>
                         {Math.round(alt.confidence * 100)}%
                       </div>
                     </div>
-                    <p className="text-gray-300 text-sm mb-3">{alt.description}</p>
+                    <p className="mb-3 text-sm leading-5 text-slate-600">{alt.description}</p>
                     <div className="space-y-1">
-                      <div className="text-xs font-medium text-gray-400">Compromessi:</div>
+                      <div className="text-xs font-semibold text-slate-500">Compromessi</div>
                       {alt.tradeoffs.map((tradeoff, i) => (
-                        <div key={i} className="text-xs text-gray-400">• {tradeoff}</div>
+                        <div key={i} className="text-xs leading-5 text-slate-600">• {tradeoff}</div>
                       ))}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           )}
         </div>
       )}
 
       {/* 📈 STATISTICS */}
       {tasks.length > 0 && (
-        <div className="glass-card p-6">
-          <h3 className="text-lg font-bold neon-text mb-4">📈 Statistiche Pianificazione</h3>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-950"><Layers3 size={18} /> Carico da pianificare</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center">
-              <div className="text-2xl font-bold text-blue-400">{tasks.length}</div>
-              <div className="text-sm text-gray-400">Task da Pianificare</div>
+              <div className="text-2xl font-semibold text-slate-950">{tasks.length}</div>
+              <div className="text-sm text-slate-500">Task da pianificare</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-green-400">
+              <div className="text-2xl font-semibold text-cyan-700">
                 {Math.round(tasks.reduce((sum, t) => sum + (t.estimatedMinutes || 60), 0) / 60 * 10) / 10}h
               </div>
-              <div className="text-sm text-gray-400">Lavoro Totale</div>
+              <div className="text-sm text-slate-500">Lavoro stimato</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-purple-400">
+              <div className="text-2xl font-semibold text-indigo-700">
                 {tasks.filter(t => t.dueDate).length}
               </div>
-              <div className="text-sm text-gray-400">Con Scadenze</div>
+              <div className="text-sm text-slate-500">Con scadenza</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-cyan-400">
-                {tasks.filter(t => t.priority === 'high').length}
+              <div className="text-2xl font-semibold text-amber-700">
+                {tasks.filter(t => t.priority === 'high' || t.priority === 'critical').length}
               </div>
-              <div className="text-sm text-gray-400">Alta Priorità</div>
+              <div className="text-sm text-slate-500">Priorità alta</div>
             </div>
           </div>
-        </div>
+        </section>
       )}
 
       {/* 💡 HELP & TIPS */}
-      <div className="glass-card p-4">
-        <details className="text-sm">
-          <summary className="cursor-pointer font-bold text-cyan-400 hover:text-cyan-300">
-            💡 Suggerimenti Pianificazione Intelligente
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <details className="text-sm text-slate-700">
+          <summary className="cursor-pointer font-semibold text-slate-900">
+            Come viene costruita la proposta
           </summary>
-          <div className="mt-3 space-y-2 text-gray-300">
-            <p>• <strong>Modalità Bilanciata:</strong> Considera tutti i fattori equamente per un programma ottimale</p>
-            <p>• <strong>Focalizzato su Scadenze:</strong> Prioritizza task urgenti e rispetto delle scadenze</p>
-            <p>• <strong>Ottimizzato per Energia:</strong> Pianifica task impegnativi durante le ore di picco energetico</p>
-            <p>• <strong>Allineato agli Obiettivi:</strong> Raggruppa task correlati per progresso focalizzato sugli obiettivi</p>
-            <p>• Finestre temporali più lunghe offrono più opportunità di ottimizzazione ma possono sembrare meno immediate</p>
-            <p>• L'AI considera automaticamente i tuoi pattern energetici, la complessità dei task e i vincoli contestuali</p>
+          <div className="mt-3 grid gap-2 leading-6 md:grid-cols-2">
+            <p>• Le scadenze aumentano l’urgenza senza nascondere i conflitti.</p>
+            <p>• I task più impegnativi cercano le ore a energia maggiore.</p>
+            <p>• I task collegati vengono raggruppati per ridurre il cambio di contesto.</p>
+            <p>• Ogni alternativa resta una Preview finché non scegli Applica piano.</p>
           </div>
         </details>
       </div>

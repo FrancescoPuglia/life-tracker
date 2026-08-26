@@ -273,8 +273,8 @@ describe('PerformanceDashboard', () => {
     await waitFor(() =>
       expect(screen.getByTestId('performance-empty-state')).toBeInTheDocument()
     );
-    expect(screen.getByText(/Nothing planned or tracked/i)).toBeInTheDocument();
-    expect(screen.getByText(/Open Time Planner/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nessun piano o tracking/i)).toBeInTheDocument();
+    expect(screen.getByText(/Apri Time Planner/i)).toBeInTheDocument();
   });
 
   it('degrades gracefully when sessions fail to load, with a retry', async () => {
@@ -283,11 +283,11 @@ describe('PerformanceDashboard', () => {
     render(<PerformanceDashboard />);
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
-    expect(screen.getByText(/actual execution is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/esecuzione effettiva non è disponibile/i)).toBeInTheDocument();
     expect(screen.queryByTestId('performance-dashboard')).toBeNull();
 
     getByIndexMock.mockResolvedValueOnce([makeSession({})]);
-    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    fireEvent.click(screen.getByRole('button', { name: /riprova/i }));
 
     await waitFor(() =>
       expect(screen.getByTestId('performance-dashboard')).toBeInTheDocument()

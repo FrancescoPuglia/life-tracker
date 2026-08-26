@@ -716,7 +716,6 @@ export default function MainApp({ buildId }: MainAppProps) {
                     tasks={data.tasks}
                     existingTimeBlocks={data.timeBlocks}
                     goals={data.goals}
-                    onScheduleGenerated={() => {}}
                     onTimeBlocksCreated={async (blocks) => {
                       for (const block of blocks) {
                         await data.createTimeBlock(block);
@@ -871,9 +870,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                 )}
 
                 {activeTab === 'vision-board' && (
-                  <VisionBoardEnhanced
-                    onBack={() => setActiveTab('planner')}
-                  />
+                  <VisionBoardEnhanced />
                 )}
 
                 {activeTab === 'voice' && (

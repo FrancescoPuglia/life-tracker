@@ -532,10 +532,10 @@ export default function DesktopSettings({
           <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h4 className="font-bold text-slate-900">Daily and Weekly email reports</h4>
+                <h4 className="font-bold text-slate-900">Review esecutive programmate</h4>
                 <p className="mt-1 text-sm text-slate-600">
-                  Times use the persisted timezone above. Saving a preference does not configure
-                  a provider or send an email.
+                  Le metriche restano deterministiche e usano il fuso orario persistito. Salvare
+                  una preferenza non configura un provider e non invia automaticamente email.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -553,12 +553,12 @@ export default function DesktopSettings({
                       : { ...current.weeklyReport, enabled: false },
                   }))}
                 />
-                Enable email reports
+                Abilita invio email
               </label>
             </div>
 
             <label className="mt-4 block max-w-xl text-sm font-semibold text-slate-800">
-              Report recipient
+              Destinatario
               <input
                 aria-label="Report recipient"
                 type="email"
@@ -585,10 +585,10 @@ export default function DesktopSettings({
                       dailyReport: { ...current.dailyReport, enabled: event.target.checked },
                     }))}
                   />
-                  Daily Report
+                  Review giornaliera
                 </label>
                 <label className="mt-3 block text-sm text-slate-700">
-                  Delivery time
+                  Orario
                   <input
                     aria-label="Daily Report time"
                     type="time"
@@ -613,11 +613,11 @@ export default function DesktopSettings({
                       weeklyReport: { ...current.weeklyReport, enabled: event.target.checked },
                     }))}
                   />
-                  Weekly Report
+                  Weekly Executive Review
                 </label>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <label className="text-sm text-slate-700">
-                    Day
+                    Giorno
                     <select
                       aria-label="Weekly Report day"
                       value={preferences.weeklyReport.isoWeekday}
@@ -630,12 +630,12 @@ export default function DesktopSettings({
                       }))}
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                     >
-                      {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                      {['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica']
                         .map((day, index) => <option key={day} value={index + 1}>{day}</option>)}
                     </select>
                   </label>
                   <label className="text-sm text-slate-700">
-                    Time
+                    Orario
                     <input
                       aria-label="Weekly Report time"
                       type="time"

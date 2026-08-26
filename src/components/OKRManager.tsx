@@ -721,21 +721,21 @@ function useTaskMetrics(task: Task) {
 // ============================================================================
 
 const STATUS_CONFIG: Record<string, { label: string; className: string; icon?: ReactNode }> = {
-  active: { label: "Active", className: "bg-blue-50 text-blue-700 border-blue-200" },
-  completed: { label: "Completed", className: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle className="w-3 h-3" /> },
-  paused: { label: "Paused", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
-  at_risk: { label: "At Risk", className: "bg-red-50 text-red-700 border-red-200", icon: <AlertTriangle className="w-3 h-3" /> },
-  archived: { label: "Archived", className: "bg-gray-50 text-gray-500 border-gray-200" },
-  pending: { label: "Pending", className: "bg-gray-50 text-gray-600 border-gray-200" },
-  in_progress: { label: "In Progress", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  blocked: { label: "Blocked", className: "bg-red-50 text-red-700 border-red-200" },
+  active: { label: "Attivo", className: "bg-blue-50 text-blue-700 border-blue-200" },
+  completed: { label: "Completato", className: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle className="w-3 h-3" /> },
+  paused: { label: "In pausa", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+  at_risk: { label: "A rischio", className: "bg-red-50 text-red-700 border-red-200", icon: <AlertTriangle className="w-3 h-3" /> },
+  archived: { label: "Archiviato", className: "bg-gray-50 text-gray-500 border-gray-200" },
+  pending: { label: "Da fare", className: "bg-gray-50 text-gray-600 border-gray-200" },
+  in_progress: { label: "In corso", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  blocked: { label: "Bloccato", className: "bg-red-50 text-red-700 border-red-200" },
 };
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; className: string }> = {
-  critical: { label: "Critical", className: "bg-red-100 text-red-800 border-red-300" },
-  high: { label: "High", className: "bg-orange-50 text-orange-700 border-orange-200" },
-  medium: { label: "Medium", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
-  low: { label: "Low", className: "bg-green-50 text-green-700 border-green-200" },
+  critical: { label: "Critica", className: "bg-red-100 text-red-800 border-red-300" },
+  high: { label: "Alta", className: "bg-orange-50 text-orange-700 border-orange-200" },
+  medium: { label: "Media", className: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+  low: { label: "Bassa", className: "bg-green-50 text-green-700 border-green-200" },
 };
 
 function StatusBadge({ status }: { status?: string }) {
@@ -840,12 +840,24 @@ interface GoalCardProps {
 
 function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, isDeleting = false, onShowNotes, onShowRoadmap, onShowVisionBoard }: GoalCardProps) {
   const metrics = useGoalMetrics(goal);
+  const { projects, tasks, currentUserId } = useOKRContext();
+  const goalProjects = projects.filter((project) => (
+    !project.deleted && project.userId === currentUserId && project.goalId === goal.id
+  ));
+  const projectIds = new Set(goalProjects.map((project) => project.id));
+  const nextTask = tasks.find((task) => (
+    !task.deleted
+    && task.userId === currentUserId
+    && task.status !== 'completed'
+    && task.status !== 'cancelled'
+    && (task.goalId === goal.id || task.goalIds?.includes(goal.id) || projectIds.has(task.projectId))
+  ));
 
   return (
     <div
       className={`
-        bg-white border-2 rounded-xl p-5 cursor-pointer transition-all duration-200
-        ${isSelected ? "border-blue-500 shadow-lg ring-2 ring-blue-100" : "border-gray-200 hover:border-gray-300 hover:shadow-md"}
+        cursor-pointer rounded-2xl border bg-white p-5 transition-colors
+        ${isSelected ? "border-indigo-400 ring-2 ring-indigo-100" : "border-slate-200 hover:border-slate-300"}
       `}
       onClick={onSelect}
       role="button"
@@ -867,9 +879,9 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, isDeleting =
           ) : (
             <h3 className="text-lg font-semibold text-gray-900 truncate">{goal.title}</h3>
           )}
-          {goal.description && (
-            <p className="text-sm text-gray-500 mt-1 line-clamp-2">{stripGaiKeyMarker(goal.description)}</p>
-          )}
+          <p className="mt-1 line-clamp-2 min-h-[40px] text-sm leading-5 text-slate-600">
+            {goal.description ? stripGaiKeyMarker(goal.description) : 'Outcome non ancora descritto.'}
+          </p>
         </div>
         <div className="flex items-center gap-1">
           {onShowNotes && (
@@ -940,29 +952,29 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, isDeleting =
         {metrics.weeklyHoursTarget > 0 && (
           <MetricRow
             icon={<Calendar className="w-3.5 h-3.5" />}
-            label="Weekly Target"
+            label="Target settimanale"
             value={`${formatHours(metrics.weeklyHoursTarget)}h`}
           />
         )}
         <MetricRow
           icon={<Target className="w-3.5 h-3.5" />}
-          label="Total Target"
+          label="Target totale"
           value={metrics.targetHours > 0 ? `${formatHours(metrics.targetHours)}h` : "—"}
         />
         <MetricRow
           icon={<Clock className="w-3.5 h-3.5" />}
-          label="Planned"
+          label="Pianificato"
           value={`${formatHours(metrics.plannedHours)}h`}
         />
         <MetricRow
           icon={<TrendingUp className="w-3.5 h-3.5" />}
-          label={metrics.actualAvailability === 'partial' ? 'Known actual ≥' : 'Known actual'}
-          value={metrics.actualAvailability === 'unavailable' ? 'Unavailable' : `${formatHours(metrics.actualHours)}h`}
+          label={metrics.actualAvailability === 'partial' ? 'Effettivo noto ≥' : 'Effettivo'}
+          value={metrics.actualAvailability === 'unavailable' ? 'Non disponibile' : `${formatHours(metrics.actualHours)}h`}
           subValue={metrics.actualAvailability !== 'unavailable' && metrics.targetHours > 0 ? `/ ${formatHours(metrics.targetHours)}h` : undefined}
         />
         {metrics.actualAvailability === 'partial' && (
           <p className="text-xs text-amber-700">
-            {metrics.missingActualCount} completed block{metrics.missingActualCount === 1 ? '' : 's'} lack Session or explicit actual evidence.
+            {metrics.missingActualCount} blocchi completati non hanno una Sessione o evidenza effettiva.
           </p>
         )}
       </div>
@@ -971,16 +983,27 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, isDeleting =
         <div className="flex items-center justify-between mb-2">
           <span className="text-lg font-bold text-blue-600">{metrics.progress}%</span>
           {metrics.krProgress !== null && (
-            <span className="text-xs text-gray-500">Based on Key Results</span>
+            <span className="text-xs text-gray-500">Da Key Result</span>
           )}
         </div>
         <ProgressBar progress={metrics.progress} />
       </div>
 
+      <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 text-sm">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Portfolio</p>
+          <p className="mt-1 font-semibold text-slate-800">{goalProjects.length} progetti</p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Prossima azione</p>
+          <p className="mt-1 truncate font-semibold text-slate-800">{nextTask?.title ?? '—'}</p>
+        </div>
+      </div>
+
       {isSelected && (
         <div className="mt-3 pt-3 border-t border-blue-100 flex items-center gap-1 text-xs text-blue-600">
           <ChevronRight className="w-3 h-3" />
-          <span>Viewing details below</span>
+          <span>Dettagli aperti sotto</span>
         </div>
       )}
     </div>
@@ -2168,6 +2191,19 @@ export default function OKRManager(props: OKRManagerProps) {
   return (
     <OKRContext.Provider value={contextValue}>
       <div className="space-y-6">
+        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Portfolio esecutivo</p>
+            <h2 className="mt-1 text-2xl font-semibold text-slate-950">Obiettivi e progetti</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+              Outcome, priorità e tempo effettivamente eseguito. Le Sessioni restano l’autorità per l’actual.
+            </p>
+          </div>
+          <dl className="flex gap-5 text-right">
+            <div><dt className="text-xs text-slate-500">Goal attivi</dt><dd className="text-xl font-semibold text-slate-950">{visibleGoals.filter((goal) => goal.status === 'active').length}</dd></div>
+            <div><dt className="text-xs text-slate-500">A rischio</dt><dd className="text-xl font-semibold text-amber-700">{visibleGoals.filter((goal) => goal.status === 'at_risk').length}</dd></div>
+          </dl>
+        </header>
         {sessionCoverage === 'error' && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
             Execution evidence is unavailable. Planned work remains visible, but actual-time and adherence values are withheld.
@@ -2186,13 +2222,13 @@ export default function OKRManager(props: OKRManagerProps) {
           </div>
         )}
         {/* Top toolbar */}
-        <div className="flex flex-wrap items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <button
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
             onClick={() => setShowCreateModal("goal")}
           >
             <Plus className="w-4 h-4" />
-            New Goal
+            Nuovo Goal
           </button>
 
           {selectedGoalId && (
@@ -2203,7 +2239,7 @@ export default function OKRManager(props: OKRManagerProps) {
                 onClick={() => setShowCreateModal("project")}
               >
                 <FolderOpen className="w-4 h-4" />
-                Add Project
+                Aggiungi progetto
               </button>
 
               <button
@@ -2211,7 +2247,7 @@ export default function OKRManager(props: OKRManagerProps) {
                 onClick={() => setShowCreateModal("keyResult")}
               >
                 <Target className="w-4 h-4" />
-                Add Key Result
+                Aggiungi Key Result
               </button>
             </>
           )}
@@ -2222,7 +2258,7 @@ export default function OKRManager(props: OKRManagerProps) {
               onClick={() => setShowCreateModal("task")}
             >
               <ListTodo className="w-4 h-4" />
-              Add Task
+              Aggiungi task
             </button>
           )}
 
@@ -2234,7 +2270,7 @@ export default function OKRManager(props: OKRManagerProps) {
                 setSelectedProjectId(null);
               }}
             >
-              Clear selection
+              Chiudi selezione
             </button>
           )}
         </div>
@@ -2243,15 +2279,15 @@ export default function OKRManager(props: OKRManagerProps) {
         {visibleGoals.length === 0 ? (
           <EmptyState
             icon={<Target className="w-6 h-6" />}
-            title="No Goals Yet"
-            description="Create your first goal to get started with OKR tracking."
+            title="Nessun Goal"
+            description="Crea il primo outcome del portfolio. I dati esistenti non vengono modificati."
             action={
               <button
                 className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
                 onClick={() => setShowCreateModal("goal")}
               >
                 <Plus className="w-4 h-4" />
-                Create Goal
+                Crea Goal
               </button>
             }
           />

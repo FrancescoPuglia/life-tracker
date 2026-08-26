@@ -3,7 +3,16 @@
 // 🔄 REAL-TIME ADAPTATION COMPONENT - Dynamic Schedule Intelligence
 
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
+import {
+  AlertTriangle,
+  BatteryLow,
+  Check,
+  Clock3,
+  PauseCircle,
+  ShieldCheck,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { rePlanningEngine } from '@/lib/rePlanningEngine';
 import { RePlanningTrigger, RePlanningOptions, RePlanningResult, ScheduleChange } from '@/types/ai-enhanced';
 import { TimeBlock, Task, Goal } from '@/types';
@@ -249,10 +258,8 @@ export default function RealTimeAdaptation({
         onEmergencyMode?.(true, `High impact adaptation: ${result.reasoning}`);
       }
 
-      // 📡 APPLY CHANGES
-      if (result.changes.length > 0) {
-        onScheduleAdapted(result.newSchedule, result.changes);
-      }
+      // The result remains a proposal. Structural schedule changes are sent
+      // to the persistence owner only after the explicit Apply action below.
 
     } catch (error) {
       console.error('🔄 ADAPTATION ERROR:', error);
@@ -311,6 +318,19 @@ export default function RealTimeAdaptation({
           }
         };
         break;
+
+      case 'missed':
+        trigger = {
+          type: 'missed_block',
+          timestamp: now,
+          affectedBlockId: getMissedBlockId(now),
+          context: {
+            currentSchedule,
+            remainingTasks: tasks,
+            missedTime: now,
+          },
+        };
+        break;
         
       case 'interrupt':
         trigger = {
@@ -353,266 +373,223 @@ export default function RealTimeAdaptation({
     return missedBlock?.id;
   };
 
-  const getDisruptionColor = (severity: string): string => {
-    switch (severity) {
-      case 'critical': return 'text-red-400 bg-red-900/20 border-red-400';
-      case 'high': return 'text-orange-400 bg-orange-900/20 border-orange-400';
-      case 'medium': return 'text-yellow-400 bg-yellow-900/20 border-yellow-400';
-      case 'low': return 'text-green-400 bg-green-900/20 border-green-400';
-      default: return 'text-gray-400 bg-gray-900/20 border-gray-400';
-    }
+  const getConfidenceColor = (confidence: number): string => {
+    if (confidence >= 0.8) return 'text-emerald-700';
+    if (confidence >= 0.6) return 'text-amber-700';
+    if (confidence >= 0.3) return 'text-orange-700';
+    return 'text-red-700';
   };
 
-  const getConfidenceColor = (confidence: number): string => {
-    if (confidence >= 0.8) return 'text-green-400';
-    if (confidence >= 0.6) return 'text-yellow-400';
-    if (confidence >= 0.3) return 'text-orange-400';
-    return 'text-red-400';
+  const applyLastProposal = () => {
+    if (!state.lastResult || state.lastResult.changes.length === 0) return;
+    onScheduleAdapted(state.lastResult.newSchedule, state.lastResult.changes);
+    audioManager.buttonFeedback();
   };
 
   return (
-    <div className="real-time-adaptation space-y-4">
-      {/* 🔄 ADAPTATION STATUS */}
-      <div className="glass-card p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
-            <h3 className="text-lg font-bold holographic-text">🔄 Real-Time Adaptation</h3>
-            <div className={`w-3 h-3 rounded-full ${state.isActive ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
-          </div>
+    <div className="space-y-5" data-testid="adapt-plan-v3">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Esecuzione adattiva</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Adatta il piano</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+            Dichiara cosa è cambiato, verifica il delta e applica soltanto la proposta che vuoi mantenere.
+          </p>
+        </div>
           
           <button
+            type="button"
             onClick={() => setState(prev => ({ ...prev, isActive: !prev.isActive }))}
-            onMouseEnter={() => audioManager.buttonHover()}
-            className={`btn-gaming text-sm px-4 py-2 ${
+            className={`min-h-[40px] rounded-xl border px-4 text-sm font-semibold transition-colors ${
               state.isActive 
-                ? 'bg-gradient-to-r from-green-600 to-green-700' 
-                : 'bg-gradient-to-r from-gray-600 to-gray-700'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-slate-200 bg-white text-slate-600'
             }`}
           >
-            {state.isActive ? '🟢 Active' : '⚪ Inactive'}
+            <span className={`mr-2 inline-block h-2 w-2 rounded-full ${state.isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+            {state.isActive ? 'Monitoraggio attivo' : 'Monitoraggio sospeso'}
           </button>
+      </header>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="adapt-change-title">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Input</p>
+            <h3 id="adapt-change-title" className="mt-1 text-lg font-semibold text-slate-950">Cosa è cambiato?</h3>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            Energia {Math.round(userEnergyLevel * 100)}%
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <AdaptTriggerButton icon={<Clock3 size={18} />} label="Sessione più lunga" description="Recupera un overrun" active={disruptions.sessionOverrun} onClick={() => void handleManualAdaptation('overrun')} />
+          <AdaptTriggerButton icon={<BatteryLow size={18} />} label="Energia bassa" description="Riduci il carico cognitivo" active={disruptions.energyDrop} onClick={() => void handleManualAdaptation('energy_low')} />
+          <AdaptTriggerButton icon={<PauseCircle size={18} />} label="Blocco saltato" description="Ripara il tempo perso" active={disruptions.missedBlock} onClick={() => void handleManualAdaptation('missed')} />
+          <AdaptTriggerButton icon={<AlertTriangle size={18} />} label="Interruzione esterna" description="Proteggi il resto del giorno" active={disruptions.externalInterrupt} onClick={() => void handleManualAdaptation('interrupt')} />
         </div>
 
         {/* PROCESSING INDICATOR */}
         {state.isProcessing && (
-          <div className="mb-4 p-3 border border-cyan-400/30 rounded-lg bg-cyan-900/10">
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3">
             <div className="flex items-center space-x-2">
-              <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-cyan-400 font-medium">Processing adaptation...</span>
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
+              <span className="text-sm font-medium text-blue-900">Calcolo del delta sicuro…</span>
             </div>
           </div>
         )}
 
         {/* EMERGENCY MODE */}
         {state.emergencyMode && (
-          <div className="mb-4 p-3 border border-red-400 rounded-lg bg-red-900/20 animate-pulse">
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <span className="text-2xl">🚨</span>
-                <span className="text-red-400 font-bold">EMERGENCY MODE ACTIVE</span>
+                <AlertTriangle size={18} className="text-red-700" />
+                <span className="font-semibold text-red-900">Impatto elevato: verifica ogni modifica</span>
               </div>
               <button
                 onClick={() => {
                   setState(prev => ({ ...prev, emergencyMode: false }));
                   onEmergencyMode?.(false, '');
                 }}
-                className="btn-gaming text-xs px-3 py-1 bg-red-600"
+                className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-800"
               >
-                Clear
+                Chiudi
               </button>
             </div>
           </div>
         )}
 
-        {/* CURRENT DISRUPTIONS */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className={`p-3 border rounded-lg text-center ${
-            disruptions.sessionOverrun 
-              ? getDisruptionColor('medium') 
-              : 'border-gray-600/30 text-gray-400'
-          }`}>
-            <div className="text-lg">⏰</div>
-            <div className="text-xs">Session Overrun</div>
-          </div>
-          
-          <div className={`p-3 border rounded-lg text-center ${
-            disruptions.energyDrop 
-              ? getDisruptionColor('high') 
-              : 'border-gray-600/30 text-gray-400'
-          }`}>
-            <div className="text-lg">⚡</div>
-            <div className="text-xs">Energy Drop</div>
-          </div>
-          
-          <div className={`p-3 border rounded-lg text-center ${
-            disruptions.missedBlock 
-              ? getDisruptionColor('high') 
-              : 'border-gray-600/30 text-gray-400'
-          }`}>
-            <div className="text-lg">📅</div>
-            <div className="text-xs">Missed Block</div>
-          </div>
-          
-          <div className={`p-3 border rounded-lg text-center ${
-            disruptions.externalInterrupt 
-              ? getDisruptionColor('critical') 
-              : 'border-gray-600/30 text-gray-400'
-          }`}>
-            <div className="text-lg">⚠️</div>
-            <div className="text-xs">External Interrupt</div>
-          </div>
-        </div>
-      </div>
+      </section>
 
       {/* 🎯 LAST ADAPTATION RESULT */}
       {state.lastResult && (
-        <div className="glass-card p-4">
-          <h4 className="font-bold text-cyan-400 mb-3">📊 Last Adaptation</h4>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="adapt-proposal-title">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Preview</p>
+              <h3 id="adapt-proposal-title" className="mt-1 text-lg font-semibold text-slate-950">Delta proposto</h3>
+            </div>
+            <button type="button" onClick={applyLastProposal} disabled={state.lastResult.changes.length === 0} className="lt-button-primary min-h-[42px] px-4 disabled:opacity-50">
+              <Check size={16} aria-hidden="true" /> Applica delta
+            </button>
+          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-cyan-400">{state.lastResult.changes.length}</div>
-              <div className="text-sm text-gray-400">Changes Made</div>
+          <div className="my-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+              <div className="text-2xl font-semibold text-slate-950">{state.lastResult.changes.length}</div>
+              <div className="text-sm text-slate-500">Modifiche proposte</div>
             </div>
             
-            <div className="text-center">
-              <div className={`text-2xl font-bold ${getConfidenceColor(state.lastResult.confidence || 0)}`}>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+              <div className={`text-2xl font-semibold ${getConfidenceColor(state.lastResult.confidence || 0)}`}>
                 {Math.round((state.lastResult.confidence || 0) * 100)}%
               </div>
-              <div className="text-sm text-gray-400">Confidence</div>
+              <div className="text-sm text-slate-500">Confidenza</div>
             </div>
             
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-400">
-                {state.lastTrigger?.type || 'unknown'}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+              <div className="truncate text-base font-semibold text-indigo-700">
+                {friendlyTrigger(state.lastTrigger?.type)}
               </div>
-              <div className="text-sm text-gray-400">Trigger</div>
+              <div className="mt-1 text-sm text-slate-500">Evento</div>
             </div>
           </div>
           
-          <div className="bg-gray-900/50 border border-gray-600/30 rounded-lg p-3 mb-4">
-            <div className="text-sm text-gray-300">{state.lastResult.reasoning}</div>
+          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+            <div className="text-sm leading-6 text-blue-950">{state.lastResult.reasoning}</div>
           </div>
           
           {state.lastResult.changes.length > 0 && (
-            <details className="text-sm">
-              <summary className="cursor-pointer font-medium text-cyan-400 hover:text-cyan-300">
-                View Changes ({state.lastResult.changes.length})
+            <details className="rounded-xl border border-slate-200 p-4 text-sm" open>
+              <summary className="cursor-pointer font-semibold text-slate-900">
+                Keep · Move · Drop · Repair ({state.lastResult.changes.length})
               </summary>
               <div className="mt-2 space-y-2">
                 {state.lastResult.changes.slice(0, 5).map((change, index) => (
-                  <div key={index} className="bg-gray-800/50 rounded p-2">
-                    <div className="font-medium text-yellow-400 capitalize">{change.type}</div>
-                    <div className="text-gray-300 text-xs">{change.reasoning}</div>
+                  <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="font-semibold capitalize text-slate-900">{friendlyChange(change.type)}</div>
+                    <div className="mt-1 text-xs leading-5 text-slate-600">{change.reasoning}</div>
                   </div>
                 ))}
                 {state.lastResult.changes.length > 5 && (
-                  <div className="text-gray-400 text-xs">
-                    ... and {state.lastResult.changes.length - 5} more changes
+                  <div className="text-xs text-slate-500">
+                    Altre {state.lastResult.changes.length - 5} modifiche nella proposta completa
                   </div>
                 )}
               </div>
             </details>
           )}
-        </div>
+          <p className="mt-4 flex items-center gap-2 text-xs text-slate-500"><ShieldCheck size={14} /> Nessun TimeBlock viene modificato prima di Applica delta.</p>
+        </section>
       )}
 
       {/* ⚙️ ADAPTATION SETTINGS */}
-      <div className="glass-card p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <details>
-          <summary className="cursor-pointer font-bold text-cyan-400 hover:text-cyan-300 mb-3">
-            ⚙️ Adaptation Settings
+          <summary className="mb-3 flex cursor-pointer items-center gap-2 font-semibold text-slate-900">
+            <SlidersHorizontal size={17} /> Regole di adattamento
           </summary>
           
           <div className="space-y-4 mt-4">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-gray-300">Auto-Adaptation</label>
+              <label className="text-sm font-medium text-slate-700">Prepara automaticamente una Preview</label>
               <button
                 onClick={() => setAdaptationSettings(prev => ({ ...prev, autoAdapt: !prev.autoAdapt }))}
                 className={`px-3 py-1 rounded text-sm ${
                   adaptationSettings.autoAdapt 
-                    ? 'bg-green-600 text-white' 
-                    : 'bg-gray-600 text-gray-300'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 text-slate-700'
                 }`}
               >
-                {adaptationSettings.autoAdapt ? 'ON' : 'OFF'}
+                {adaptationSettings.autoAdapt ? 'Attiva' : 'Disattiva'}
               </button>
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Strategy</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Strategia</label>
               <select
                 value={adaptationSettings.strategy}
                 onChange={(e) => setAdaptationSettings(prev => ({ ...prev, strategy: e.target.value as any }))}
-                className="w-full bg-gray-900 border border-gray-600 rounded text-white p-2"
+                className="w-full rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
               >
-                <option value="balanced">🎯 Balanced</option>
-                <option value="save_day">💼 Save the Day</option>
-                <option value="save_goal">🎖️ Save Goals</option>
-                <option value="save_energy">⚡ Save Energy</option>
-                <option value="minimal_change">🔧 Minimal Change</option>
+                <option value="balanced">Bilanciata</option>
+                <option value="save_day">Proteggi la giornata</option>
+                <option value="save_goal">Proteggi i Goal</option>
+                <option value="save_energy">Proteggi l’energia</option>
+                <option value="minimal_change">Cambiamento minimo</option>
               </select>
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Aggressiveness</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Ampiezza del cambiamento</label>
               <select
                 value={adaptationSettings.aggressiveness}
                 onChange={(e) => setAdaptationSettings(prev => ({ ...prev, aggressiveness: e.target.value as any }))}
-                className="w-full bg-gray-900 border border-gray-600 rounded text-white p-2"
+                className="w-full rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
               >
-                <option value="conservative">🐌 Conservative</option>
-                <option value="moderate">⚖️ Moderate</option>
-                <option value="aggressive">🚀 Aggressive</option>
+                <option value="conservative">Conservativa</option>
+                <option value="moderate">Moderata</option>
+                <option value="aggressive">Ampia</option>
               </select>
             </div>
           </div>
         </details>
       </div>
 
-      {/* 🎮 MANUAL TRIGGERS */}
-      <div className="glass-card p-4">
-        <h4 className="font-bold text-cyan-400 mb-3">🎮 Manual Adaptation Triggers</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <button
-            onClick={() => handleManualAdaptation('overrun')}
-            onMouseEnter={() => audioManager.buttonHover()}
-            className="btn-gaming px-4 py-2 text-sm bg-gradient-to-r from-orange-600 to-red-600"
-          >
-            ⏰ Session Overrun
-          </button>
-          
-          <button
-            onClick={() => handleManualAdaptation('energy_low')}
-            onMouseEnter={() => audioManager.buttonHover()}
-            className="btn-gaming px-4 py-2 text-sm bg-gradient-to-r from-yellow-600 to-orange-600"
-          >
-            ⚡ Low Energy
-          </button>
-          
-          <button
-            onClick={() => handleManualAdaptation('interrupt')}
-            onMouseEnter={() => audioManager.buttonHover()}
-            className="btn-gaming px-4 py-2 text-sm bg-gradient-to-r from-red-600 to-pink-600"
-          >
-            ⚠️ External Interrupt
-          </button>
-        </div>
-      </div>
-
       {/* 📊 ADAPTATION HISTORY */}
       {state.adaptationHistory.length > 0 && (
-        <div className="glass-card p-4">
-          <h4 className="font-bold text-cyan-400 mb-3">📊 Recent Adaptations</h4>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h4 className="mb-3 text-base font-semibold text-slate-950">Preview recenti</h4>
           <div className="space-y-2">
             {state.adaptationHistory.slice(-5).map((adaptation, index) => (
-              <div key={index} className="flex items-center justify-between text-sm bg-gray-800/30 rounded p-2">
+              <div key={index} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm">
                 <div className="flex items-center space-x-2">
-                  <span className="text-gray-400">{adaptation.timestamp.toLocaleTimeString()}</span>
-                  <span className="text-cyan-400 capitalize">{adaptation.trigger}</span>
+                  <span className="text-slate-500">{adaptation.timestamp.toLocaleTimeString()}</span>
+                  <span className="capitalize text-slate-800">{friendlyTrigger(adaptation.trigger)}</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <span className="text-yellow-400">{adaptation.changesCount} changes</span>
+                  <span className="text-slate-600">{adaptation.changesCount} modifiche</span>
                   <span className={getConfidenceColor(adaptation.confidence)}>
                     {Math.round(adaptation.confidence * 100)}%
                   </span>
@@ -624,4 +601,52 @@ export default function RealTimeAdaptation({
       )}
     </div>
   );
+}
+
+function AdaptTriggerButton({
+  icon,
+  label,
+  description,
+  active,
+  onClick,
+}: {
+  readonly icon: ReactNode;
+  readonly label: string;
+  readonly description: string;
+  readonly active: boolean;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[92px] rounded-xl border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+        active
+          ? 'border-amber-300 bg-amber-50 text-amber-950'
+          : 'border-slate-200 bg-slate-50 text-slate-900 hover:border-indigo-200 hover:bg-indigo-50/40'
+      }`}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold">{icon}{label}</span>
+      <span className="mt-2 block text-xs leading-5 text-slate-500">{description}</span>
+    </button>
+  );
+}
+
+function friendlyTrigger(value: string | undefined): string {
+  const labels: Record<string, string> = {
+    overrun: 'Sessione più lunga',
+    session_end: 'Fine Sessione',
+    energy_change: 'Energia bassa',
+    missed_block: 'Blocco saltato',
+    external_interrupt: 'Interruzione esterna',
+  };
+  return value ? labels[value] ?? value.replaceAll('_', ' ') : 'Non specificato';
+}
+
+function friendlyChange(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized.includes('move') || normalized.includes('reschedul')) return 'Move · Sposta';
+  if (normalized.includes('delete') || normalized.includes('drop') || normalized.includes('cancel')) return 'Drop · Rimuovi';
+  if (normalized.includes('add') || normalized.includes('repair') || normalized.includes('create')) return 'Repair · Ripara';
+  return 'Keep · Mantieni';
 }
