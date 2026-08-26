@@ -7,6 +7,7 @@ import {
 import { db, sanitizeForStorage } from '@/lib/database';
 import { toDateSafe } from '@/utils/dateUtils';
 import { rollupForCompletedTimeBlock, performHierarchicalRollup } from '@/lib/hierarchicalRollup';
+import { buildGoalDeletionPlan } from '@/lib/goalDeletion';
 
 // ============================================================================
 // DATA STATE MACHINE
@@ -751,35 +752,42 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     const existing = goals.find(g => g.id === id);
     if (!existing) return;
 
-    // Find all affected children for cascade soft-delete
-    const affectedProjects = projects.filter(p => p.goalId === id);
-    const affectedProjectIds = new Set(affectedProjects.map(p => p.id));
-    const affectedTasks = tasks.filter(t => affectedProjectIds.has(t.projectId));
-
-    // Optimistic UI update
-    setGoals(prev => prev.filter(g => g.id !== id));
-    setProjects(prev => prev.filter(p => !affectedProjectIds.has(p.id)));
-    setTasks(prev => prev.filter(t => !affectedProjectIds.has(t.projectId)));
-
     try {
-      // Cascade soft-delete: Projects → Tasks → Goal
-      await Promise.all([
-        ...affectedTasks.map(t =>
-          db.update('tasks', { ...t, deleted: true, deletedReason: 'parent-project-deleted', updatedAt: new Date() })
-        ),
-        ...affectedProjects.map(p =>
-          db.update('projects', { ...p, deleted: true, deletedReason: 'parent-goal-deleted', updatedAt: new Date() })
-        ),
-        db.update('goals', { ...existing, deleted: true, updatedAt: new Date() })
+      const [rawGoal, rawKeyResults, rawProjects, rawTasks] = await Promise.all([
+        db.readAuthoritative<Goal>('goals', id),
+        db.getAllAuthoritative<KeyResult>('keyResults'),
+        db.getAllAuthoritative<Project>('projects'),
+        db.getAllAuthoritative<Task>('tasks'),
       ]);
+      if (!rawGoal) {
+        // A prior client already committed the physical deletion. Reconcile
+        // this stale render without issuing a forbidden delete of a missing doc.
+        setGoals(prev => prev.filter(goal => goal.id !== id));
+        return;
+      }
+      const plan = buildGoalDeletionPlan({
+        ownerUid: userId,
+        goal: deserializeGoal(rawGoal),
+        keyResults: rawKeyResults.map(deserializeKeyResult),
+        projects: rawProjects.map(deserializeProject),
+        tasks: rawTasks.map(deserializeTask),
+      });
+      const keyResultIds = new Set(plan.keyResultIds);
+      const projectIds = new Set(plan.projectIds);
+      const taskIds = new Set(plan.taskIds);
+
+      // Firestore is the authenticated durable authority. Do not hide anything
+      // until the complete hierarchy has committed atomically.
+      await db.deleteMany(plan.operations);
+      setGoals(prev => prev.filter(goal => goal.id !== id));
+      setKeyResults(prev => prev.filter(keyResult => !keyResultIds.has(keyResult.id)));
+      setProjects(prev => prev.filter(project => !projectIds.has(project.id)));
+      setTasks(prev => prev.filter(task => !taskIds.has(task.id)));
     } catch (error) {
       console.error('[DataProvider] Delete goal failed:', error);
-      // Rollback optimistic updates
-      setGoals(prev => [...prev, existing]);
-      setProjects(prev => [...prev, ...affectedProjects]);
-      setTasks(prev => [...prev, ...affectedTasks]);
+      throw error;
     }
-  }, [goals, projects, tasks]);
+  }, [goals, userId]);
 
   // ========== CRUD: KeyResult ==========
   const createKeyResult = useCallback(async (data: Partial<KeyResult>): Promise<string | undefined> => {

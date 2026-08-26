@@ -29,6 +29,11 @@ const firestoreMocks = vi.hoisted(() => ({
     forEach: (_visit: (snapshot: { id: string; data: () => unknown }) => void) => undefined,
     docs: [],
   })),
+  getDocFromServer: vi.fn(async () => ({ exists: () => false })),
+  getDocsFromServer: vi.fn(async () => ({
+    forEach: (_visit: (snapshot: { id: string; data: () => unknown }) => void) => undefined,
+    docs: [],
+  })),
   onSnapshot: vi.fn(() => () => undefined),
   query: vi.fn((reference: unknown, ...constraints: unknown[]) => ({ reference, constraints })),
   where: vi.fn((field: string, operator: string, value: unknown) => ({
@@ -39,11 +44,18 @@ const firestoreMocks = vi.hoisted(() => ({
   })),
   serverTimestamp: vi.fn(),
   updateDoc: vi.fn(async (_document: unknown, _data: unknown) => undefined),
+  batchDelete: vi.fn(),
+  batchCommit: vi.fn(async () => undefined),
+  writeBatch: vi.fn(),
 }));
 
 firestoreMocks.serverTimestamp.mockImplementation(
   () => new firestoreMocks.TestServerTimestamp(),
 );
+firestoreMocks.writeBatch.mockImplementation(() => ({
+  delete: firestoreMocks.batchDelete,
+  commit: firestoreMocks.batchCommit,
+}));
 
 vi.mock('./firebase', () => ({ firestore: { kind: 'test-firestore' } }));
 vi.mock('firebase/firestore', () => ({
@@ -54,7 +66,9 @@ vi.mock('firebase/firestore', () => ({
   doc: firestoreMocks.doc,
   enableNetwork: firestoreMocks.enableNetwork,
   getDoc: vi.fn(),
+  getDocFromServer: firestoreMocks.getDocFromServer,
   getDocs: firestoreMocks.getDocs,
+  getDocsFromServer: firestoreMocks.getDocsFromServer,
   limit: vi.fn(),
   onSnapshot: firestoreMocks.onSnapshot,
   orderBy: vi.fn(),
@@ -65,7 +79,7 @@ vi.mock('firebase/firestore', () => ({
   Timestamp: firestoreMocks.TestTimestamp,
   updateDoc: firestoreMocks.updateDoc,
   where: firestoreMocks.where,
-  writeBatch: vi.fn(),
+  writeBatch: firestoreMocks.writeBatch,
 }));
 
 import { FirebaseAdapter } from './firebaseAdapter';
@@ -166,6 +180,82 @@ describe('FirebaseAdapter owner-constrained collection reads', () => {
     expect(timeBlock?.endTime).toBeInstanceOf(Date);
     expect(timeBlock?.startTime.getUTCMilliseconds()).toBe(123);
     expect(timeBlock?.endTime.getUTCMilliseconds()).toBe(456);
+  });
+
+  it('commits an owner-scoped Goal hierarchy as one Firestore batch', async () => {
+    const adapter = adapterFor('alice');
+
+    await adapter.deleteMany([
+      { collection: 'keyResults', id: 'kr-1' },
+      { collection: 'tasks', id: 'task-1' },
+      { collection: 'projects', id: 'project-1' },
+      { collection: 'goals', id: 'goal-1' },
+    ]);
+
+    expect(firestoreMocks.writeBatch).toHaveBeenCalledOnce();
+    expect(firestoreMocks.batchDelete.mock.calls.map(([reference]) => reference)).toEqual([
+      { path: 'users/alice/keyResults', id: 'kr-1' },
+      { path: 'users/alice/tasks', id: 'task-1' },
+      { path: 'users/alice/projects', id: 'project-1' },
+      { path: 'users/alice/goals', id: 'goal-1' },
+    ]);
+    expect(firestoreMocks.batchCommit).toHaveBeenCalledOnce();
+  });
+
+  it('uses server-only owner-scoped reads to construct destructive state', async () => {
+    const adapter = adapterFor('alice');
+
+    await adapter.readAuthoritative('goals', 'goal-1');
+    await adapter.getAllAuthoritative('projects');
+
+    expect(firestoreMocks.getDocFromServer).toHaveBeenCalledWith({
+      path: 'users/alice/goals',
+      id: 'goal-1',
+    });
+    expect(firestoreMocks.getDocsFromServer).toHaveBeenCalledWith(expect.objectContaining({
+      constraints: [expect.objectContaining({ field: 'userId', value: 'alice' })],
+    }));
+  });
+
+  it('does not report deletion before the authoritative batch commit resolves', async () => {
+    let acknowledge!: () => void;
+    firestoreMocks.batchCommit.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    }));
+    const adapter = adapterFor('alice');
+    let resolved = false;
+    const deletion = adapter.deleteMany([{ collection: 'goals', id: 'goal-1' }])
+      .then(() => { resolved = true; });
+
+    await vi.waitFor(() => expect(firestoreMocks.batchCommit).toHaveBeenCalledOnce());
+    expect(resolved).toBe(false);
+    acknowledge();
+    await deletion;
+    expect(resolved).toBe(true);
+  });
+
+  it('propagates server rejection without attempting a partial fallback', async () => {
+    firestoreMocks.batchCommit.mockRejectedValueOnce(new Error('permission-denied'));
+    const adapter = adapterFor('alice');
+
+    await expect(adapter.deleteMany([
+      { collection: 'projects', id: 'project-1' },
+      { collection: 'goals', id: 'goal-1' },
+    ])).rejects.toThrow('permission-denied');
+    expect(firestoreMocks.batchCommit).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [[{ collection: 'goals', id: '../other' }], 'invalid document id'],
+    [[
+      { collection: 'goals', id: 'goal-1' },
+      { collection: 'goals', id: 'goal-1' },
+    ], 'duplicate document'],
+  ] as const)('rejects unsafe atomic deletion input', async (operations, message) => {
+    const adapter = adapterFor('alice');
+
+    await expect(adapter.deleteMany(operations)).rejects.toThrow(message);
+    expect(firestoreMocks.writeBatch).not.toHaveBeenCalled();
   });
 });
 

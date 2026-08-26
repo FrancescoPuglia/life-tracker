@@ -5,7 +5,12 @@ import {
   TimeBlockStatus
 } from '@/types';
 import { Page } from '@/types/blocks';
-import { DatabaseAdapter, createFirebaseAdapter } from './firebaseAdapter';
+import {
+  assertAtomicDeleteOperations,
+  type AtomicDeleteOperation,
+  type DatabaseAdapter,
+  createFirebaseAdapter,
+} from './firebaseAdapter';
 import { firebaseConfig } from '@/config/firebaseConfig';
 import { aggregateExecutionWindow } from './executionAggregation';
 import {
@@ -429,6 +434,10 @@ class MemoryAdapter implements DatabaseAdapter {
     return (items.find((item) => item.id === id) as T) || null;
   }
 
+  async readAuthoritative<T>(collection: string, id: string): Promise<T | null> {
+    return this.read<T>(collection, id);
+  }
+
   async update<T extends { id: string }>(collection: string, data: T): Promise<T> {
     const items = this.store[collection] || [];
     const idx = items.findIndex((item) => item.id === data.id);
@@ -441,8 +450,22 @@ class MemoryAdapter implements DatabaseAdapter {
     this.store[collection] = items.filter((item) => item.id !== id);
   }
 
+  async deleteMany(operations: readonly AtomicDeleteOperation[]): Promise<void> {
+    assertAtomicDeleteOperations(operations);
+    const nextStore = { ...this.store };
+    for (const operation of operations) {
+      nextStore[operation.collection] = (nextStore[operation.collection] || [])
+        .filter((item) => item.id !== operation.id);
+    }
+    this.store = nextStore;
+  }
+
   async getAll<T>(collection: string): Promise<T[]> {
     return (this.store[collection] || []) as T[];
+  }
+
+  async getAllAuthoritative<T>(collection: string): Promise<T[]> {
+    return this.getAll<T>(collection);
   }
 
   async getByIndex<T>(_collection: string, _field: string, _value: any): Promise<T[]> {
@@ -686,6 +709,28 @@ class IndexedDBAdapter implements DatabaseAdapter {
     });
   }
 
+  async readAuthoritative<T>(storeName: string, id: string): Promise<T | null> {
+    return this.read<T>(storeName, id);
+  }
+
+  async deleteMany(operations: readonly AtomicDeleteOperation[]): Promise<void> {
+    assertAtomicDeleteOperations(operations);
+    if (!this.db) await this.init();
+
+    const storeNames = [...new Set(operations.map((operation) => operation.collection))];
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(storeNames, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(
+        transaction.error ?? new Error('IndexedDB atomic deletion was aborted.'),
+      );
+      for (const operation of operations) {
+        transaction.objectStore(operation.collection).delete(operation.id);
+      }
+    });
+  }
+
   async getAll<T>(storeName: string): Promise<T[]> {
     try {
       const store = await this.getStore(storeName);
@@ -846,6 +891,10 @@ class IndexedDBAdapter implements DatabaseAdapter {
       this.getAll<Session>('sessions'),
     ]);
     return buildPlanVsActualData(userId, days, timeBlocks, sessions);
+  }
+
+  async getAllAuthoritative<T>(storeName: string): Promise<T[]> {
+    return this.getAll<T>(storeName);
   }
 
   async calculateTimeAllocation(userId: string, days: number = 7): Promise<TimeAllocationDatum[]> {
@@ -1484,6 +1533,11 @@ class LifeTrackerDB {
     return this.adapter.read(storeName, id);
   }
 
+  async readAuthoritative<T>(storeName: string, id: string): Promise<T | null> {
+    await this.ensureReady();
+    return this.adapter.readAuthoritative(storeName, id);
+  }
+
   async update<T extends { id: string }>(storeName: string, data: T): Promise<T> {
     await this.ensureReady();
     return this.adapter.update(storeName, data);
@@ -1492,6 +1546,11 @@ class LifeTrackerDB {
   async delete(storeName: string, id: string): Promise<void> {
     await this.ensureReady();
     return this.adapter.delete(storeName, id);
+  }
+
+  async deleteMany(operations: readonly AtomicDeleteOperation[]): Promise<void> {
+    await this.ensureReady();
+    return this.adapter.deleteMany(operations);
   }
 
   async getAll<T>(storeName: string): Promise<T[]> {
@@ -1674,6 +1733,11 @@ class LifeTrackerDB {
       this.getAll<Session>('sessions'),
     ]);
     return buildPlanVsActualData(userId, days, timeBlocks, sessions);
+  }
+
+  async getAllAuthoritative<T>(storeName: string): Promise<T[]> {
+    await this.ensureReady();
+    return this.adapter.getAllAuthoritative(storeName);
   }
 
   async calculateTimeAllocation(userId: string, days: number = 7): Promise<TimeAllocationDatum[]> {

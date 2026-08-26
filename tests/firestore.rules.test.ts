@@ -19,6 +19,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -234,6 +235,52 @@ describe('Firestore user isolation rules', () => {
     const updated = await getDoc(goal);
     expect(updated.data()?.title).toBe('Updated goal');
     await assertSucceeds(deleteDoc(goal));
+  });
+
+  it('atomically removes an owned disposable Goal hierarchy and proves server absence', async () => {
+    const db = testEnv.authenticatedContext('alice').firestore();
+    const references = [
+      doc(db, 'users/alice/goals/disposable-goal'),
+      doc(db, 'users/alice/keyResults/disposable-kr'),
+      doc(db, 'users/alice/projects/disposable-project'),
+      doc(db, 'users/alice/tasks/disposable-task'),
+    ];
+    await Promise.all(references.map((reference) => assertSucceeds(setDoc(
+      reference,
+      ownedEntity('alice', reference.id),
+    ))));
+
+    const batch = writeBatch(db);
+    references.forEach((reference) => batch.delete(reference));
+    await assertSucceeds(batch.commit());
+
+    const snapshots = await Promise.all(references.map((reference) => getDoc(reference)));
+    expect(snapshots.every((snapshot) => !snapshot.exists())).toBe(true);
+  });
+
+  it('leaves no partial deletion when one document in a batch is unauthorized', async () => {
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const aliceGoal = doc(alice, 'users/alice/goals/disposable-goal');
+    const bobTaskFromAlice = doc(alice, 'users/bob/tasks/disposable-task');
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await Promise.all([
+        setDoc(
+          doc(context.firestore(), 'users/alice/goals/disposable-goal'),
+          ownedEntity('alice', 'disposable-goal'),
+        ),
+        setDoc(
+          doc(context.firestore(), 'users/bob/tasks/disposable-task'),
+          ownedEntity('bob', 'disposable-task'),
+        ),
+      ]);
+    });
+
+    const batch = writeBatch(alice);
+    batch.delete(aliceGoal);
+    batch.delete(bobTaskFromAlice);
+    await assertFails(batch.commit());
+
+    expect((await getDoc(aliceGoal)).exists()).toBe(true);
   });
 
   it('fails closed when asked to delete an owned-path document that does not exist', async () => {

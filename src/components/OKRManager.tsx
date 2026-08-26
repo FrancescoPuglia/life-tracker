@@ -832,12 +832,13 @@ interface GoalCardProps {
   onSelect: () => void;
   onUpdate?: (id: string, updates: Partial<Goal>) => void;
   onDelete?: () => void;
+  isDeleting?: boolean;
   onShowNotes?: (goalId: string) => void;
   onShowRoadmap?: (goalId: string) => void;
   onShowVisionBoard?: (goalId: string) => void;
 }
 
-function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes, onShowRoadmap, onShowVisionBoard }: GoalCardProps) {
+function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, isDeleting = false, onShowNotes, onShowRoadmap, onShowVisionBoard }: GoalCardProps) {
   const metrics = useGoalMetrics(goal);
 
   return (
@@ -851,6 +852,7 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes,
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onSelect()}
       aria-pressed={isSelected}
+      aria-busy={isDeleting}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
@@ -914,14 +916,15 @@ function GoalCard({ goal, isSelected, onSelect, onUpdate, onDelete, onShowNotes,
           
           {onDelete && (
             <button
-              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:cursor-wait disabled:opacity-60"
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete();
+                if (!isDeleting) onDelete();
               }}
-              aria-label="Delete goal"
+              aria-label={isDeleting ? 'Eliminazione Goal in corso' : 'Elimina Goal'}
+              disabled={isDeleting}
             >
-              <Trash2 className="w-4 h-4" />
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             </button>
           )}
         </div>
@@ -1898,6 +1901,8 @@ export default function OKRManager(props: OKRManagerProps) {
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState<CreateModalType>(null);
   const [editingKeyResult, setEditingKeyResult] = useState<KeyResult | null>(null);
+  const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   
   // Notes & Roadmap state
   const [activeTab, setActiveTab] = useState<'notes' | 'roadmap' | 'vision-board'>('notes');
@@ -2012,19 +2017,42 @@ export default function OKRManager(props: OKRManagerProps) {
   }, []);
 
   const handleDeleteGoal = useCallback(
-    (goalId: string) => {
-      const ok = confirm("Delete this goal? (Will archive goal, projects & tasks linked to it)");
+    async (goalId: string) => {
+      if (deletingGoalId) return;
+      const keyResultCount = visibleKeyResults.filter((keyResult) => keyResult.goalId === goalId).length;
+      const linkedProjects = visibleProjects.filter((project) => project.goalId === goalId);
+      const projectIds = new Set(linkedProjects.map((project) => project.id));
+      const taskCount = visibleTasks.filter((task) => (
+        projectIds.has(task.projectId)
+        || task.goalId === goalId
+        || task.goalIds?.includes(goalId) === true
+      )).length;
+      const ok = confirm(
+        `Eliminare definitivamente questo Goal?\n\nSaranno eliminati anche ${keyResultCount} Key Result, ${linkedProjects.length} Progetti e ${taskCount} Task collegati. L’operazione non può essere annullata.`,
+      );
       if (!ok) return;
 
-      if (onDeleteGoal) onDeleteGoal(goalId);
-      else onUpdateGoal(goalId, { deleted: true, updatedAt: new Date() });
-
-      if (selectedGoalId === goalId) {
-        setSelectedGoalId(null);
-        setSelectedProjectId(null);
+      setDeletingGoalId(goalId);
+      setDeleteError(null);
+      try {
+        if (!onDeleteGoal) {
+          throw new Error('Durable Goal deletion is unavailable.');
+        }
+        await onDeleteGoal(goalId);
+        if (selectedGoalId === goalId) {
+          setSelectedGoalId(null);
+          setSelectedProjectId(null);
+        }
+      } catch (error) {
+        console.error('[OKRManager] Goal deletion was not committed:', error);
+        setDeleteError(
+          'Eliminazione non completata. Il Goal e tutti i dati collegati sono rimasti invariati. Controlla la connessione e riprova.',
+        );
+      } finally {
+        setDeletingGoalId(null);
       }
     },
-    [onDeleteGoal, onUpdateGoal, selectedGoalId]
+    [deletingGoalId, onDeleteGoal, selectedGoalId, visibleKeyResults, visibleProjects, visibleTasks]
   );
 
   const handleDeleteProject = useCallback(
@@ -2145,6 +2173,18 @@ export default function OKRManager(props: OKRManagerProps) {
             Execution evidence is unavailable. Planned work remains visible, but actual-time and adherence values are withheld.
           </div>
         )}
+        {deleteError && (
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+            <span>{deleteError}</span>
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 font-semibold text-red-700 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+              onClick={() => setDeleteError(null)}
+            >
+              Chiudi
+            </button>
+          </div>
+        )}
         {/* Top toolbar */}
         <div className="flex flex-wrap items-center gap-2 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
           <button
@@ -2225,6 +2265,7 @@ export default function OKRManager(props: OKRManagerProps) {
                 onSelect={() => handleSelectGoal(goal.id)}
                 onUpdate={onUpdateGoal}
                 onDelete={() => handleDeleteGoal(goal.id)}
+                isDeleting={deletingGoalId === goal.id}
                 onShowNotes={(goalId) => {
                   setSelectedGoalId(goalId);
                   setActiveTab('notes');

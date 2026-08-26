@@ -1,23 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import type { Task } from '@/types';
+import type { Goal, KeyResult, Project, Task } from '@/types';
+import type { AtomicDeleteOperation } from '@/lib/firebaseAdapter';
 
 // ---- Mounted-provider harness (db fully mocked) -----------------------------
 
-const { dbMock, taskStore } = vi.hoisted(() => {
-  const taskStore: { tasks: Task[] } = { tasks: [] };
+const { dbMock, entityStore } = vi.hoisted(() => {
+  const entityStore: {
+    goals: Goal[];
+    keyResults: KeyResult[];
+    projects: Project[];
+    tasks: Task[];
+  } = { goals: [], keyResults: [], projects: [], tasks: [] };
   const dbMock = {
     init: vi.fn(async () => undefined),
     switchToFirebase: vi.fn(async () => undefined),
-    getAll: vi.fn(async (store: string) => (store === 'tasks' ? taskStore.tasks : [])),
+    getAll: vi.fn(async (store: string) => (
+      entityStore[store as keyof typeof entityStore] ?? []
+    )),
+    getAllAuthoritative: vi.fn(async (store: string) => (
+      entityStore[store as keyof typeof entityStore] ?? []
+    )),
+    readAuthoritative: vi.fn(async (store: string, id: string) => (
+      (entityStore[store as keyof typeof entityStore] as Array<{ id: string }> | undefined)
+        ?.find((entity) => entity.id === id) ?? null
+    )),
     getByIndex: vi.fn(async () => []),
     update: vi.fn(async (_store: string, data: unknown) => data),
     create: vi.fn(async (_store: string, data: unknown) => data),
     delete: vi.fn(async () => undefined),
+    deleteMany: vi.fn(async (operations: readonly AtomicDeleteOperation[]) => {
+      const stores = entityStore as Record<string, Array<{ id: string }>>;
+      for (const operation of operations) {
+        const index = stores[operation.collection].findIndex((entity) => entity.id === operation.id);
+        if (index >= 0) stores[operation.collection].splice(index, 1);
+      }
+    }),
     calculateTodayKPIs: vi.fn(async () => ({})),
     getAdapterType: vi.fn(() => 'memory'),
   };
-  return { dbMock, taskStore };
+  return { dbMock, entityStore };
 });
 
 vi.mock('@/lib/database', () => ({ db: dbMock }));
@@ -26,15 +48,21 @@ import { DataProvider, useDataContext } from './DataProvider';
 
 let capturedUpdateTask: ((id: string, updates: Partial<Task>) => Promise<void>) | null = null;
 let capturedRetryLoad: (() => void) | null = null;
+let capturedDeleteGoal: ((id: string) => Promise<void>) | null = null;
 
 function Probe() {
   const ctx = useDataContext();
   capturedUpdateTask = ctx.updateTask;
   capturedRetryLoad = ctx.retryLoad;
+  capturedDeleteGoal = ctx.deleteGoal;
   return (
     <div>
       <div data-testid="probe-status">{ctx.status}</div>
       <div data-testid="probe-error">{ctx.loadError}</div>
+      <div data-testid="probe-goals">{ctx.goals.map((goal) => goal.id).join(',')}</div>
+      <div data-testid="probe-key-results">{ctx.keyResults.map((keyResult) => keyResult.id).join(',')}</div>
+      <div data-testid="probe-projects">{ctx.projects.map((project) => project.id).join(',')}</div>
+      <div data-testid="probe-tasks">{ctx.tasks.map((task) => task.id).join(',')}</div>
     </div>
   );
 }
@@ -55,7 +83,7 @@ function makeStoredTask(over: Partial<Task> = {}): Task {
 }
 
 async function mountWithTask(task: Task) {
-  taskStore.tasks = [task];
+  entityStore.tasks = [task];
   render(
     <DataProvider userId="user-a">
       <Probe />
@@ -68,11 +96,31 @@ async function mountWithTask(task: Task) {
 describe('DataProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    taskStore.tasks = [];
+    entityStore.goals = [];
+    entityStore.keyResults = [];
+    entityStore.projects = [];
+    entityStore.tasks = [];
     capturedRetryLoad = null;
+    capturedDeleteGoal = null;
     dbMock.init.mockResolvedValue(undefined);
     dbMock.switchToFirebase.mockResolvedValue(undefined);
-    dbMock.getAll.mockImplementation(async (store: string) => (store === 'tasks' ? taskStore.tasks : []));
+    dbMock.getAll.mockImplementation(async (store: string) => (
+      entityStore[store as keyof typeof entityStore] ?? []
+    ));
+    dbMock.getAllAuthoritative.mockImplementation(async (store: string) => (
+      entityStore[store as keyof typeof entityStore] ?? []
+    ));
+    dbMock.readAuthoritative.mockImplementation(async (store: string, id: string) => (
+      (entityStore[store as keyof typeof entityStore] as Array<{ id: string }> | undefined)
+        ?.find((entity) => entity.id === id) ?? null
+    ));
+    dbMock.deleteMany.mockImplementation(async (operations: readonly AtomicDeleteOperation[]) => {
+      const stores = entityStore as Record<string, Array<{ id: string }>>;
+      for (const operation of operations) {
+        const index = stores[operation.collection].findIndex((entity) => entity.id === operation.id);
+        if (index >= 0) stores[operation.collection].splice(index, 1);
+      }
+    });
     dbMock.calculateTodayKPIs.mockResolvedValue({});
   });
 
@@ -205,27 +253,159 @@ describe('DataProvider', () => {
     });
   });
 
-  describe('Cascade Delete Logic', () => {
-    it('should identify affected children when deleting goal', () => {
-      const goal = { id: 'goal-1', title: 'Test Goal' };
-      const projects = [
-        { id: 'proj-1', goalId: 'goal-1', name: 'Project 1' },
-        { id: 'proj-2', goalId: 'goal-2', name: 'Project 2' },
-        { id: 'proj-3', goalId: 'goal-1', name: 'Project 3' },
-      ];
-      const tasks = [
-        { id: 'task-1', projectId: 'proj-1', title: 'Task 1' },
-        { id: 'task-2', projectId: 'proj-2', title: 'Task 2' },
-        { id: 'task-3', projectId: 'proj-3', title: 'Task 3' },
-      ];
+  describe('authoritative Goal deletion', () => {
+    it('keeps the full hierarchy visible until the atomic server commit is acknowledged', async () => {
+      seedGoalHierarchy();
+      let acknowledge!: () => void;
+      dbMock.deleteMany.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      }));
+      await mountProvider();
 
-      // Cascade logic
-      const affectedProjects = projects.filter(p => p.goalId === goal.id);
-      const affectedProjectIds = new Set(affectedProjects.map(p => p.id));
-      const affectedTasks = tasks.filter(t => affectedProjectIds.has(t.projectId));
+      let deletion!: Promise<void>;
+      act(() => {
+        deletion = capturedDeleteGoal!('goal-1');
+      });
 
-      expect(affectedProjects).toHaveLength(2); // proj-1, proj-3
-      expect(affectedTasks).toHaveLength(2); // task-1, task-3
+      await waitFor(() => expect(dbMock.deleteMany).toHaveBeenCalledOnce());
+
+      expect(screen.getByTestId('probe-goals')).toHaveTextContent('goal-1');
+      expect(screen.getByTestId('probe-key-results')).toHaveTextContent('kr-1');
+      expect(screen.getByTestId('probe-projects')).toHaveTextContent('project-1');
+      expect(screen.getByTestId('probe-tasks')).toHaveTextContent('task-1');
+
+      await act(async () => {
+        acknowledge();
+        await deletion;
+      });
+
+      expect(screen.getByTestId('probe-goals')).not.toHaveTextContent('goal-1');
+      expect(screen.getByTestId('probe-key-results')).not.toHaveTextContent('kr-1');
+      expect(screen.getByTestId('probe-projects')).not.toHaveTextContent('project-1');
+      expect(screen.getByTestId('probe-tasks')).not.toHaveTextContent('task-1');
+    });
+
+    it('deletes Key Results, Projects, and direct or transitive Tasks in one operation', async () => {
+      seedGoalHierarchy();
+      entityStore.tasks.push(makeStoredTask({
+        id: 'task-direct',
+        projectId: 'project-other',
+        goalId: 'goal-1',
+      }));
+      await mountProvider();
+
+      await act(async () => capturedDeleteGoal!('goal-1'));
+
+      expect(dbMock.deleteMany).toHaveBeenCalledWith([
+        { collection: 'keyResults', id: 'kr-1' },
+        { collection: 'tasks', id: 'task-1' },
+        { collection: 'tasks', id: 'task-direct' },
+        { collection: 'projects', id: 'project-1' },
+        { collection: 'goals', id: 'goal-1' },
+      ]);
+      expect(entityStore.goals.map(({ id }) => id)).toEqual(['goal-other']);
+      expect(entityStore.keyResults).toEqual([]);
+      expect(entityStore.projects.map(({ id }) => id)).toEqual(['project-other']);
+      expect(entityStore.tasks).toEqual([]);
+    });
+
+    it('does not report success or mutate UI state when the server mutation fails', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      seedGoalHierarchy();
+      dbMock.deleteMany.mockRejectedValueOnce(new Error('offline'));
+      await mountProvider();
+
+      await act(async () => {
+        await expect(capturedDeleteGoal!('goal-1')).rejects.toThrow('offline');
+      });
+
+      expect(screen.getByTestId('probe-goals')).toHaveTextContent('goal-1');
+      expect(screen.getByTestId('probe-key-results')).toHaveTextContent('kr-1');
+      expect(screen.getByTestId('probe-projects')).toHaveTextContent('project-1');
+      expect(screen.getByTestId('probe-tasks')).toHaveTextContent('task-1');
+      consoleError.mockRestore();
+    });
+
+    it('remains absent after authoritative reload and repeated deletion is idempotent', async () => {
+      seedGoalHierarchy();
+      const firstMount = await mountProvider();
+
+      await act(async () => capturedDeleteGoal!('goal-1'));
+      expect(dbMock.deleteMany).toHaveBeenCalledTimes(1);
+      await act(async () => capturedDeleteGoal!('goal-1'));
+      expect(dbMock.deleteMany).toHaveBeenCalledTimes(1);
+      firstMount.unmount();
+
+      await mountProvider();
+      expect(screen.getByTestId('probe-goals')).not.toHaveTextContent('goal-1');
+      expect(screen.getByTestId('probe-key-results')).not.toHaveTextContent('kr-1');
+      expect(screen.getByTestId('probe-projects')).not.toHaveTextContent('project-1');
+      expect(screen.getByTestId('probe-tasks')).not.toHaveTextContent('task-1');
+      expect(dbMock.init).not.toHaveBeenCalled();
     });
   });
 });
+
+async function mountProvider() {
+  const view = render(
+    <DataProvider userId="user-a">
+      <Probe />
+    </DataProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId('probe-status')).toHaveTextContent('ready'));
+  return view;
+}
+
+function seedGoalHierarchy() {
+  entityStore.goals = [makeGoal('goal-1'), makeGoal('goal-other')];
+  entityStore.keyResults = [makeKeyResult('kr-1', 'goal-1')];
+  entityStore.projects = [makeProject('project-1', 'goal-1'), makeProject('project-other', 'goal-other')];
+  entityStore.tasks = [makeStoredTask({ id: 'task-1', projectId: 'project-1', goalId: 'goal-1' })];
+}
+
+function makeGoal(id: string): Goal {
+  return {
+    id,
+    userId: 'user-a',
+    domainId: 'd1',
+    title: id,
+    status: 'active',
+    priority: 'medium',
+    targetDate: new Date(2026, 11, 31),
+    timeAllocationTarget: 4,
+    keyResults: [],
+    category: 'important_not_urgent',
+    complexity: 'moderate',
+    createdAt: new Date(2026, 6, 1),
+    updatedAt: new Date(2026, 6, 1),
+  };
+}
+
+function makeKeyResult(id: string, goalId: string): KeyResult {
+  return {
+    id,
+    goalId,
+    userId: 'user-a',
+    domainId: 'd1',
+    title: id,
+    targetValue: 1,
+    currentValue: 0,
+    status: 'active',
+    createdAt: new Date(2026, 6, 1),
+    updatedAt: new Date(2026, 6, 1),
+  };
+}
+
+function makeProject(id: string, goalId: string): Project {
+  return {
+    id,
+    goalId,
+    userId: 'user-a',
+    domainId: 'd1',
+    name: id,
+    status: 'active',
+    priority: 'medium',
+    createdAt: new Date(2026, 6, 1),
+    updatedAt: new Date(2026, 6, 1),
+  };
+}

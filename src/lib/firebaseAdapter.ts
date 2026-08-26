@@ -5,7 +5,9 @@ import {
   addDoc,
   setDoc,
   getDoc,
+  getDocFromServer,
   getDocs,
+  getDocsFromServer,
   updateDoc,
   deleteDoc,
   query,
@@ -35,15 +37,65 @@ export interface DatabaseAdapter {
   init(): Promise<void>;
   create<T extends { id?: string }>(collection: string, data: T): Promise<T>;
   read<T>(collection: string, id: string): Promise<T | null>;
+  readAuthoritative<T>(collection: string, id: string): Promise<T | null>;
   update<T extends { id: string }>(collection: string, data: T): Promise<T>;
   delete(collection: string, id: string): Promise<void>;
+  deleteMany(operations: readonly AtomicDeleteOperation[]): Promise<void>;
   getAll<T>(collection: string): Promise<T[]>;
+  getAllAuthoritative<T>(collection: string): Promise<T[]>;
   getByIndex<T>(collection: string, field: string, value: any): Promise<T[]>;
   query<T>(collection: string, constraints: QueryConstraint[]): Promise<T[]>;
   subscribe<T>(collection: string, callback: (data: T[]) => void): () => void;
   isOnline(): boolean;
   enableOffline(): Promise<void>;
   enableOnline(): Promise<void>;
+}
+
+export type AtomicDeleteCollection = 'goals' | 'keyResults' | 'projects' | 'tasks';
+
+export interface AtomicDeleteOperation {
+  readonly collection: AtomicDeleteCollection;
+  readonly id: string;
+}
+
+const ATOMIC_DELETE_COLLECTIONS = new Set<AtomicDeleteCollection>([
+  'goals',
+  'keyResults',
+  'projects',
+  'tasks',
+]);
+
+export function assertAtomicDeleteOperations(
+  operations: readonly AtomicDeleteOperation[],
+): void {
+  if (!Array.isArray(operations) || operations.length === 0) {
+    throw new Error('Atomic deletion requires at least one document.');
+  }
+  if (operations.length > 500) {
+    throw new Error('Atomic deletion exceeds the Firestore 500-document limit.');
+  }
+
+  const seen = new Set<string>();
+  for (const operation of operations) {
+    if (!ATOMIC_DELETE_COLLECTIONS.has(operation.collection)) {
+      throw new Error('Atomic deletion contains an unsupported collection.');
+    }
+    if (
+      typeof operation.id !== 'string'
+      || operation.id.length === 0
+      || operation.id.length > 1_500
+      || operation.id.includes('/')
+      || operation.id === '.'
+      || operation.id === '..'
+    ) {
+      throw new Error('Atomic deletion contains an invalid document id.');
+    }
+    const key = `${operation.collection}/${operation.id}`;
+    if (seen.has(key)) {
+      throw new Error('Atomic deletion contains a duplicate document.');
+    }
+    seen.add(key);
+  }
 }
 
 export interface QueryConstraint {
@@ -284,6 +336,43 @@ export class FirebaseAdapter implements DatabaseAdapter {
     }
   }
 
+  async readAuthoritative<T>(collectionName: string, id: string): Promise<T | null> {
+    await this.init();
+    if (!firestore || !this.userId) {
+      throw new Error('Firebase owner-scoped Firestore is not initialized.');
+    }
+
+    const snapshot = await getDocFromServer(doc(
+      firestore,
+      this.getUserCollection(collectionName),
+      id,
+    ));
+    if (!snapshot.exists()) return null;
+    return this.convertTimestampsToDates({ id: snapshot.id, ...snapshot.data() }) as T;
+  }
+
+  async deleteMany(operations: readonly AtomicDeleteOperation[]): Promise<void> {
+    assertAtomicDeleteOperations(operations);
+    await this.init();
+
+    if (!firestore) {
+      throw new Error('Firebase Firestore not initialized');
+    }
+    if (!this.userId) {
+      throw new Error('Firebase userId not set. Call setUserId() first.');
+    }
+
+    const batch = writeBatch(firestore);
+    for (const operation of operations) {
+      batch.delete(doc(
+        firestore,
+        this.getUserCollection(operation.collection),
+        operation.id,
+      ));
+    }
+    await batch.commit();
+  }
+
   async getAll<T>(collectionName: string): Promise<T[]> {
     await this.init();
     // 🔇 EMERGENCY: console.log disabled to stop spam
@@ -489,6 +578,25 @@ export class FirebaseAdapter implements DatabaseAdapter {
         this.convertDatesToTimestamps(value);
       }
     });
+  }
+
+  async getAllAuthoritative<T>(collectionName: string): Promise<T[]> {
+    await this.init();
+    if (!firestore || !this.userId) {
+      throw new Error('Firebase owner-scoped Firestore is not initialized.');
+    }
+
+    const collectionRef = collection(firestore, this.getUserCollection(collectionName));
+    const ownedQuery = query(collectionRef, where('userId', '==', this.userId));
+    const querySnapshot = await getDocsFromServer(ownedQuery);
+    const results: T[] = [];
+    querySnapshot.forEach((snapshot) => {
+      results.push(this.convertTimestampsToDates({
+        id: snapshot.id,
+        ...snapshot.data(),
+      }) as T);
+    });
+    return results;
   }
 
   private convertTimestampsToDates(data: any): any {
