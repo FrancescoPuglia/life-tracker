@@ -11,8 +11,8 @@ production mutation without a separate human gate.
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
 - Final SHA: pending final receipt commit
-- Remote HEAD at fresh-login fix checkpoint:
-  `158b5aff601d9e506c7c1bbed5e6c6b130fad4e7`
+- Remote HEAD at production Secure AI compatibility checkpoint:
+  `6c13e2d` (`codex/daily-driver-v1`)
 - Worktree: clean at sprint start and before this receipt update; final state
   pending
 
@@ -132,6 +132,11 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   one-file source SHA-256
   `7f95ba84efa0537537dd4d92e8ee30f5408ab2c83bc71d4f36508fd0e5a297bd`.
 - Existing index/TTL state: none, reusing the 2026-08-24 production audit.
+- Required production index delta: exactly one collection-scoped composite
+  index for `timeBlocks(startTime ASC, endTime ASC)`, deployed with an
+  index-only temporary Firebase config and explicit
+  `--project life-tracker-12000 --only firestore:indexes`. It is `READY`.
+  No field override or Rules release was included in that deployment.
 - Active production Rules:
   `projects/life-tracker-12000/rulesets/523e6510-07a0-447c-9ea1-cd07bbedaecf`;
   exact source SHA-256
@@ -144,9 +149,13 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   secrets are retained rather than destructively purged. Acceptance writes use
   isolated disposable records and Undo/cleanup. A paid Firestore backup is not
   enabled for this non-destructive metadata/function delta.
-- Production Secure AI preparation: exact backend source build PASS; expected
-  backend fingerprint
-  `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`;
+- Production Secure AI preparation: the release-boundary source remained the
+  exact reviewed detached source `3100c42`, plus only the backward-compatible
+  in-memory decoder for historical browser timestamp-map representations.
+  No production document was migrated or rewritten. Focused decoder tests
+  PASS 9/9; detached Functions typecheck and build PASS. Final backend
+  fingerprint:
+  `sha256:400b8f4c7d8ca23b3a31aeb596d50c9d69ea5c30d778d541d8e17c6f782ad085`;
   expected one-origin Sol/medium runtime fingerprint
   `sha256:90f81b28a952c81d870db3315f55f38dbac8ade9c25c92b150d4fc8f382a5025`.
   `AI_CAPABILITY_SIGNING_SECRET` version 1 and human-supplied `OPENAI_API_KEY`
@@ -158,11 +167,16 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   then exited 1 solely because its first-deploy cleanup policy was absent. The
   causal `functions:artifacts:setpolicy` remediation exited 0 without a second
   Function deployment.
-- Live backend: exactly zero Gen1 and one Gen2 Function; Node 22, 512 MiB,
-  60-second timeout, max 20 instances, concurrency 40; source generation
-  `1787740767541944`. Cloud Run generation/observed generation 1, revision
-  `lifetrackeraiapi-00001-bug`, ready with 100% latest traffic. Both secret
-  bindings resolve exact version 1.
+- Final live backend: exactly zero Gen1 and one active Gen2 Function; Node 22,
+  512 MiB, 60-second timeout, max 20 instances, concurrency 40; source
+  generation `1787752479816343`; Firebase source hash
+  `13cf5908dbc22eb4493de3234b326eb804a2119f`. A temporary safe stage-only
+  diagnostic revision used to isolate index readiness was replaced after
+  acceptance by the minimal release source above. Provider-free health returns
+  the exact final source fingerprint and unchanged runtime fingerprint; the
+  exact Tauri origin returns 200 and a subdomain near-match returns 403. Both
+  secret bindings remain metadata-only at exact version 1; no secret value was
+  accessed, printed, copied, or rotated.
 - Provider-free production verifier: PASS, 12/12 requests. Exact
   `https://tauri.localhost` health/preflight succeeded; HTTP, subdomain,
   explicit-port, Pages, and attacker near-matches were denied. Live source and
@@ -221,22 +235,28 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   the controlled Desktop process restart.
 - Today / Analytics acceptance: PASS. Today Command Center, session-authoritative
   Performance, and Analytics loaded after the completed Session.
-- Secure AI and Preview/Apply/Undo acceptance: PENDING explicit payload-level
-  approval required by the execution safety reviewer. The bounded plan sends
-  the disposable Goal/Task names plus authorized grounded production context
-  to the already-deployed production OpenAI backend, then previews, rejects,
-  applies, verifies, and undoes only the disposable TimeBlock. No capability,
-  token, secret, or historical record will be printed or modified.
+- Secure AI and Preview/Apply/Undo acceptance: PASS after Francesco's explicit
+  production acceptance approval. Authenticated grounded read returned the
+  exact disposable Goal and Task with real-provider/tool-call evidence.
+  Preview produced exactly one immutable operation and one diff for the exact
+  disposable TimeBlock with zero conflicts. Reject left authoritative state
+  byte/semantically unchanged. A fresh plan had a distinct ID; Apply returned
+  `verified=true`, and an owner-scoped authoritative reread found exactly the
+  requested interval. Undo returned `verified=true` and an authoritative
+  reread matched the complete original semantic record. Historical personal
+  records were untouched.
 - Restart/re-auth evidence: fresh re-auth PASS before fixture creation; full
   process restart and post-restart authoritative fixture/Session reread PASS.
-  A final post-fixture sign-out/sign-in remains pending.
+  A final post-fixture sign-out/sign-in remains the sole Desktop acceptance
+  action before exact fixture cleanup.
 - Tray/single-instance: PASS in the installed production app; closing the
   window retained the exact process and launching the Start Menu executable
   restored the singleton. Autostart and native notification: NOT RUN.
-- MCP: NOT ATTEMPTED; it remains strictly after Desktop Secure AI/durability.
-- Current human blocker: explicitly approve the bounded production Secure AI
-  acceptance payload described above. The execution environment rejected the
-  call until that post-disclosure approval is recorded.
+- MCP: NOT ATTEMPTED; mandatory existing read-only MCP release remains strictly
+  after the final Desktop re-auth/durability proof and fixture cleanup.
+- Current human blocker: perform one installed-app sign-out/sign-in cycle so
+  the already-created disposable hierarchy and completed Session can be
+  observed after reauthentication before their exact cleanup.
 
 ## Deferred work
 
