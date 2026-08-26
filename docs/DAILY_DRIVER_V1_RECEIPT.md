@@ -11,8 +11,8 @@ production mutation without a separate human gate.
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
 - Final SHA: pending final receipt commit
-- Remote HEAD at installed staging source checkpoint:
-  `be35501d4b9c1df40714aaa51fb0fb2ea9d0414d`
+- Remote HEAD at production recovery checkpoint:
+  `a5a2bfd7dce60a50c06c20621f8411b2a600e891`
 - Worktree: clean at sprint start and before this receipt update; final state
   pending
 
@@ -98,29 +98,39 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 ## Production Daily Driver
 
 - Production project: `life-tracker-12000` (`970402762590`)
-- Production resources changed: none
+- Production resources changed, all explicitly scoped to
+  `life-tracker-12000`:
+  - enabled only Cloud Functions, Cloud Run, Artifact Registry, Cloud Build,
+    Eventarc, and Secret Manager APIs;
+  - generated only the official Pub/Sub and Eventarc Google-managed service
+    identities; no broad IAM role was granted;
+  - created `AI_CAPABILITY_SIGNING_SECRET` version 1 directly from fresh
+    randomness without displaying or writing its value;
+  - deployed Firestore Rules only. No index, TTL, Function, historical data,
+    billing, budget, reminder, report, MCP, Tasks, or Scheduler mutation occurred.
 - Billing gate: Blaze/pay-as-you-go is independently VERIFIED from read-only
   metadata; a billing account is linked. No billing or budget setting was
   changed. The Budget API returned an HTTP 500 metadata error, so the reported
   EUR 5 alert is `NOT VERIFIED` by this sprint and will not be retried or
   modified.
-- Predeployment application SHA:
-  `ca4a908041dc5d0409a2ce52324e598983e8b25b`.
+- Production Desktop source SHA:
+  `a5a2bfd7dce60a50c06c20621f8411b2a600e891`.
 - Planned backend source: exact staging-verified detached source
   `3100c42bfda50bb4627b7345270985a517439167`, not the unrelated reminder,
   report, or MCP exports added later.
-- Existing production Function state: canonical `lifeTrackerAiApi` endpoint
-  HTTP 404; Cloud Functions and Cloud Run APIs are disabled. The full empty
-  inventory will be confirmed after enabling only the required inventory/runtime
-  APIs and before deployment.
+- Existing production Function state after required API enablement: zero Gen1
+  Functions, zero Gen2 Functions, and zero Function-managed Cloud Run services;
+  canonical `lifeTrackerAiApi` endpoint HTTP 404.
 - Predeployment Rules release:
   `projects/life-tracker-12000/rulesets/491f1929-e5fe-4686-8ec2-e0974a13e132`;
   one-file source SHA-256
   `7f95ba84efa0537537dd4d92e8ee30f5408ab2c83bc71d4f36508fd0e5a297bd`.
 - Existing index/TTL state: none, reusing the 2026-08-24 production audit.
-- Required service state before promotion: Firestore, Firebase Rules, Identity
-  Toolkit, and Pub/Sub enabled; Cloud Functions, Cloud Run, Artifact Registry,
-  Cloud Build, Eventarc, and Secret Manager disabled.
+- Active production Rules:
+  `projects/life-tracker-12000/rulesets/523e6510-07a0-447c-9ea1-cd07bbedaecf`;
+  exact source SHA-256
+  `2b4a86baea34655cb268d885e11edc76c843691321fd75508094338a9bc72514`.
+  The prior rollback ruleset remains listed and immutable.
 - Minimum recovery path: this release performs no migration or historical-data
   write. Rules rollback re-points `cloud.firestore` to the immutable prior
   ruleset above. Function rollback deletes only the newly introduced
@@ -128,6 +138,29 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   secrets are retained rather than destructively purged. Acceptance writes use
   isolated disposable records and Undo/cleanup. A paid Firestore backup is not
   enabled for this non-destructive metadata/function delta.
+- Production Secure AI preparation: exact backend source build PASS; expected
+  backend fingerprint
+  `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`;
+  expected one-origin Sol/medium runtime fingerprint
+  `sha256:90f81b28a952c81d870db3315f55f38dbac8ade9c25c92b150d4fc8f382a5025`.
+  `AI_CAPABILITY_SIGNING_SECRET` version 1 is enabled;
+  `OPENAI_API_KEY` is absent and requires secure human input. Function deploy:
+  NOT RUN.
+- Production installer:
+  `src-tauri/target/release/bundle/nsis/Life Tracker_1.0.0_x64-setup.exe`;
+  SHA-256
+  `637c34abbe04e1aaf3396ea03e0ce805429b913b51e00ac27c76a3f852cff16e`.
+- Built production executable: 6,485,504 bytes; SHA-256
+  `e753bf1253af8338dc1e2ee3d374be2993ec4ee6c1631f59c0efe6271149d59d`.
+  Installed NSIS-patched executable SHA-256:
+  `a7b14533fd7344c81e1fe661ca80297b3981ebf4a859a1614d35fb8d1c6949f4`.
+- Production artifact scan: PASS; no provider credential, private-key,
+  staging-project, secret-variable, or Pages runtime signature. The one broad
+  `re_` executable shape has the same digest as the previously traced pinned
+  `tauri_runtime_wry` token; the installer contains none.
+- Installed launch: PASS from the normal current-user installation; production
+  login form reached at `https://tauri.localhost`, no ErrorBoundary. Francesco
+  login and real-data visibility remain NOT RUN pending human availability.
 - Forward-durability acceptance: NOT RUN
 - Weekly Planner acceptance: NOT RUN
 - Session acceptance: NOT RUN
@@ -136,6 +169,9 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 - Restart/re-auth evidence: NOT RUN
 - Notification/tray/autostart: NOT RUN
 - MCP: NOT ATTEMPTED
+- Current human blocker: securely set `OPENAI_API_KEY` in production Secret
+  Manager using Firebase CLI. No secret value may enter chat, logs, files, or
+  command arguments.
 
 ## Deferred work
 
