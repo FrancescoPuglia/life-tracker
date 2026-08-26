@@ -206,14 +206,19 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   authoritative Firestore rereads found every record with the correct UID and
   exact Goal -> Project -> Task -> TimeBlock parent links and timestamps. UI
   reload reconstructed the hierarchy. Renaming the disposable Goal produced
-  the exact authoritative reread. Full process-restart/re-auth reread and final
-  fixture cleanup remain pending until Secure AI acceptance completes.
+  the exact authoritative reread. A controlled full Desktop process restart
+  then reread the singular Goal, Project, Task, and TimeBlock from authoritative
+  Firestore with the same owner and exact hierarchy; the updated hierarchy
+  rendered again in the installed UI. Post-fixture re-auth and final fixture
+  cleanup remain pending until Secure AI acceptance completes.
 - Weekly Planner acceptance: PASS for installed Planner, Weekly Planning draft
   view, Weekly Execution, and Goal Architect loading against production state.
 - Session acceptance: PASS. The precondition found zero existing open personal
   Sessions; one new owner-scoped Session completed start -> pause -> resume ->
   stop, resume reused the exact same document, authoritative Firestore recorded
-  5 seconds of active duration, and no open Session remained.
+  5 seconds of active duration, and no open Session remained. The exact
+  completed owner Session, start/end interval, status, and duration survived
+  the controlled Desktop process restart.
 - Today / Analytics acceptance: PASS. Today Command Center, session-authoritative
   Performance, and Analytics loaded after the completed Session.
 - Secure AI and Preview/Apply/Undo acceptance: PENDING explicit payload-level
@@ -222,8 +227,9 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   to the already-deployed production OpenAI backend, then previews, rejects,
   applies, verifies, and undoes only the disposable TimeBlock. No capability,
   token, secret, or historical record will be printed or modified.
-- Restart/re-auth evidence: fresh re-auth PASS before fixture creation; fixture
-  process-restart and post-restart authoritative reread remain pending.
+- Restart/re-auth evidence: fresh re-auth PASS before fixture creation; full
+  process restart and post-restart authoritative fixture/Session reread PASS.
+  A final post-fixture sign-out/sign-in remains pending.
 - Tray/single-instance: PASS in the installed production app; closing the
   window retained the exact process and launching the Start Menu executable
   restored the singleton. Autostart and native notification: NOT RUN.
