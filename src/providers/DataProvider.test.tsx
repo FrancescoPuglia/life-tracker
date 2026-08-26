@@ -25,11 +25,18 @@ vi.mock('@/lib/database', () => ({ db: dbMock }));
 import { DataProvider, useDataContext } from './DataProvider';
 
 let capturedUpdateTask: ((id: string, updates: Partial<Task>) => Promise<void>) | null = null;
+let capturedRetryLoad: (() => void) | null = null;
 
 function Probe() {
   const ctx = useDataContext();
   capturedUpdateTask = ctx.updateTask;
-  return <div data-testid="probe-status">{ctx.status}</div>;
+  capturedRetryLoad = ctx.retryLoad;
+  return (
+    <div>
+      <div data-testid="probe-status">{ctx.status}</div>
+      <div data-testid="probe-error">{ctx.loadError}</div>
+    </div>
+  );
 }
 
 function makeStoredTask(over: Partial<Task> = {}): Task {
@@ -61,6 +68,51 @@ async function mountWithTask(task: Task) {
 describe('DataProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    taskStore.tasks = [];
+    capturedRetryLoad = null;
+    dbMock.init.mockResolvedValue(undefined);
+    dbMock.switchToFirebase.mockResolvedValue(undefined);
+    dbMock.getAll.mockImplementation(async (store: string) => (store === 'tasks' ? taskStore.tasks : []));
+    dbMock.calculateTodayKPIs.mockResolvedValue({});
+  });
+
+  describe('authenticated bootstrap', () => {
+    it('switches directly to Firebase after fresh login without awaiting the local adapter', async () => {
+      dbMock.init.mockImplementation(() => new Promise<void>(() => {}));
+
+      render(
+        <DataProvider userId="user-a">
+          <Probe />
+        </DataProvider>
+      );
+
+      await waitFor(() => expect(screen.getByTestId('probe-status').textContent).toBe('ready'));
+      expect(dbMock.switchToFirebase).toHaveBeenCalledTimes(1);
+      expect(dbMock.switchToFirebase).toHaveBeenCalledWith('user-a');
+      expect(dbMock.init).not.toHaveBeenCalled();
+    });
+
+    it('exits loading on bootstrap failure and can retry without a page reload', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      dbMock.switchToFirebase
+        .mockRejectedValueOnce(new Error('permission-denied'))
+        .mockResolvedValueOnce(undefined);
+
+      render(
+        <DataProvider userId="user-a">
+          <Probe />
+        </DataProvider>
+      );
+
+      await waitFor(() => expect(screen.getByTestId('probe-status').textContent).toBe('error'));
+      expect(screen.getByTestId('probe-error').textContent).toContain('Production data could not be loaded');
+
+      await act(() => capturedRetryLoad!());
+
+      await waitFor(() => expect(screen.getByTestId('probe-status').textContent).toBe('ready'));
+      expect(dbMock.switchToFirebase).toHaveBeenCalledTimes(2);
+      consoleError.mockRestore();
+    });
   });
 
   describe('TimeBlock Validation', () => {

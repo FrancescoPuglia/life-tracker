@@ -73,15 +73,33 @@ function DataGate() {
 }
 
 function DataLoadingGate() {
-  const { status } = useDataContext();
+  const { status, loadError, retryLoad } = useDataContext();
   
   // State: idle or loading -> show loading
   if (status === 'idle' || status === 'loading') {
     return <LoadingScreen message="Loading your data..." />;
   }
   
-  // State: error -> show error (but still render app for graceful degradation)
-  // State: ready -> render app
+  if (status === 'error') {
+    return (
+      <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center px-6">
+        <div className="max-w-lg text-center">
+          <h2 className="text-3xl font-bold text-white mb-4">Life Tracker</h2>
+          <p role="alert" className="text-slate-200 text-lg mb-6">
+            {loadError || 'Production data could not be loaded.'}
+          </p>
+          <button
+            type="button"
+            onClick={retryLoad}
+            className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return <MainApp buildId={BUILD_ID} />;
 }
 

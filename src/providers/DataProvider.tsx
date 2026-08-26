@@ -170,6 +170,8 @@ function deserializeGoalRoadmap(roadmap: any): GoalRoadmap {
 interface DataContextValue {
   // Status
   status: DataStatus;
+  loadError: string | null;
+  retryLoad: () => void;
   userId: string;
   
   // Data (already filtered by userId)
@@ -253,6 +255,8 @@ interface DataProviderProps {
 export function DataProvider({ userId, children }: DataProviderProps) {
   // State machine
   const [status, setStatus] = useState<DataStatus>('idle');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [loadedForUser, setLoadedForUser] = useState<string | null>(null);
   
   // Data state
@@ -275,37 +279,48 @@ export function DataProvider({ userId, children }: DataProviderProps) {
 
   // ========== DATA LOADING & REHYDRATION ========== 
   useEffect(() => {
-    // Always reload when userId or adapter mode changes
     if (!userId) return;
+
+    let active = true;
     setStatus('loading');
-    (async () => {
-      await db.init();
-      // Forza adapter: se userId valido, sempre Firebase
-      if (userId && db.switchToFirebase) {
-        try {
-          console.log('Skipping DOUBLE persistence setup to avoid c050...');
-          // SKIP DOUBLE PERSISTENCE - Already done in firebase.ts initialization
-          // const { ensureFirestorePersistence, firestore } = await import('@/lib/firebase');
-          // try { await ensureFirestorePersistence(firestore); } catch (e) { console.warn('[DataProvider] Persistence warning:', e); }
-          await db.switchToFirebase(userId);
-          console.log('Firebase switch without double persistence setup');
-        } catch (e) {
-          console.warn('Firebase switch failed, using local:', e);
-        }
+    setLoadError(null);
+
+    const withTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`DATA_BOOTSTRAP_TIMEOUT:${label}`)),
+          20_000,
+        );
+      });
+
+      try {
+        return await Promise.race([promise, timeout]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
       }
-      // Carica tutto
-      const [rawTimeBlocks, rawGoals, rawProjects, rawTasks, rawKeyResults, rawHabits, rawHabitLogs, rawNotes, rawNoteTemplates, rawGoalRoadmaps] = await Promise.all([
-        db.getAll<TimeBlock>('timeBlocks').catch(() => []),
-        db.getAll<Goal>('goals').catch(() => []),
-        db.getAll<Project>('projects').catch(() => []),
-        db.getAll<Task>('tasks').catch(() => []),
-        db.getAll<KeyResult>('keyResults').catch(() => []),
-        db.getAll<Habit>('habits').catch(() => []),
-        db.getAll<HabitLog>('habitLogs').catch(() => []),
-        db.getAll<Note>('notes').catch(() => []),
-        db.getAll<NoteTemplate>('noteTemplates').catch(() => []),
-        db.getAll<GoalRoadmap>('goalRoadmaps').catch(() => []),
-      ]);
+    };
+
+    const loadData = async () => {
+      try {
+        // Fresh sign-in must take the same direct Firebase path as persisted-auth
+        // startup. Initializing the default IndexedDB adapter first caused a
+        // second effect run and overlapping adapter switches; F5 only appeared
+        // to fix it because the UID had then been persisted in sessionStorage.
+        await withTimeout(db.switchToFirebase(userId), 'firebase-adapter');
+
+        const [rawTimeBlocks, rawGoals, rawProjects, rawTasks, rawKeyResults, rawHabits, rawHabitLogs, rawNotes, rawNoteTemplates, rawGoalRoadmaps] = await withTimeout(Promise.all([
+          db.getAll<TimeBlock>('timeBlocks'),
+          db.getAll<Goal>('goals'),
+          db.getAll<Project>('projects'),
+          db.getAll<Task>('tasks'),
+          db.getAll<KeyResult>('keyResults'),
+          db.getAll<Habit>('habits'),
+          db.getAll<HabitLog>('habitLogs'),
+          db.getAll<Note>('notes'),
+          db.getAll<NoteTemplate>('noteTemplates'),
+          db.getAll<GoalRoadmap>('goalRoadmaps'),
+        ]), 'firestore-reads');
       // Disabled DataProvider logs to stop spam
       // console.logs disabled to prevent infinite loop spam
 
@@ -335,29 +350,46 @@ export function DataProvider({ userId, children }: DataProviderProps) {
           }))
         });
       }
-      setTimeBlocks(rawTimeBlocks.map(deserializeTimeBlock).filter(x => x.userId === userId));
-      setGoals(rawGoals.map(deserializeGoal).filter(x => x.userId === userId && !x.deleted));
-      setProjects(rawProjects.map(deserializeProject).filter(x => x.userId === userId && !x.deleted));
-      setTasks(rawTasks.map(deserializeTask).filter(x => x.userId === userId && !x.deleted));
-      setKeyResults(rawKeyResults.map(deserializeKeyResult).filter(x => x.userId === userId && !x.deleted));
-      setHabits(rawHabits.map(deserializeHabit).filter(x => x.userId === userId && !x.deleted));
-      setHabitLogs(rawHabitLogs.map(deserializeHabitLog).filter(x => x.userId === userId));
-      setNotes(rawNotes.map(deserializeNote).filter(x => x.userId === userId));
-      setNoteTemplates(rawNoteTemplates.map(deserializeNoteTemplate).filter(x => x.userId === userId));
-      setGoalRoadmaps(rawGoalRoadmaps.map(deserializeGoalRoadmap).filter(x => x.userId === userId));
-      try {
-        const newKpis = await db.calculateTodayKPIs(userId);
-        setKpis(newKpis);
-      } catch (e) {
-        console.warn('[DataProvider] KPI calculation failed:', e);
+        if (!active) return;
+        setTimeBlocks(rawTimeBlocks.map(deserializeTimeBlock).filter(x => x.userId === userId));
+        setGoals(rawGoals.map(deserializeGoal).filter(x => x.userId === userId && !x.deleted));
+        setProjects(rawProjects.map(deserializeProject).filter(x => x.userId === userId && !x.deleted));
+        setTasks(rawTasks.map(deserializeTask).filter(x => x.userId === userId && !x.deleted));
+        setKeyResults(rawKeyResults.map(deserializeKeyResult).filter(x => x.userId === userId && !x.deleted));
+        setHabits(rawHabits.map(deserializeHabit).filter(x => x.userId === userId && !x.deleted));
+        setHabitLogs(rawHabitLogs.map(deserializeHabitLog).filter(x => x.userId === userId));
+        setNotes(rawNotes.map(deserializeNote).filter(x => x.userId === userId));
+        setNoteTemplates(rawNoteTemplates.map(deserializeNoteTemplate).filter(x => x.userId === userId));
+        setGoalRoadmaps(rawGoalRoadmaps.map(deserializeGoalRoadmap).filter(x => x.userId === userId));
+        try {
+          const newKpis = await db.calculateTodayKPIs(userId);
+          if (active) setKpis(newKpis);
+        } catch (e) {
+          console.warn('[DataProvider] KPI calculation failed:', e);
+        }
+        if (!active) return;
+        setLoadedForUser(userId);
+        setStatus('ready');
+      } catch (error) {
+        if (!active) return;
+        const timedOut = error instanceof Error && error.message.startsWith('DATA_BOOTSTRAP_TIMEOUT:');
+        console.error('[DataProvider] Authoritative data bootstrap failed', error);
+        setLoadError(timedOut
+          ? 'Production data took too long to respond. Check your connection and try again.'
+          : 'Production data could not be loaded. Check your connection and try again.');
+        setStatus('error');
       }
-      setLoadedForUser(userId);
-      setStatus('ready');
-      if (process.env.NODE_ENV !== 'production') {
-        // console.log disabled
-      }
-    })();
-  }, [userId, db.getAdapterType()]);
+    };
+
+    void loadData();
+    return () => {
+      active = false;
+    };
+  }, [userId, loadAttempt]);
+
+  const retryLoad = useCallback(() => {
+    setLoadAttempt(attempt => attempt + 1);
+  }, []);
 
   // ========== KPI Refresh (must be above TimeBlock CRUD for deps) ==========
   const refreshKPIs = useCallback(async () => {
@@ -1243,6 +1275,8 @@ export function DataProvider({ userId, children }: DataProviderProps) {
   // ========== Context Value ==========
   const value: DataContextValue = useMemo(() => ({
     status,
+    loadError,
+    retryLoad,
     userId,
     timeBlocks,
     goals,
@@ -1289,7 +1323,7 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     refreshTimeBlocks,
     refreshKPIs,
   }), [
-    status, userId, timeBlocks, goals, keyResults, projects, tasks, habits, habitLogs, kpis,
+    status, loadError, retryLoad, userId, timeBlocks, goals, keyResults, projects, tasks, habits, habitLogs, kpis,
     notes, noteTemplates, goalRoadmaps,
     createTimeBlock, updateTimeBlock, deleteTimeBlock,
     createGoal, updateGoal, deleteGoal,
