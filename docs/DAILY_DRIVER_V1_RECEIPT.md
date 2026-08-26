@@ -10,11 +10,12 @@ production mutation without a separate human gate.
 
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
-- Final SHA: pending the real ChatGPT-client read acceptance receipt
-- Remote HEAD at MCP OAuth interoperability deployment checkpoint:
-  `c9f835e`
-- Worktree: clean at sprint start and at the pushed OAuth interoperability
-  source checkpoint; final receipt state pending
+- Final release implementation SHA:
+  `c9f835eba7586167f5b6b22c3fbe4a7198bb8dbf`
+- Remote HEAD immediately before this final acceptance-only receipt update:
+  `917f55a413cff45a2f6ec9b57722bce0e56badb2`
+- Worktree: clean at sprint start, at the pushed OAuth interoperability source
+  checkpoint, and immediately before this final acceptance-only receipt update
 
 ## Staging deployment
 
@@ -349,23 +350,28 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   paths; `apply_plan` and an excessive analysis range failed closed. Both
   temporary access and refresh tokens were revoked, and the revoked access
   token returned 401. No UID, token, or personal record content was printed.
-- MCP ChatGPT-client acceptance: PENDING one retry in the existing ChatGPT
-  Developer Mode plugin, discovered-tool review, and the bounded real-data read
-  `List my active Life Tracker goals.` Server-side OAuth, owner authorization,
-  live read behavior, and the exact real-client discovery/authorization path
-  are otherwise production-verified.
+- MCP ChatGPT-client acceptance: PASS. Francesco reported that the existing
+  Life Tracker developer-mode plugin connected successfully after the fix and
+  then read his production goals clearly. Sanitized Cloud Run evidence
+  independently correlated the same real-client flow: localized `/authorize`
+  returned 200; Firebase `/authorize/complete` returned 200; `/token` returned
+  200; and subsequent OpenAI-host `/mcp` requests returned successful 200/202
+  responses. The live server exposes the reviewed exact 12 read-only tools and
+  zero writes; the successful goal answer exercises the owner-scoped
+  `get_goals` path against the same `life-tracker-12000` data used by Desktop.
+  No token, UID, personal goal content, or credential was printed or added to
+  this receipt.
 - MCP rollback: set only `MCP_READ_RUNTIME_ENABLED=false` in the ignored local
   production runtime config and redeploy with `firebase.mcp.json`, explicit
   `--project life-tracker-12000 --only functions`; verify 503 before any owner
   read. Revoke/remove the ChatGPT connection separately. TTL policies target
   only expiring MCP control records and never Life Tracker domain data.
-- Current human blocker: click `Connetti` again in the existing Life Tracker
-  ChatGPT plugin, complete the Firebase owner consent, and run the bounded goal
-  read. No plugin recreation or configuration change is requested.
+- Human blocker: none. The real ChatGPT OAuth connection and bounded production
+  goal read are accepted.
 
 ## Deferred work
 
 WhatsApp, Twilio, reports/email, routing refinements, MCP redesign, privacy,
 Pages retirement, updater, and all P2/P3 work remain outside this sprint.
 
-`LIFE TRACKER PRODUCTION DESKTOP DAILY DRIVER READY`
+`LIFE TRACKER PERSONAL V1 READY — DESKTOP + CHATGPT MCP`
