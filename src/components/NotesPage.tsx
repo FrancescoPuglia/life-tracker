@@ -34,6 +34,12 @@ interface PageWithStats extends Page {
   lastModified: string;
 }
 
+function formatNoteDate(value: unknown): string {
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (!Number.isFinite(date.getTime())) return '—';
+  return date.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -96,11 +102,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
           return total;
         }, 0);
         
-        const lastModified = new Date(page.updatedAt).toLocaleDateString('it-IT', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric'
-        });
+        const lastModified = formatNoteDate(page.updatedAt);
         
         return {
           ...page,
@@ -348,7 +350,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
   // ============================================================================
   
   const PageCard = ({ page }: { page: PageWithStats }) => (
-    <div className="group p-4 bg-gray-800/50 hover:bg-gray-800 border border-gray-700 hover:border-gray-600 rounded-xl transition-all">
+    <div className="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-indigo-200 hover:bg-slate-50/50">
       <div className="flex items-start justify-between mb-3">
         <div 
           className="flex items-center gap-3 flex-1 cursor-pointer"
@@ -372,7 +374,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
                   }}
                   onBlur={() => handleRenamePage(page.id, editingTitle)}
                   autoFocus
-                  className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-cyan-500"
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
                 />
                 <button
                   onClick={(e) => {
@@ -386,10 +388,10 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
               </div>
             ) : (
               <>
-                <h3 className="font-medium text-white group-hover:text-cyan-400 transition-colors">
+                <h3 className="font-semibold text-slate-900 transition-colors group-hover:text-indigo-700">
                   {page.title}
                 </h3>
-                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
                   <span>{page.blocksCount} blocks</span>
                   <span>•</span>
                   <span>{page.wordsCount} words</span>
@@ -414,14 +416,14 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
           
           {/* Dropdown Menu */}
           {openDropdownId === page.id && (
-            <div className="absolute right-0 top-8 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20">
+            <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-slate-200 bg-white shadow-xl">
               <div className="py-1">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     startRenaming(page);
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white flex items-center gap-2"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                 >
                   <Edit3 className="w-4 h-4" />
                   Rinomina
@@ -432,12 +434,12 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
                     handleDuplicatePage(page);
                     setOpenDropdownId(null);
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 hover:text-white flex items-center gap-2"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                 >
                   <Copy className="w-4 h-4" />
                   Duplica
                 </button>
-                <div className="border-t border-gray-700 my-1"></div>
+                <div className="my-1 border-t border-slate-200"></div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -460,7 +462,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
           {page.tags.map(tag => (
             <span 
               key={tag} 
-              className="px-2 py-1 bg-gray-700/50 text-gray-300 text-xs rounded"
+              className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600"
             >
               #{tag}
             </span>
@@ -491,13 +493,13 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
   
   if (viewMode === 'editor' && currentPage) {
     return (
-      <div className={`w-full h-full bg-gray-950 ${className}`}>
+      <div className={`h-full w-full bg-white ${className}`}>
         {/* Editor Header */}
-        <div className="sticky top-0 z-20 bg-gray-950/80 backdrop-blur-sm border-b border-gray-800">
+        <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
           <div className="flex items-center justify-between px-4 py-3">
             <button
               onClick={() => { setCurrentPage(null); setViewMode('list'); }}
-              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+              className="flex items-center gap-2 text-slate-600 transition-colors hover:text-indigo-700"
             >
               <ArrowLeft className="w-5 h-5" />
               <span className="text-sm">Torna alle pagine</span>
@@ -505,7 +507,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
             
             <div className="flex items-center gap-2 text-xs text-gray-500">
               <span>Auto-save attivo</span>
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              <div className="h-2 w-2 rounded-full bg-emerald-500" />
             </div>
           </div>
         </div>
@@ -526,13 +528,13 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
 
   if (viewMode === 'notion') {
     return (
-      <div className={`w-full h-full bg-gray-950 ${className}`}>
+      <div className={`h-full w-full bg-white ${className}`}>
         {/* Notion Header */}
-        <div className="sticky top-0 z-20 bg-gray-950/80 backdrop-blur-sm border-b border-gray-800">
+        <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
           <div className="flex items-center justify-between px-4 py-3">
             <button
               onClick={() => setViewMode('list')}
-              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+              className="flex items-center gap-2 text-slate-600 transition-colors hover:text-indigo-700"
             >
               <ArrowLeft className="w-5 h-5" />
               <span className="text-sm">Torna alle pagine</span>
@@ -554,16 +556,16 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
   }
   
   return (
-    <div className={`w-full h-full bg-gray-950 ${className}`}>
+    <div className={`h-full w-full bg-white ${className}`}>
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-gray-950/80 backdrop-blur-sm border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+        <div className="mx-auto max-w-[1440px] px-4 py-5">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                🧠 <span>Second Brain</span>
+              <h1 className="flex items-center gap-3 text-[28px] font-semibold tracking-[-0.02em] text-slate-950">
+                <BookOpen className="h-6 w-6 text-indigo-600" /> <span>Second Brain</span>
               </h1>
-              <p className="text-gray-400 mt-1">
+              <p className="mt-1 text-sm text-slate-500">
                 Le tue idee, note e conoscenze organizzate
               </p>
             </div>
@@ -571,8 +573,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setViewMode('notion')}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 
-                         hover:from-purple-500 hover:to-blue-500 text-white rounded-lg transition-colors"
+                className="lt-button-secondary px-4 text-indigo-700"
               >
                 <Cloud className="w-5 h-5" />
                 Notion
@@ -580,8 +581,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
 
               <button
                 onClick={() => handleCreatePage('New Page')}
-                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 
-                         text-white rounded-lg transition-colors"
+                className="lt-button-primary px-4"
               >
                 <Plus className="w-5 h-5" />
                 Nuova Pagina
@@ -589,8 +589,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
               
               <button
                 onClick={() => handleCreatePage('New Template', true)}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 
-                         text-white rounded-lg transition-colors"
+                className="lt-button-secondary px-4"
               >
                 <Star className="w-5 h-5" />
                 Template
@@ -607,15 +606,14 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Cerca nelle pagine..."
-                className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg 
-                         text-white placeholder-gray-400 focus:outline-none focus:border-cyan-500"
+                className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
               />
             </div>
             
             <select
               value={filterBy}
               onChange={(e) => setFilterBy(e.target.value as FilterBy)}
-              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800"
             >
               <option value="all">Tutte</option>
               <option value="recent">Recenti</option>
@@ -626,7 +624,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortBy)}
-              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800"
             >
               <option value="updated">Ultima modifica</option>
               <option value="created">Data creazione</option>
@@ -634,16 +632,16 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
               <option value="blocks">Numero blocchi</option>
             </select>
             
-            <div className="flex items-center border border-gray-700 rounded-lg">
+            <div className="flex items-center rounded-lg border border-slate-300 bg-white">
               <button
                 onClick={() => setViewMode('list')}
-                className={`p-2 ${viewMode === 'list' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                className={`p-2 ${viewMode === 'list' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400 hover:text-slate-700'}`}
               >
                 <List className="w-5 h-5" />
               </button>
               <button
                 onClick={() => setViewMode('grid')}
-                className={`p-2 ${viewMode === 'grid' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                className={`p-2 ${viewMode === 'grid' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400 hover:text-slate-700'}`}
               >
                 <Grid className="w-5 h-5" />
               </button>
@@ -659,7 +657,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
             <button
               onClick={() => setSelectedTag(null)}
               className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                selectedTag === null ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:text-white'
+                selectedTag === null ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900'
               }`}
             >
               Tutti
@@ -669,7 +667,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
                 key={tag}
                 onClick={() => setSelectedTag(tag)}
                 className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                  selectedTag === tag ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:text-white'
+                  selectedTag === tag ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900'
                 }`}
               >
                 #{tag}
@@ -680,7 +678,7 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
       )}
       
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 pb-8 h-[calc(100vh-200px)] overflow-auto">
+      <div className="mx-auto h-[calc(100vh-200px)] max-w-[1440px] overflow-auto px-4 pb-8">
         {error && (
           <div className="mb-6 p-4 bg-red-900/20 border border-red-700 rounded-lg">
             <p className="text-red-400">{error}</p>
@@ -695,15 +693,15 @@ export default function NotesPage({ className = '' }: NotesPageProps) {
         
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="text-gray-400">Caricamento...</div>
+            <div className="text-sm text-slate-500">Caricamento…</div>
           </div>
         ) : getFilteredPages().length === 0 ? (
           <div className="text-center py-12">
-            <BookOpen className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-            <h3 className="text-xl text-gray-400 mb-2">
+            <BookOpen className="mx-auto mb-4 h-12 w-12 text-slate-300" />
+            <h3 className="mb-2 text-lg font-semibold text-slate-800">
               {searchQuery || selectedTag ? 'Nessun risultato' : 'Nessuna pagina'}
             </h3>
-            <p className="text-gray-500 mb-6">
+            <p className="mb-6 text-sm text-slate-500">
               {searchQuery || selectedTag 
                 ? 'Prova a modificare i filtri di ricerca'
                 : 'Inizia creando la tua prima pagina'

@@ -272,52 +272,43 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
 
   const getRarityColor = (rarity: Badge['rarity']) => {
     switch (rarity) {
-      case 'common': return 'badge-common';
-      case 'rare': return 'badge-rare';
-      case 'epic': return 'from-purple-500 to-pink-500 border-purple-400';
-      case 'legendary': return 'badge-legendary';
-    }
-  };
-
-  const getRarityGlow = (rarity: Badge['rarity']) => {
-    switch (rarity) {
-      case 'common': return '0 0 20px rgba(79, 172, 254, 0.6)';
-      case 'rare': return '0 0 20px rgba(184, 74, 255, 0.6)';
-      case 'epic': return '0 0 30px rgba(168, 85, 247, 0.8)';
-      case 'legendary': return '0 0 40px rgba(255, 215, 0, 0.9)';
+      case 'common': return 'border-slate-500 bg-slate-600';
+      case 'rare': return 'border-blue-500 bg-blue-600';
+      case 'epic': return 'border-violet-500 bg-violet-600';
+      case 'legendary': return 'border-amber-500 bg-amber-500';
     }
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {/* Newly Unlocked Badge Animation */}
       {newlyUnlocked.map(badge => (
         <div
           key={badge.id}
-          className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
         >
-          <div className="futuristic-card p-8 text-center max-w-md animate-pulse">
+          <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-2xl">
             <div className="mb-6">
-              <div className={`achievement-badge mx-auto ${getRarityColor(badge.rarity)}`}>
+              <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border ${getRarityColor(badge.rarity)}`}>
                 {React.createElement(ICON_MAP[badge.icon as keyof typeof ICON_MAP], {
                   className: "w-12 h-12 text-white"
                 })}
               </div>
             </div>
             
-            <h3 className="text-3xl font-bold holographic-text mb-2">
-              BADGE SBLOCCATO!
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">
+              Traguardo sbloccato
             </h3>
             
-            <h4 className="text-xl font-semibold text-white mb-4">
+            <h4 className="mb-4 text-xl font-semibold text-slate-950">
               {badge.name}
             </h4>
             
-            <p className="text-gray-300 mb-6">
+            <p className="mb-6 text-sm text-slate-600">
               {badge.description}
             </p>
 
-            <div className="text-xs text-gray-400 uppercase tracking-wider">
+            <div className="text-xs uppercase tracking-wider text-slate-500">
               {badge.rarity} • {badge.category}
             </div>
           </div>
@@ -325,12 +316,16 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
       ))}
 
       {/* Badge Gallery */}
-      <div className="futuristic-card">
-        <h3 className="text-2xl font-bold mb-6 holographic-text">
-          🏆 Hall of Fame
-        </h3>
+      <div className="rounded-[14px] border border-slate-200 bg-white p-5">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Progressi verificati</p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-950">Traguardi</h3>
+          </div>
+          <p className="text-sm text-slate-500">{unlockedBadges.length} di {ACHIEVEMENT_BADGES.length} sbloccati</p>
+        </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
           {ACHIEVEMENT_BADGES.map(badge => {
             const isUnlocked = unlockedBadges.some(ub => ub.id === badge.id);
             const progress = calculateProgress(badge);
@@ -339,33 +334,28 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
             return (
               <div
                 key={badge.id}
-                className={`text-center group transition-all duration-300 ${
-                  isUnlocked ? 'transform hover:scale-105' : ''
-                }`}
+                className={`group rounded-xl border p-3 text-center transition-colors ${isUnlocked ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-slate-200 bg-slate-50/70'}`}
               >
                 <div 
-                  className={`w-20 h-20 mx-auto mb-3 rounded-full border-3 flex items-center justify-center transition-all duration-300 ${
+                  className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border transition-colors ${
                     isUnlocked 
-                      ? `${getRarityColor(badge.rarity)} achievement-badge` 
-                      : 'border-gray-600 bg-gray-800 opacity-50'
+                      ? getRarityColor(badge.rarity)
+                      : 'border-slate-200 bg-slate-100 opacity-60'
                   }`}
-                  style={{
-                    boxShadow: isUnlocked ? getRarityGlow(badge.rarity) : 'none'
-                  }}
                 >
                   <IconComponent 
-                    className={`w-8 h-8 ${isUnlocked ? 'text-white' : 'text-gray-500'}`}
+                    className={`h-5 w-5 ${isUnlocked ? 'text-white' : 'text-slate-400'}`}
                   />
                 </div>
 
                 <h4 className={`font-semibold text-sm mb-1 ${
-                  isUnlocked ? 'text-white' : 'text-gray-500'
+                  isUnlocked ? 'text-slate-900' : 'text-slate-500'
                 }`}>
                   {badge.name}
                 </h4>
 
                 <p className={`text-xs mb-2 ${
-                  isUnlocked ? 'text-gray-300' : 'text-gray-600'
+                  isUnlocked ? 'text-slate-600' : 'text-slate-400'
                 }`}>
                   {badge.description}
                 </p>
@@ -373,9 +363,9 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
                 {/* Progress Bar for Locked Badges */}
                 {!isUnlocked && progress > 0 && (
                   <div className="w-full">
-                    <div className="futuristic-progress h-2">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
                       <div 
-                        className="progress-fill-futuristic h-full"
+                        className="h-full rounded-full bg-indigo-500"
                         style={{ width: `${progress}%` }}
                       />
                     </div>
@@ -405,29 +395,29 @@ export default function BadgeSystem({ userStats, onBadgeUnlocked }: BadgeSystemP
         </div>
 
         {/* Stats Summary */}
-        <div className="mt-8 pt-6 border-t border-gray-700">
+        <div className="mt-6 border-t border-slate-200 pt-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div>
-              <div className="text-2xl font-bold neon-text">{unlockedBadges.length}</div>
-              <div className="text-xs text-gray-400">BADGES SBLOCCATI</div>
+              <div className="text-2xl font-semibold text-slate-950">{unlockedBadges.length}</div>
+              <div className="text-xs text-slate-500">SBLOCCATI</div>
             </div>
             <div>
               <div className="text-2xl font-bold text-yellow-400">
                 {unlockedBadges.filter(b => b.rarity === 'legendary').length}
               </div>
-              <div className="text-xs text-gray-400">LEGENDARY</div>
+              <div className="text-xs text-slate-500">LEGGENDARI</div>
             </div>
             <div>
               <div className="text-2xl font-bold text-purple-400">
                 {unlockedBadges.filter(b => b.rarity === 'epic').length}
               </div>
-              <div className="text-xs text-gray-400">EPIC</div>
+              <div className="text-xs text-slate-500">EPICI</div>
             </div>
             <div>
               <div className="text-2xl font-bold text-blue-400">
                 {Math.round((unlockedBadges.length / ACHIEVEMENT_BADGES.length) * 100)}%
               </div>
-              <div className="text-xs text-gray-400">COMPLETAMENTO</div>
+              <div className="text-xs text-slate-500">COMPLETAMENTO</div>
             </div>
           </div>
         </div>

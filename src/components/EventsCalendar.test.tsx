@@ -15,19 +15,19 @@ afterEach(() => {
 });
 
 describe('EventsCalendar — premium shell', () => {
-  it('renders the calendar shell with the English title and active-events line', () => {
+  it('renders the calendar shell with the strategic role and active-events line', () => {
     render(<EventsCalendar />);
     expect(screen.getByTestId('events-calendar')).toBeInTheDocument();
-    expect(screen.getByText(/Strategic Calendar/i)).toBeInTheDocument();
+    expect(screen.getByText(/Calendario strategico/i)).toBeInTheDocument();
     // 0 active events on first paint.
-    expect(screen.getByText(/0 active event/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 eventi attivi/i)).toBeInTheDocument();
   });
 
-  it('shows the "Add Event" CTA in the header', () => {
+  it('shows the new event CTA in the header', () => {
     render(<EventsCalendar />);
     const btn = screen.getByTestId('calendar-add-event');
     expect(btn).toBeInTheDocument();
-    expect(btn.textContent).toMatch(/Add Event/i);
+    expect(btn.textContent).toMatch(/Nuovo evento/i);
   });
 
   it('highlights today with a dedicated test id', () => {
@@ -46,7 +46,7 @@ describe('EventsCalendar — empty state & CTA wiring', () => {
     render(<EventsCalendar />);
     const empty = screen.getByTestId('calendar-empty-state');
     expect(empty).toBeInTheDocument();
-    expect(empty.textContent).toMatch(/No strategic events planned/i);
+    expect(empty.textContent).toMatch(/Nessun evento strategico pianificato/i);
   });
 
   it('exposes "Add Event" inside the empty state too', () => {

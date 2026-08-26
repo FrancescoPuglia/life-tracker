@@ -17,7 +17,7 @@ describe('Report history UI', () => {
     const store = resolvedStore(page([item]));
     const { container } = render(<ReportHistory userId="owner-1" store={store} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading the newest');
+    expect(screen.getByRole('status')).toHaveTextContent('Caricamento dei report');
     expect(await screen.findByText('Email sent')).toBeInTheDocument();
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
     expect(screen.getByText(/Missing Sessions are not interpreted as zero/i)).toBeInTheDocument();
@@ -29,8 +29,8 @@ describe('Report history UI', () => {
 
   it('renders a clear empty state without implying missing tracking data', async () => {
     render(<ReportHistory userId="owner-1" store={resolvedStore(page([]))} />);
-    expect(await screen.findByText('No reports yet')).toBeInTheDocument();
-    expect(screen.getByText(/after deterministic generation/i)).toBeInTheDocument();
+    expect(await screen.findByText('Nessun report disponibile')).toBeInTheDocument();
+    expect(screen.getByText(/generazione deterministica/i)).toBeInTheDocument();
   });
 
   it('surfaces quarantined records and bounded overflow without loading server-only state', async () => {
@@ -54,10 +54,10 @@ describe('Report history UI', () => {
     render(<ReportHistory userId="owner-1" store={store} />);
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('temporarily unavailable');
+    expect(alert).toHaveTextContent('temporaneamente non disponibile');
     expect(alert).not.toHaveTextContent('private index/provider detail');
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByText('No reports yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Riprova' }));
+    expect(await screen.findByText('Nessun report disponibile')).toBeInTheDocument();
     expect(store.list).toHaveBeenCalledTimes(2);
   });
 

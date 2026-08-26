@@ -194,22 +194,3 @@
   filter: none;
   text-shadow: none;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --color-canvas: #0b1120;
-    --color-surface: #111827;
-    --color-surface-elevated: #172033;
-    --color-surface-subtle: #182234;
-    --color-border: #273449;
-    --color-border-strong: #3a4961;
-    --color-text-primary: #f1f5f9;
-    --color-text-secondary: #cbd5e1;
-    --color-text-muted: #94a3b8;
-    --bg-primary: var(--color-canvas);
-    --bg-secondary: var(--color-surface-subtle);
-    --glass-bg: var(--color-surface);
-    --glass-border: var(--color-border);
-  }
-}

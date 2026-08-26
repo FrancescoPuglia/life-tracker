@@ -43,18 +43,18 @@ export default function ReportHistory({
 
   return (
     <section className="space-y-5" aria-labelledby="report-history-title">
-      <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <header className="border-b border-slate-200 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">
-              Scientific reporting
+              Evidenza deterministica
             </p>
             <h3 id="report-history-title" className="mt-1 text-xl font-bold text-slate-900">
-              Report history
+              Archivio report
             </h3>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Versioned Daily and Weekly reports. Numerical values come from deterministic
-              metrics; unavailable Sessions remain unknown and are never displayed as zero.
+              Report giornalieri e settimanali versionati. Le Sessioni non disponibili restano
+              sconosciute e non vengono mai rappresentate come zero.
             </p>
           </div>
           <button
@@ -63,7 +63,7 @@ export default function ReportHistory({
             disabled={state.status === 'loading'}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
           >
-            {state.status === 'loading' ? 'Loading…' : 'Refresh'}
+            {state.status === 'loading' ? 'Caricamento…' : 'Aggiorna'}
           </button>
         </div>
       </header>
@@ -71,24 +71,24 @@ export default function ReportHistory({
       {state.status === 'loading' && (
         <div
           role="status"
-          className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-600"
+          className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-600"
         >
-          Loading the newest archived reports…
+          Caricamento dei report archiviati più recenti…
         </div>
       )}
 
       {state.status === 'unavailable' && (
         <div role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-          <h4 className="font-bold text-amber-950">Report history is temporarily unavailable</h4>
+          <h4 className="font-semibold text-amber-950">Archivio report temporaneamente non disponibile</h4>
           <p className="mt-1 text-sm text-amber-900">
-            Tracking data was not changed. Check your connection and try again.
+            I dati di tracking sono al sicuro. Verifica la connessione e riprova.
           </p>
           <button
             type="button"
             onClick={() => setRequestVersion((version) => version + 1)}
             className="mt-4 rounded-lg bg-amber-900 px-4 py-2 text-sm font-semibold text-white"
           >
-            Try again
+            Riprova
           </button>
         </div>
       )}
@@ -111,14 +111,14 @@ function ReportHistoryPageView({ page }: { readonly page: ReportHistoryPage }) {
       )}
 
       {page.items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-6 text-center">
           <h4 className="font-bold text-slate-900">
-            {page.malformedCount > 0 ? 'No valid reports can be shown' : 'No reports yet'}
+            {page.malformedCount > 0 ? 'Nessun report valido da mostrare' : 'Nessun report disponibile'}
           </h4>
           <p className="mt-1 text-sm text-slate-600">
             {page.malformedCount > 0
-              ? 'The invalid archives remain untouched for safe server-side diagnosis.'
-              : 'Daily and Weekly reports will appear here after deterministic generation.'}
+              ? 'Gli archivi non validi restano intatti per una diagnosi sicura.'
+              : 'I report giornalieri e settimanali compariranno qui dopo la generazione deterministica.'}
           </p>
         </div>
       ) : (

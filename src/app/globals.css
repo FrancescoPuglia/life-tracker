@@ -147,10 +147,6 @@ textarea:focus-visible,
   .lt-sidebar-slot { position: static; height: auto; margin-bottom: 12px; }
   .grid-responsive { grid-template-columns: 1fr; }
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .lt-topbar { background: rgb(17 24 39 / 0.94); }
-  :root:not([data-theme="light"]) ::selection { background: #3730a3; color: #fff; }
-}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
