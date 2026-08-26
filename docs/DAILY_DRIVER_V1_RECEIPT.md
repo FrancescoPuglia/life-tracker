@@ -167,7 +167,9 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 - Analytics acceptance: NOT RUN
 - Secure AI and Preview/Apply/Undo acceptance: NOT RUN
 - Restart/re-auth evidence: NOT RUN
-- Notification/tray/autostart: NOT RUN
+- Tray/single-instance: PASS in the installed production app; closing the
+  window retained the exact process and launching the Start Menu executable
+  restored the singleton. Autostart and native notification: NOT RUN.
 - MCP: NOT ATTEMPTED
 - Current human blocker: securely set `OPENAI_API_KEY` in production Secret
   Manager using Firebase CLI. No secret value may enter chat, logs, files, or
