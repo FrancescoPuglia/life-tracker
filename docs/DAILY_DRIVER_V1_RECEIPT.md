@@ -11,8 +11,8 @@ production mutation without a separate human gate.
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
 - Final SHA: pending final receipt commit
-- Remote HEAD at production recovery checkpoint:
-  `a5a2bfd7dce60a50c06c20621f8411b2a600e891`
+- Remote HEAD at fresh-login fix checkpoint:
+  `158b5aff601d9e506c7c1bbed5e6c6b130fad4e7`
 - Worktree: clean at sprint start and before this receipt update; final state
   pending
 
@@ -120,7 +120,7 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   EUR 5 alert is `NOT VERIFIED` by this sprint and will not be retried or
   modified.
 - Production Desktop source SHA:
-  `a5a2bfd7dce60a50c06c20621f8411b2a600e891`.
+  `158b5aff601d9e506c7c1bbed5e6c6b130fad4e7`.
 - Planned backend source: exact staging-verified detached source
   `3100c42bfda50bb4627b7345270985a517439167`, not the unrelated reminder,
   report, or MCP exports added later.
@@ -171,36 +171,70 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 - Production installer:
   `src-tauri/target/release/bundle/nsis/Life Tracker_1.0.0_x64-setup.exe`;
   SHA-256
-  `637c34abbe04e1aaf3396ea03e0ce805429b913b51e00ac27c76a3f852cff16e`.
+  `fc720eaf75312839a1a5cafd8c00e1370ff59986db80cf11636f25ba8766a0c2`.
 - Built production executable: 6,485,504 bytes; SHA-256
-  `e753bf1253af8338dc1e2ee3d374be2993ec4ee6c1631f59c0efe6271149d59d`.
+  `d0a307ebd761ef4c4c4d7066ecbf5e2bb375dec4d27670b30b0f34d8bed19df3`.
   Installed NSIS-patched executable SHA-256:
-  `a7b14533fd7344c81e1fe661ca80297b3981ebf4a859a1614d35fb8d1c6949f4`.
+  `04aa91037e0857dcf520c3733501d909bde016aed1c9d711ac2a4eaafc48f461`.
 - Production artifact scan: PASS; no provider credential, private-key,
   staging-project, secret-variable, or Pages runtime signature. The one broad
   `re_` executable shape has the same digest as the previously traced pinned
   `tauri_runtime_wry` token; the installer contains none.
-- Installed launch: PASS from the normal current-user installation; production
-  login form reached at `https://tauri.localhost`, no ErrorBoundary. Metadata
-  check confirms no existing authenticated WebView session. Francesco login and
-  real-data visibility require one human sign-in and remain NOT RUN.
-- Forward-durability acceptance: NOT RUN
-- Weekly Planner acceptance: NOT RUN
-- Session acceptance: NOT RUN
-- Analytics acceptance: NOT RUN
-- Secure AI and Preview/Apply/Undo acceptance: NOT RUN
-- Restart/re-auth evidence: NOT RUN
+- Installed launch: PASS from the normal current-user installation at
+  `https://tauri.localhost`; no ErrorBoundary. Production Auth metadata is
+  valid and unexpired, its audience is exactly `life-tracker-12000`, the UID
+  matches the persisted Desktop session, production Firestore traffic is
+  present, and staging traffic is absent. Francesco's compatible historical
+  production state is visible.
+- Fresh-login bootstrap blocker: FIXED in `158b5af`. The unauthenticated path
+  initialized IndexedDB before switching to Firebase and depended on the
+  mutable adapter type, permitting overlapping bootstrap attempts; persisted
+  Auth after F5 took the direct Firebase path. DataProvider now switches
+  directly to the owner-bound Firebase adapter, runs once per UID/explicit
+  retry, rejects Firestore read failures instead of silently substituting
+  empty/local state, and resolves within 20 seconds to either ready or an
+  actionable retry screen. Focused DataProvider tests PASS (9/9), including a
+  non-resolving local-adapter regression and retry without reload; canonical
+  typecheck, static security, Desktop export/output security, and Desktop
+  security PASS.
+- Fresh sign-out/sign-in acceptance: PASS in the newly installed build. The
+  real production dashboard appeared directly with no F5, Ctrl+R, or process
+  restart; boolean-only runtime confirmation recorded fresh sign-in after app
+  launch, production audience/UID match, `uiReady=true`, and no loader/retry.
+- Forward-durability acceptance (in progress): PASS for UI creation of one
+  uniquely prefixed disposable Goal, Project, Task, and TimeBlock; owner-scoped
+  authoritative Firestore rereads found every record with the correct UID and
+  exact Goal -> Project -> Task -> TimeBlock parent links and timestamps. UI
+  reload reconstructed the hierarchy. Renaming the disposable Goal produced
+  the exact authoritative reread. Full process-restart/re-auth reread and final
+  fixture cleanup remain pending until Secure AI acceptance completes.
+- Weekly Planner acceptance: PASS for installed Planner, Weekly Planning draft
+  view, Weekly Execution, and Goal Architect loading against production state.
+- Session acceptance: PASS. The precondition found zero existing open personal
+  Sessions; one new owner-scoped Session completed start -> pause -> resume ->
+  stop, resume reused the exact same document, authoritative Firestore recorded
+  5 seconds of active duration, and no open Session remained.
+- Today / Analytics acceptance: PASS. Today Command Center, session-authoritative
+  Performance, and Analytics loaded after the completed Session.
+- Secure AI and Preview/Apply/Undo acceptance: PENDING explicit payload-level
+  approval required by the execution safety reviewer. The bounded plan sends
+  the disposable Goal/Task names plus authorized grounded production context
+  to the already-deployed production OpenAI backend, then previews, rejects,
+  applies, verifies, and undoes only the disposable TimeBlock. No capability,
+  token, secret, or historical record will be printed or modified.
+- Restart/re-auth evidence: fresh re-auth PASS before fixture creation; fixture
+  process-restart and post-restart authoritative reread remain pending.
 - Tray/single-instance: PASS in the installed production app; closing the
   window retained the exact process and launching the Start Menu executable
   restored the singleton. Autostart and native notification: NOT RUN.
-- MCP: NOT ATTEMPTED
-- Current human blocker: sign in once through the already-open installed
-  production `Life Tracker` window. Credentials must remain in the Windows UI
-  and never enter chat or automation output.
+- MCP: NOT ATTEMPTED; it remains strictly after Desktop Secure AI/durability.
+- Current human blocker: explicitly approve the bounded production Secure AI
+  acceptance payload described above. The execution environment rejected the
+  call until that post-disclosure approval is recorded.
 
 ## Deferred work
 
 WhatsApp, Twilio, reports/email, routing refinements, MCP redesign, privacy,
 Pages retirement, updater, and all P2/P3 work remain outside this sprint.
 
-`LIFE TRACKER DAILY DRIVER NOT READY`
+`LIFE TRACKER DAILY DRIVER BLOCKED — HUMAN ACTION REQUIRED`
