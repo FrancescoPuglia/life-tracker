@@ -120,6 +120,29 @@ describe('Life Tracker remote MCP HTTP boundary', () => {
     expect(JSON.stringify(goals.body)).not.toContain('goal-victim');
   });
 
+  it('accepts the real ChatGPT ui_locales authorization hint without relaxing unknown parameters', async () => {
+    const { app } = fixture();
+    const localized = await request(app)
+      .get('/authorize')
+      .query({ ...validAuthorizeQuery(), ui_locales: 'it-IT en' })
+      .expect(200);
+    expect(localized.type).toBe('text/html');
+    expect(localized.text).toContain('Life Tracker');
+
+    const unknown = await request(app)
+      .get('/authorize')
+      .query({ ...validAuthorizeQuery(), unexpected_hint: 'ignored-by-some-providers' })
+      .expect(302);
+    const redirect = new URL(String(unknown.headers.location));
+    expect(redirect.searchParams.get('error')).toBe('invalid_request');
+    expect(redirect.searchParams.get('iss')).toBe(BASE_URL);
+
+    await request(app)
+      .get('/authorize')
+      .query({ ...validAuthorizeQuery(), ui_locales: 'it-IT<script>' })
+      .expect(302);
+  });
+
   it('requires OAuth before MCP initialization and returns a discoverable challenge', async () => {
     const { app } = fixture();
     const missing = await request(app)

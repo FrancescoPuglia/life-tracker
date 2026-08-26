@@ -29,6 +29,13 @@ const authorizeSchema = z.object({
   code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   code_challenge_method: z.literal('S256'),
   resource: z.string().url().max(2_048),
+  // ChatGPT supplies this standard OIDC display hint from the real linking UI.
+  // It does not affect identity or authorization and is deliberately ignored.
+  ui_locales: z.string()
+    .min(2)
+    .max(256)
+    .regex(/^[A-Za-z0-9-]+(?: [A-Za-z0-9-]+)*$/)
+    .optional(),
 }).strict();
 
 const completeSchema = z.object({
