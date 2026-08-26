@@ -107,7 +107,13 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   - created `AI_CAPABILITY_SIGNING_SECRET` version 1 directly from fresh
     randomness without displaying or writing its value;
   - deployed Firestore Rules only. No index, TTL, Function, historical data,
-    billing, budget, reminder, report, MCP, Tasks, or Scheduler mutation occurred.
+    billing, budget, reminder, report, MCP, Tasks, or Scheduler mutation occurred
+    at that checkpoint;
+  - created only `lifeTrackerAiApi` in `europe-west1`, with exact secret-accessor
+    grants on the two named secrets. Firebase CLI also enabled its required
+    Extensions metadata API; no Extension was installed;
+  - applied the Firebase default one-day cleanup policy only to the new
+    `europe-west1/gcf-artifacts` repository to prevent image-storage buildup.
 - Billing gate: Blaze/pay-as-you-go is independently VERIFIED from read-only
   metadata; a billing account is linked. No billing or budget setting was
   changed. The Budget API returned an HTTP 500 metadata error, so the reported
@@ -143,9 +149,25 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   `sha256:8bec8a4cea3b148f56f9fdd3b6643edcd1f64ac0dd05eb3f9f35c0eb9b342a06`;
   expected one-origin Sol/medium runtime fingerprint
   `sha256:90f81b28a952c81d870db3315f55f38dbac8ade9c25c92b150d4fc8f382a5025`.
-  `AI_CAPABILITY_SIGNING_SECRET` version 1 is enabled;
-  `OPENAI_API_KEY` is absent and requires secure human input. Function deploy:
-  NOT RUN.
+  `AI_CAPABILITY_SIGNING_SECRET` version 1 and human-supplied `OPENAI_API_KEY`
+  version 1 are enabled. Neither value was accessed or displayed.
+- Production Secure AI deployment: PASS from exact detached source
+  `3100c42bfda50bb4627b7345270985a517439167`; explicit
+  `--project life-tracker-12000`; exact
+  `--only functions:lifeTrackerAiApi`. The Function create succeeded; the CLI
+  then exited 1 solely because its first-deploy cleanup policy was absent. The
+  causal `functions:artifacts:setpolicy` remediation exited 0 without a second
+  Function deployment.
+- Live backend: exactly zero Gen1 and one Gen2 Function; Node 22, 512 MiB,
+  60-second timeout, max 20 instances, concurrency 40; source generation
+  `1787740767541944`. Cloud Run generation/observed generation 1, revision
+  `lifetrackeraiapi-00001-bug`, ready with 100% latest traffic. Both secret
+  bindings resolve exact version 1.
+- Provider-free production verifier: PASS, 12/12 requests. Exact
+  `https://tauri.localhost` health/preflight succeeded; HTTP, subdomain,
+  explicit-port, Pages, and attacker near-matches were denied. Live source and
+  runtime fingerprints exactly match the expected values above; Sol/medium and
+  prompt/schema authority are unchanged.
 - Production installer:
   `src-tauri/target/release/bundle/nsis/Life Tracker_1.0.0_x64-setup.exe`;
   SHA-256
@@ -159,8 +181,9 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   `re_` executable shape has the same digest as the previously traced pinned
   `tauri_runtime_wry` token; the installer contains none.
 - Installed launch: PASS from the normal current-user installation; production
-  login form reached at `https://tauri.localhost`, no ErrorBoundary. Francesco
-  login and real-data visibility remain NOT RUN pending human availability.
+  login form reached at `https://tauri.localhost`, no ErrorBoundary. Metadata
+  check confirms no existing authenticated WebView session. Francesco login and
+  real-data visibility require one human sign-in and remain NOT RUN.
 - Forward-durability acceptance: NOT RUN
 - Weekly Planner acceptance: NOT RUN
 - Session acceptance: NOT RUN
@@ -171,9 +194,9 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   window retained the exact process and launching the Start Menu executable
   restored the singleton. Autostart and native notification: NOT RUN.
 - MCP: NOT ATTEMPTED
-- Current human blocker: securely set `OPENAI_API_KEY` in production Secret
-  Manager using Firebase CLI. No secret value may enter chat, logs, files, or
-  command arguments.
+- Current human blocker: sign in once through the already-open installed
+  production `Life Tracker` window. Credentials must remain in the Windows UI
+  and never enter chat or automation output.
 
 ## Deferred work
 
