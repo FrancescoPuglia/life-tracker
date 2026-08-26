@@ -11,10 +11,10 @@ production mutation without a separate human gate.
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
 - Final SHA: pending final receipt commit
-- Remote HEAD at production Secure AI acceptance checkpoint:
-  `6c9ace977530f02e23cf94d796c7f8607fcc3622`
-- Worktree: clean at sprint start and before this receipt update; final state
-  pending
+- Remote HEAD at Production Desktop READY checkpoint:
+  `0d009fb76a92e9c33cea980812bdf3a7afcdb0dd`
+- Worktree: clean at sprint start; tracked tree clean before this receipt
+  update; final state pending
 
 ## Staging deployment
 
@@ -260,10 +260,58 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 - Tray/single-instance: PASS in the installed production app; closing the
   window retained the exact process and launching the Start Menu executable
   restored the singleton. Autostart and native notification: NOT RUN.
-- MCP: PENDING; the Production Desktop gate is now complete, so the existing
-  bounded read-only production MCP is the only remaining Personal V1 release
-  dependency.
-- Current human blocker: none for Production Desktop.
+- MCP deployment: PASS to explicit production project `life-tracker-12000`.
+  The deployed authority is isolated checkpoint `099c579` plus only the
+  already-tested legacy timestamp-map compatibility decoder; the shared MCP,
+  package, and config sources otherwise have zero diff from that checkpoint.
+  Firebase discovery found exactly one endpoint (`lifeTrackerMcp`), four
+  non-secret parameters, zero secret bindings, zero task queues, zero
+  schedulers, zero custom roles, and zero required APIs. Final isolated bundle:
+  388,790 bytes; SHA-256
+  `277b4bfe5151743920177a39d87578d71e5de788b55dfcaf4e683acf28b757fb`.
+- MCP live Function: codebase `mcp`; Node 22; `europe-west1`; 512 MiB;
+  60-second timeout; concurrency 20; max instances 2; source generation
+  `1787756028542047`; source hash
+  `2d8bf3fced25abac0ab1ec3b5e9f3a2cadd20f8d`; canonical root
+  `https://lifetrackermcp-7tbny53slq-ew.a.run.app` and connection endpoint
+  `https://lifetrackermcp-7tbny53slq-ew.a.run.app/mcp`. It is bound to the
+  exact production owner and sole active production Firebase Web app, with the
+  read kill switch enabled. Owner UID and Web configuration values were never
+  printed; there is no MCP secret binding.
+- MCP promotion safety: first deployed default-off and proved HTTP 503 before
+  Auth/Firestore initialization; then bound the generated root while still
+  off. The first enabled health call failed closed because Firebase CLI's Web
+  config included fields outside the reviewed four-field allowlist. The one
+  causal retry retained only `apiKey`, `authDomain`, `projectId`, and `appId`;
+  final health is 200. No tool or identity scope changed.
+- MCP persistence metadata: the existing `timeBlocks(startTime ASC,
+  endTime ASC)` composite remains the sole composite. Exactly five `purgeAt`
+  TTL overrides are live for pending authorizations, authorization codes,
+  access tokens, refresh tokens, and MCP read-rate controls. No Rules release,
+  domain collection TTL, index deletion, or historical-data mutation was
+  included.
+- MCP public acceptance: PASS. Health advertises exactly 12 read tools and 0
+  write tools; protected-resource and authorization-server discovery bind the
+  exact root/resource and sole `life_tracker.read` scope; public-client token
+  exchange is S256 PKCE only. Tokenless MCP returned 401 with a discoverable
+  challenge; an unknown OAuth client, write scope, and unknown route all
+  failed closed. ChatGPT's current public client metadata still contains the
+  reviewed stable redirect, public-client method, and authorization-code
+  contract. The official connection procedure is documented by
+  [OpenAI's ChatGPT plugin connection guide](https://developers.openai.com/plugins/deploy/connect-chatgpt).
+- MCP real-client acceptance: PENDING one interactive ChatGPT Developer Mode
+  connection, Firebase owner consent, discovered-tool review, and bounded read
+  smoke. The local Windows/WSL interop bridge failed before the optional
+  automated owner-flow verifier could start; it created no token or request.
+  Public endpoint and negative-boundary verification completed independently.
+- MCP rollback: set only `MCP_READ_RUNTIME_ENABLED=false` in the ignored local
+  production runtime config and redeploy with `firebase.mcp.json`, explicit
+  `--project life-tracker-12000 --only functions`; verify 503 before any owner
+  read. Revoke/remove the ChatGPT connection separately. TTL policies target
+  only expiring MCP control records and never Life Tracker domain data.
+- Current human blocker: connect the exact production `/mcp` endpoint in
+  ChatGPT Developer Mode, complete the Firebase owner consent, review the 12
+  read-only tools, and perform one bounded real-data read.
 
 ## Deferred work
 
