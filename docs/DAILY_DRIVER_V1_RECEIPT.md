@@ -1,6 +1,6 @@
 # Daily Driver v1 release receipt
 
-Date: 2026-08-25 (Europe/Rome)
+Date: 2026-08-26 (Europe/Rome)
 
 This receipt tracks the bounded Daily Driver release sprint. It does not
 authorize resources beyond the explicit staging Function approval or any
@@ -99,13 +99,35 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
 
 - Production project: `life-tracker-12000` (`970402762590`)
 - Production resources changed: none
-- Recovery/rollback state: the existing audit confirms no PITR, delete
-  protection, backup schedule, or existing backup. A recoverable export/backup
-  plus pre-change resource inventory is required before production mutation.
-- Human cost gate: production has no linked billing account; billing is
-  disabled. Cloud Functions, Cloud Run, Artifact Registry, Cloud Build, and
-  Secret Manager APIs are disabled, so the minimum Secure AI backend cannot be
-  promoted until the project is upgraded to Blaze/pay-as-you-go by Francesco.
+- Billing gate: Blaze/pay-as-you-go is independently VERIFIED from read-only
+  metadata; a billing account is linked. No billing or budget setting was
+  changed. The Budget API returned an HTTP 500 metadata error, so the reported
+  EUR 5 alert is `NOT VERIFIED` by this sprint and will not be retried or
+  modified.
+- Predeployment application SHA:
+  `ca4a908041dc5d0409a2ce52324e598983e8b25b`.
+- Planned backend source: exact staging-verified detached source
+  `3100c42bfda50bb4627b7345270985a517439167`, not the unrelated reminder,
+  report, or MCP exports added later.
+- Existing production Function state: canonical `lifeTrackerAiApi` endpoint
+  HTTP 404; Cloud Functions and Cloud Run APIs are disabled. The full empty
+  inventory will be confirmed after enabling only the required inventory/runtime
+  APIs and before deployment.
+- Predeployment Rules release:
+  `projects/life-tracker-12000/rulesets/491f1929-e5fe-4686-8ec2-e0974a13e132`;
+  one-file source SHA-256
+  `7f95ba84efa0537537dd4d92e8ee30f5408ab2c83bc71d4f36508fd0e5a297bd`.
+- Existing index/TTL state: none, reusing the 2026-08-24 production audit.
+- Required service state before promotion: Firestore, Firebase Rules, Identity
+  Toolkit, and Pub/Sub enabled; Cloud Functions, Cloud Run, Artifact Registry,
+  Cloud Build, Eventarc, and Secret Manager disabled.
+- Minimum recovery path: this release performs no migration or historical-data
+  write. Rules rollback re-points `cloud.firestore` to the immutable prior
+  ruleset above. Function rollback deletes only the newly introduced
+  `lifeTrackerAiApi` in `europe-west1` after positively identifying the project;
+  secrets are retained rather than destructively purged. Acceptance writes use
+  isolated disposable records and Undo/cleanup. A paid Firestore backup is not
+  enabled for this non-destructive metadata/function delta.
 - Forward-durability acceptance: NOT RUN
 - Weekly Planner acceptance: NOT RUN
 - Session acceptance: NOT RUN
