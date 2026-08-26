@@ -104,7 +104,7 @@ export default function ExecutionAlarmHost({
       } : null);
     }, Math.max(0, snoozedUntilMs - Date.now()));
     return () => clearTimeout(timer);
-  }, [active?.state.updatedAt, isSnoozed, snoozedUntilMs]);
+  }, [active, isSnoozed, snoozedUntilMs]);
 
   useEffect(() => {
     if (!active || isSnoozed || preferences.muted || !preferences.soundEnabled) {
@@ -113,7 +113,7 @@ export default function ExecutionAlarmHost({
     }
     void sound.current?.startBounded();
     return () => sound.current?.stop();
-  }, [active?.signal.dispatch.attemptId, isSnoozed, preferences.muted, preferences.soundEnabled]);
+  }, [active, isSnoozed, preferences.muted, preferences.soundEnabled]);
 
   const matchedBlock = useMemo(() => (
     active?.signal.context.timeBlockId

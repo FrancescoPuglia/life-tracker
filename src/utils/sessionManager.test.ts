@@ -69,6 +69,8 @@ describe('SessionManager persisted-session restore', () => {
   });
 
   it('does not mutate in-memory authority when a lifecycle write fails', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(at('08:10'));
     const original = makeSession({ activeSegmentStartedAt: at('08:00') });
     manager.restoreCurrentSession(original, OWNER);
     vi.spyOn(db, 'update').mockRejectedValue(new Error('offline'));
