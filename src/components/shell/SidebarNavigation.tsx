@@ -1,18 +1,28 @@
 'use client';
 
-// src/components/shell/SidebarNavigation.tsx
-// Grouped sidebar navigation for the Life Tracker command center.
-//
-// Replaces the flat 16-item gradient list with four semantic groups:
-//   • Command Center  — what you're doing now / today / this week's plan
-//   • Build System    — goal architecture and weekly intent
-//   • Intelligence    — analytics, coaching, knowledge
-//   • Growth          — habits, vision, achievements, voice
-//
-// Props-driven so MainApp keeps owning `activeTab` and we can test the
-// component in isolation.
-
-import { memo } from 'react';
+import { memo, useState } from 'react';
+import {
+  Activity,
+  BarChart3,
+  BookOpen,
+  Brain,
+  CalendarDays,
+  ChevronDown,
+  Compass,
+  FileText,
+  Flame,
+  Image,
+  Layers3,
+  Mic2,
+  PlayCircle,
+  RefreshCw,
+  Settings,
+  Sparkles,
+  Sun,
+  Target,
+  Trophy,
+  type LucideIcon,
+} from 'lucide-react';
 
 export type SidebarNavId =
   | 'today'
@@ -39,7 +49,7 @@ export type SidebarNavId =
 interface NavItem {
   id: SidebarNavId;
   label: string;
-  icon: string;
+  icon: LucideIcon;
   subtitle: string;
 }
 
@@ -49,47 +59,54 @@ interface NavGroup {
   items: ReadonlyArray<NavItem>;
 }
 
+const TODAY_ITEM: NavItem = {
+  id: 'today',
+  label: 'Oggi',
+  icon: Sun,
+  subtitle: 'Comando della giornata',
+};
+
 export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
   {
-    id: 'command_center',
-    label: 'Command Center',
+    id: 'plan',
+    label: 'Pianifica',
     items: [
-      { id: 'today', label: 'Today', icon: '☀️', subtitle: 'Today at a glance' },
-      { id: 'planner', label: 'Time Planner', icon: '📅', subtitle: 'Plan and execute blocks' },
-      { id: 'events', label: 'Calendar', icon: '📆', subtitle: 'Strategic events' },
+      { id: 'planner', label: 'Time Planner', icon: CalendarDays, subtitle: 'Blocchi di esecuzione' },
+      { id: 'events', label: 'Calendario', icon: Compass, subtitle: 'Scadenze e milestone' },
+      { id: 'okr', label: 'Obiettivi e progetti', icon: Target, subtitle: 'Direzione e risultati' },
+      { id: 'weekly_intel', label: 'Piano settimanale', icon: Layers3, subtitle: 'Costruisci la settimana' },
+      { id: 'goal_architect', label: 'Goal Architect', icon: Sparkles, subtitle: 'Struttura un obiettivo' },
     ],
   },
   {
-    id: 'build_system',
-    label: 'Build System',
+    id: 'execute',
+    label: 'Esegui',
     items: [
-      { id: 'goal_architect', label: 'Goal Architect', icon: '🏗️', subtitle: 'Draft goals from text' },
-      { id: 'okr', label: 'Goals & Projects', icon: '🎯', subtitle: 'Manage your OKRs' },
-      { id: 'weekly_intel', label: 'Weekly Intelligence', icon: '🧭', subtitle: 'Draft a week' },
-      { id: 'weekly', label: 'Weekly Execution', icon: '📈', subtitle: 'Plan vs reality' },
+      { id: 'habits', label: 'Abitudini', icon: Flame, subtitle: 'Ritmo quotidiano' },
+      { id: 'smart_scheduler', label: 'Auto Scheduler', icon: PlayCircle, subtitle: 'Organizza il carico' },
+      { id: 'adaptation', label: 'Adatta piano', icon: RefreshCw, subtitle: 'Ripara la giornata' },
+    ],
+  },
+  {
+    id: 'review',
+    label: 'Analizza',
+    items: [
+      { id: 'weekly', label: 'Esecuzione settimanale', icon: Activity, subtitle: 'Piano e realtà' },
+      { id: 'performance', label: 'Performance', icon: BarChart3, subtitle: 'Evidenza di esecuzione' },
+      { id: 'analytics', label: 'Analytics', icon: BarChart3, subtitle: 'Trend e distribuzione' },
+      { id: 'reports', label: 'Report', icon: FileText, subtitle: 'Archivio giornaliero' },
+      { id: 'badges', label: 'Traguardi', icon: Trophy, subtitle: 'Progressi sbloccati' },
     ],
   },
   {
     id: 'intelligence',
-    label: 'Intelligence',
+    label: 'Intelligenza',
     items: [
-      { id: 'performance', label: 'Performance', icon: '⏱️', subtitle: 'Plan vs Actual OS' },
-      { id: 'micro_coach', label: 'AI Coach', icon: '🧠', subtitle: 'Performance insights' },
-      { id: 'analytics', label: 'Analytics', icon: '📊', subtitle: 'Trend dashboards' },
-      { id: 'reports', label: 'Reports', icon: '📑', subtitle: 'Daily & weekly archive' },
-      { id: 'goal_analytics', label: 'Goal Intelligence', icon: '🎯', subtitle: 'Goal-centric metrics' },
-      { id: 'notes', label: 'Second Brain', icon: '📝', subtitle: 'Smart notes' },
-    ],
-  },
-  {
-    id: 'growth',
-    label: 'Growth',
-    items: [
-      { id: 'habits', label: 'Habits', icon: '🔥', subtitle: 'Track daily habits' },
-      { id: 'vision-board', label: 'Vision Board', icon: '✧', subtitle: 'Long-term vision' },
-      { id: 'badges', label: 'Achievements', icon: '🏆', subtitle: 'Earned milestones' },
-      { id: 'voice', label: 'Voice System', icon: '🎙️', subtitle: 'Language & voice' },
-      { id: 'settings', label: 'Settings', icon: '⚙️', subtitle: 'Desktop and providers' },
+      { id: 'micro_coach', label: 'AI Coach', icon: Brain, subtitle: 'Insight contestuali' },
+      { id: 'goal_analytics', label: 'Goal Intelligence', icon: Target, subtitle: 'Analisi per obiettivo' },
+      { id: 'notes', label: 'Second Brain', icon: BookOpen, subtitle: 'Conoscenza e note' },
+      { id: 'vision-board', label: 'Vision Board', icon: Image, subtitle: 'Orizzonte strategico' },
+      { id: 'voice', label: 'Voce', icon: Mic2, subtitle: 'Comandi e lingua' },
     ],
   },
 ];
@@ -100,89 +117,91 @@ export interface SidebarNavigationProps {
 }
 
 function SidebarNavigationInner({ activeTab, onSelect }: SidebarNavigationProps) {
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(SIDEBAR_GROUPS.map((group) => [group.id, true])),
+  );
+
   return (
-    <nav
-      aria-label="Primary navigation"
-      data-testid="sidebar-navigation"
-      className="rounded-2xl border border-gray-200 bg-white/90 backdrop-blur-sm shadow-sm overflow-hidden"
-    >
-      <header className="px-4 py-3 border-b border-gray-100">
-        <p className="text-[10px] uppercase tracking-[0.18em] font-semibold text-blue-700">
-          Life Tracker
-        </p>
-        <h2 className="mt-0.5 text-sm font-bold text-gray-900">Command Center</h2>
-      </header>
+    <nav aria-label="Navigazione principale" data-testid="sidebar-navigation" className="lt-panel flex h-full flex-col overflow-hidden">
+      <div className="border-b border-slate-200 p-2">
+        <NavButton item={TODAY_ITEM} active={activeTab === TODAY_ITEM.id} onSelect={onSelect} featured />
+      </div>
 
-      <ul className="max-h-[calc(100vh-220px)] overflow-y-auto py-2">
-        {SIDEBAR_GROUPS.map((group) => (
-          <li key={group.id} className="py-1.5">
-            <p
-              className="px-4 pt-1 pb-1 text-[10px] uppercase tracking-[0.16em] font-semibold text-gray-400"
-              data-testid={`sidebar-group-${group.id}`}
-            >
-              {group.label}
-            </p>
-            <ul className="space-y-0.5 px-1.5">
-              {group.items.map((item) => {
-                const isActive = item.id === activeTab;
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelect(item.id)}
-                      aria-current={isActive ? 'page' : undefined}
-                      data-testid={`sidebar-item-${item.id}`}
-                      className={`group w-full text-left flex items-center gap-3 rounded-lg px-2.5 py-2 transition ${
-                        isActive
-                          ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 shadow-sm'
-                          : 'border border-transparent hover:bg-gray-50'
-                      }`}
-                    >
-                      <span
-                        className={`flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md text-base ${
-                          isActive
-                            ? 'bg-white border border-blue-100'
-                            : 'bg-gray-50 border border-gray-100 group-hover:bg-white'
-                        }`}
-                        aria-hidden="true"
-                      >
-                        {item.icon}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={`block text-[13px] font-semibold leading-tight ${
-                            isActive ? 'text-blue-900' : 'text-gray-800'
-                          }`}
-                        >
-                          {item.label}
-                        </span>
-                        <span
-                          className={`block text-[11px] leading-tight ${
-                            isActive ? 'text-blue-700/80' : 'text-gray-500'
-                          }`}
-                        >
-                          {item.subtitle}
-                        </span>
-                      </span>
-                      {isActive && (
-                        <span
-                          className="ml-1 w-1.5 h-1.5 rounded-full bg-blue-500"
-                          aria-hidden="true"
-                        />
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </li>
-        ))}
-      </ul>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {SIDEBAR_GROUPS.map((group) => {
+          const expanded = openGroups[group.id];
+          const containsActive = group.items.some((item) => item.id === activeTab);
+          return (
+            <section key={group.id} className="mb-1" data-testid={`sidebar-group-${group.id}`}>
+              <button
+                type="button"
+                className={`flex min-h-[34px] w-full items-center justify-between rounded-lg px-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] transition-colors ${containsActive ? 'text-indigo-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
+                aria-expanded={expanded}
+                aria-controls={`sidebar-group-items-${group.id}`}
+                onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: !current[group.id] }))}
+              >
+                {group.label}
+                <ChevronDown size={14} aria-hidden="true" className={`transition-transform ${expanded ? '' : '-rotate-90'}`} />
+              </button>
+              {expanded && (
+                <ul id={`sidebar-group-items-${group.id}`} className="space-y-0.5 pb-1">
+                  {group.items.map((item) => (
+                    <li key={item.id}>
+                      <NavButton item={item} active={activeTab === item.id} onSelect={onSelect} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
-      <footer className="px-4 py-2 border-t border-gray-100 text-[10px] text-gray-400">
-        Personal Execution Command Center
-      </footer>
+      <div className="border-t border-slate-200 p-2">
+        <NavButton
+          item={{ id: 'settings', label: 'Impostazioni', icon: Settings, subtitle: 'Desktop e preferenze' }}
+          active={activeTab === 'settings'}
+          onSelect={onSelect}
+        />
+      </div>
     </nav>
+  );
+}
+
+function NavButton({
+  item,
+  active,
+  onSelect,
+  featured = false,
+}: {
+  item: NavItem;
+  active: boolean;
+  onSelect: (id: SidebarNavId) => void;
+  featured?: boolean;
+}) {
+  const Icon = item.icon;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item.id)}
+      aria-current={active ? 'page' : undefined}
+      data-testid={`sidebar-item-${item.id}`}
+      className={`group flex min-h-[44px] w-full items-center gap-3 rounded-[10px] border px-2.5 text-left transition-colors ${
+        active
+          ? 'border-indigo-100 bg-indigo-50 text-indigo-950'
+          : featured
+            ? 'border-transparent bg-slate-50 text-slate-900 hover:border-slate-200 hover:bg-white'
+            : 'border-transparent text-slate-700 hover:bg-slate-50 hover:text-slate-950'
+      }`}
+    >
+      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${active ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 group-hover:text-slate-700'}`} aria-hidden="true">
+        <Icon size={16} strokeWidth={2} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold leading-[18px]">{item.label}</span>
+        <span className={`block truncate text-[11px] leading-4 ${active ? 'text-indigo-700' : 'text-slate-500'}`}>{item.subtitle}</span>
+      </span>
+    </button>
   );
 }
 

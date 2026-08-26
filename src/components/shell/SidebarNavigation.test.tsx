@@ -8,12 +8,12 @@ import SidebarNavigation, {
 } from './SidebarNavigation';
 
 describe('SidebarNavigation', () => {
-  it('renders the four grouped sections', () => {
+  it('renders the four semantic priority groups', () => {
     render(<SidebarNavigation activeTab="today" onSelect={() => {}} />);
-    expect(screen.getByTestId('sidebar-group-command_center')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-group-build_system')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-group-plan')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-group-execute')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-group-review')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-group-intelligence')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-group-growth')).toBeInTheDocument();
   });
 
   it('exposes the five primary nav targets that must keep working', () => {
@@ -57,10 +57,10 @@ describe('SidebarNavigation', () => {
   it('SIDEBAR_GROUPS export is stable and ordered', () => {
     const orderedIds: ReadonlyArray<string> = SIDEBAR_GROUPS.map((g) => g.id);
     expect(orderedIds).toEqual([
-      'command_center',
-      'build_system',
+      'plan',
+      'execute',
+      'review',
       'intelligence',
-      'growth',
     ]);
   });
 

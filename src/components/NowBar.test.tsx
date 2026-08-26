@@ -16,7 +16,7 @@ describe('NowBar', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /START POWER/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Avvia sessione/i }));
     expect(onStartSession).toHaveBeenCalledWith('task-now', 'block-now');
     expect(screen.getByText('Next commitment')).toBeInTheDocument();
   });
@@ -33,7 +33,7 @@ describe('NowBar', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /RESUME/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Riprendi/i }));
     expect(onStartSession).toHaveBeenCalledWith();
   });
 
@@ -49,7 +49,7 @@ describe('NowBar', () => {
       />,
     );
 
-    const start = screen.getByRole('button', { name: /CHECKING SESSIONS/i });
+    const start = screen.getByRole('button', { name: /Verifica sessioni/i });
     expect(start).toBeDisabled();
     fireEvent.click(start);
     expect(onStartSession).not.toHaveBeenCalled();

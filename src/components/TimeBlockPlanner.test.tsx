@@ -55,9 +55,9 @@ describe('TimeBlockPlanner — shell', () => {
 
   it('exposes Day / Week / Month switcher buttons', () => {
     renderPlanner();
-    expect(screen.getByRole('button', { name: /^day$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^week$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^month$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^giorno$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^settimana$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^mese$/i })).toBeInTheDocument();
   });
 });
 
@@ -66,8 +66,8 @@ describe('TimeBlockPlanner — empty state', () => {
     renderPlanner();
     const empty = screen.getByTestId('planner-empty-state');
     expect(empty).toBeInTheDocument();
-    expect(empty.textContent).toMatch(/No blocks for/i);
-    expect(empty.textContent).toMatch(/Generate your week from Weekly Intelligence/i);
+    expect(empty.textContent).toMatch(/Nessun blocco per/i);
+    expect(empty.textContent).toMatch(/genera la settimana dal Piano settimanale/i);
   });
 
   it('exposes Add Block inside the empty state', () => {
@@ -75,7 +75,7 @@ describe('TimeBlockPlanner — empty state', () => {
     expect(screen.getByTestId('planner-empty-add-block')).toBeInTheDocument();
   });
 
-  it('shows "Generate Weekly Plan" only when onNavigate is provided', () => {
+  it('shows the weekly plan CTA only when onNavigate is provided', () => {
     const { rerender } = renderPlanner();
     expect(screen.queryByTestId('planner-empty-generate-weekly')).toBeNull();
     expect(screen.queryByTestId('planner-generate-weekly-plan')).toBeNull();
@@ -117,15 +117,24 @@ describe('TimeBlockPlanner — empty state', () => {
   });
 });
 
+describe('TimeBlockPlanner — month layout', () => {
+  it('renders a stable six-week grid with 42 complete day cells', () => {
+    renderPlanner();
+    fireEvent.click(screen.getByRole('button', { name: /^mese$/i }));
+    const monthGrid = screen.getByTestId('planner-month-grid');
+    expect(monthGrid.querySelectorAll(':scope > button')).toHaveLength(42);
+  });
+});
+
 describe('TimeBlockPlanner — day summary', () => {
   it('shows an unavailable adherence denominator when there are no planned minutes', () => {
     renderPlanner();
     const summary = screen.getByTestId('planner-day-summary');
-    expect(summary.textContent).toMatch(/Planned/i);
-    expect(summary.textContent).toMatch(/Known actual/i);
-    expect(summary.textContent).toMatch(/Adherence/i);
+    expect(summary.textContent).toMatch(/Pianificato/i);
+    expect(summary.textContent).toMatch(/Effettivo noto/i);
+    expect(summary.textContent).toMatch(/Aderenza/i);
     expect(summary.textContent).toMatch(/0\s*min/);
-    expect(summary.textContent).toMatch(/Unavailable/);
+    expect(summary.textContent).toMatch(/Non disponibile/);
   });
 
   it('does not substitute a completed block planned window for execution', () => {
@@ -144,9 +153,9 @@ describe('TimeBlockPlanner — day summary', () => {
     renderPlanner({ timeBlocks: [block] });
 
     const summary = screen.getByTestId('planner-day-summary');
-    expect(summary.textContent).toMatch(/Planned1 h/i);
-    expect(summary.textContent).toMatch(/Known actual ≥0 min/i);
-    expect(summary.textContent).toMatch(/AdherenceUnavailable/i);
+    expect(summary.textContent).toMatch(/Pianificato1 h/i);
+    expect(summary.textContent).toMatch(/Effettivo noto ≥0 min/i);
+    expect(summary.textContent).toMatch(/AderenzaNon disponibile/i);
   });
 
   it('manual completion changes status only and does not manufacture actual timestamps', () => {

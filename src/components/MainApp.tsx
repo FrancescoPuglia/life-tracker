@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { Brain, ChevronDown, LogOut, Volume2, VolumeX, Zap } from 'lucide-react';
 import { Session, TimeBlock, AnalyticsData } from '@/types';
 import { SessionManager } from '@/utils/sessionManager';
 import { db } from '@/lib/database';
@@ -17,7 +18,6 @@ import AuthModal from '@/components/AuthModal';
 import SyncStatusIndicator from '@/components/SyncStatus';
 import DailyMotivation from '@/components/DailyMotivation';
 // (DailyLoginStreakSystem + StreakCounter removed from sidebar — see note above.)
-import GamingEffects from '@/components/GamingEffects';
 import DopamineRewardSystem from '@/components/DopamineRewardSystem';
 import StrategicDopamineSystem from '@/components/StrategicDopamineSystem';
 import BlockCountdown from '@/components/BlockCountdown';
@@ -75,6 +75,29 @@ import TodayCommandCenter from '@/components/shell/TodayCommandCenter';
 // ============================================================================
 
 type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro_coach' | 'habits' | 'okr' | 'performance' | 'analytics' | 'reports' | 'goal_analytics' | 'badges' | 'vision-board' | 'notes' | 'events' | 'weekly' | 'weekly_intel' | 'goal_architect' | 'voice' | 'settings';
+
+const PAGE_TITLES: Record<ActiveTab, string> = {
+  today: 'Oggi',
+  planner: 'Time Planner',
+  smart_scheduler: 'Auto Scheduler',
+  adaptation: 'Adatta piano',
+  micro_coach: 'AI Coach',
+  habits: 'Abitudini',
+  okr: 'Obiettivi e progetti',
+  performance: 'Performance',
+  analytics: 'Analytics',
+  reports: 'Report',
+  goal_analytics: 'Goal Intelligence',
+  badges: 'Traguardi',
+  'vision-board': 'Vision Board',
+  notes: 'Second Brain',
+  events: 'Calendario strategico',
+  weekly: 'Esecuzione settimanale',
+  weekly_intel: 'Piano settimanale',
+  goal_architect: 'Goal Architect',
+  voice: 'Voce',
+  settings: 'Impostazioni',
+};
 
 interface MainAppProps {
   buildId: string;
@@ -479,143 +502,100 @@ export default function MainApp({ buildId }: MainAppProps) {
         audioManager.perfectDay?.();
       }}
     >
-      <div className="min-h-screen" data-testid="app-ready">
-        <GamingEffects />
+      <div className="lt-app-shell" data-testid="app-ready">
         <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
         <DailyMotivation />
         <BlockCountdown />
 
-      {/* Header */}
-      <header className="gaming-card fixed top-0 left-0 right-0 z-40 border-0 border-b-2 border-blue-200/30">
-        <div className="max-w-7xl mx-auto px-6">
-          
-          {/* Top Row: Brand + User */}
-          <div className="flex items-center justify-between py-1">
-            <div className="flex items-center space-x-4">
-              <div className="text-2xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-                ⚡ LifeTracker
+        <header className="lt-topbar">
+          <div className="lt-topbar-inner">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="lt-brand-mark" aria-hidden="true"><Zap size={17} fill="currentColor" /></span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold leading-4 text-slate-950">Life Tracker</p>
+                <p className="truncate text-xs leading-4 text-slate-500">{PAGE_TITLES[activeTab]}</p>
               </div>
-              <span
-                className="hidden md:inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-mono text-gray-500"
-                title={`Build ${buildId}`}
-              >
-                v{buildId.slice(0, 7)}
-              </span>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="lt-topbar-context min-w-0">
+              <NowBar
+                currentSession={currentSession}
+                currentTimeBlock={currentTimeBlock}
+                nextTimeBlock={nextTimeBlock}
+                sessionStateReady={sessionCoverage === 'ready'}
+                onStartSession={handleStartSession}
+                onPauseSession={handlePauseSession}
+                onStopSession={handleStopSession}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-1.5">
+              <SyncStatusIndicator />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !soundEnabled;
+                  setSoundEnabled(next);
+                  audioManager.setEnabled(next);
+                  if (next) audioManager.buttonFeedback();
+                }}
+                className="lt-icon-button min-h-[36px] w-9"
+                aria-label={soundEnabled ? 'Disattiva suoni' : 'Attiva suoni'}
+                title={soundEnabled ? 'Suoni attivi' : 'Suoni disattivati'}
+              >
+                {soundEnabled ? <Volume2 size={16} aria-hidden="true" /> : <VolumeX size={16} aria-hidden="true" />}
+              </button>
               <button
                 type="button"
                 onClick={() => setAiDrawerOpen(true)}
                 data-testid="ask-ai-button"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:from-blue-100 hover:to-indigo-100 transition"
+                className="lt-button-secondary min-h-[36px] px-3 text-indigo-700"
               >
-                <span aria-hidden="true">🧠</span>
-                <span>Ask AI</span>
+                <Brain size={16} aria-hidden="true" />
+                <span>Chiedi all’AI</span>
               </button>
-              <SyncStatusIndicator />
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg">
-                  {(user.displayName?.[0]) || (user.email?.[0]) || 'U'}
+              <details className="relative">
+                <summary className="lt-profile-summary flex min-h-[38px] cursor-pointer list-none items-center gap-1 rounded-[10px] border border-transparent px-1.5 transition-colors hover:border-slate-200 hover:bg-slate-50" aria-label="Apri menu profilo">
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 text-xs font-bold text-white">
+                    {(user.displayName?.[0]) || (user.email?.[0]) || 'U'}
+                  </span>
+                  <ChevronDown size={14} className="text-slate-500" aria-hidden="true" />
+                </summary>
+                <div className="absolute right-0 top-11 z-50 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                  <p className="truncate text-sm font-semibold text-slate-900">{user.displayName || 'Profilo personale'}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{user.email}</p>
+                  <p className="mt-2 font-mono text-[11px] text-slate-400">Build {buildId.slice(0, 7)}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      signOut();
+                      audioManager.buttonFeedback();
+                    }}
+                    className="mt-3 flex min-h-[40px] w-full items-center gap-2 rounded-lg px-3 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50"
+                  >
+                    <LogOut size={16} aria-hidden="true" />
+                    Esci
+                  </button>
                 </div>
-                <div className="hidden lg:block">
-                  <div className="text-sm font-semibold text-gray-800">
-                    {user.displayName || 'Productivity Master'}
-                  </div>
-                  <div className="text-xs text-gray-500">{user.email}</div>
-                </div>
-                <button
-                  onClick={() => {
-                    const next = !soundEnabled;
-                    setSoundEnabled(next);
-                    audioManager.setEnabled(next);
-                    if (next) audioManager.buttonFeedback();
-                  }}
-                  className="text-lg px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-                  title={soundEnabled ? 'Mute sounds' : 'Enable sounds'}
-                >
-                  {soundEnabled ? '🔊' : '🔇'}
-                </button>
-                <button
-                  onClick={() => {
-                    signOut();
-                    audioManager.buttonFeedback();
-                  }}
-                  className="btn-gaming variant-danger text-xs px-4 py-2"
-                >
-                  Sign Out
-                </button>
-              </div>
+              </details>
             </div>
           </div>
-          
-          {/* Bottom Row: NowBar */}
-          <div className="pb-1">
-            <NowBar
-              currentSession={currentSession}
-              currentTimeBlock={currentTimeBlock}
-              nextTimeBlock={nextTimeBlock}
-              sessionStateReady={sessionCoverage === 'ready'}
-              onStartSession={handleStartSession}
-              onPauseSession={handlePauseSession}
-              onStopSession={handleStopSession}
+        </header>
+
+        <div className="lt-shell-body">
+          <aside className="lt-sidebar-slot">
+            <SidebarNavigation
+              activeTab={activeTab as SidebarNavId}
+              onSelect={(id) => {
+                setActiveTab(id as ActiveTab);
+                audioManager.buttonFeedback();
+              }}
             />
-          </div>
-        </div>
-      </header>
+          </aside>
 
-      {/* Main Content */}
-      <div className="pt-16 pb-8 bg-gradient-to-br from-neutral-50 to-neutral-100 min-h-screen">
-        <div className="container mx-auto">
-          <div className="grid-responsive gap-6 px-4 sm:px-6 lg:px-8">
-            {/* Left Sidebar — grouped navigation */}
-            <div className="sidebar-container">
-              <SidebarNavigation
-                activeTab={activeTab as SidebarNavId}
-                onSelect={(id) => {
-                  setActiveTab(id as ActiveTab);
-                  audioManager.buttonFeedback();
-                }}
-              />
-            </div>
-
-            {/* Main Content Area */}
-            <div className="gaming-card">
-              <div className="p-6 border-b border-gradient-to-r from-blue-200/30 to-purple-200/30">
-                <h2 className="text-3xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent flex items-center gap-3">
-                  {activeTab === 'today' && '☀️ Today'}
-                  {activeTab === 'planner' && '📅 Time Planner'}
-                  {activeTab === 'smart_scheduler' && '⚡ Auto Scheduler'}
-                  {activeTab === 'adaptation' && '🔄 Auto Replan'}
-                  {activeTab === 'micro_coach' && '🧠 AI Coach'}
-                  {activeTab === 'habits' && '🔥 Habits Tracker'}
-                  {activeTab === 'okr' && '🎯 Goals & Projects'}
-                  {activeTab === 'notes' && '🧠 Second Brain'}
-                  {activeTab === 'vision-board' && '✧ Vision Board'}
-                  {activeTab === 'performance' && '⏱️ Performance Review'}
-                  {activeTab === 'analytics' && '📊 Analytics Dashboard'}
-                  {activeTab === 'reports' && '📑 Scientific Reports'}
-                  {activeTab === 'goal_analytics' && '🎯 Goal Intelligence'}
-                  {activeTab === 'weekly' && '📈 Weekly Execution'}
-                  {activeTab === 'weekly_intel' && '🧭 Weekly Intelligence'}
-                  {activeTab === 'goal_architect' && '🏗️ Goal Architect'}
-                  {activeTab === 'events' && '📆 Calendario Strategico'}
-                  {activeTab === 'badges' && '🏆 Achievements'}
-                  {activeTab === 'voice' && '🎙️ Voice System'}
-                  {activeTab === 'settings' && '⚙️ Settings'}
-                  <div className="achievement-badge ml-auto">ACTIVE</div>
-                </h2>
-              </div>
-              <div className="p-6 particle-container relative overflow-hidden">
-                {/* Animated background particles */}
-                <div className="absolute top-0 left-0 w-4 h-4 particle" style={{ top: '10%', left: '5%' }}></div>
-                <div className="absolute top-0 left-0 w-3 h-3 particle" style={{ top: '30%', left: '15%', animationDelay: '2s' }}></div>
-                <div className="absolute top-0 left-0 w-2 h-2 particle" style={{ top: '60%', left: '8%', animationDelay: '4s' }}></div>
-                <div className="absolute top-0 left-0 w-3 h-3 particle" style={{ top: '80%', left: '20%', animationDelay: '1s' }}></div>
-                <div className="absolute top-0 right-0 w-4 h-4 particle" style={{ top: '20%', right: '10%', animationDelay: '3s' }}></div>
-                <div className="absolute top-0 right-0 w-2 h-2 particle" style={{ top: '50%', right: '5%', animationDelay: '5s' }}></div>
-                
-                {/* Content */}
+          <main className={`lt-page ${activeTab === 'planner' ? 'lt-page--planner' : ''}`}>
+            <div className="lt-page-surface">
+              <div className="lt-page-content">
                 {activeTab === 'today' && (
                   <>
                     {sessionActionError && (
@@ -848,9 +828,8 @@ export default function MainApp({ buildId }: MainAppProps) {
                 )}
               </div>
             </div>
-          </div>
+          </main>
         </div>
-      </div>
 
       {/* Ask AI drawer — opens on Top Bar "Ask AI" click. */}
       <AskAIDrawer open={aiDrawerOpen} onClose={() => setAiDrawerOpen(false)}>
@@ -875,15 +854,6 @@ export default function MainApp({ buildId }: MainAppProps) {
         }}
       />
 
-      {/* Footer */}
-      <footer className="border-t border-neutral-200 bg-neutral-50 py-3">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex justify-between items-center text-xs text-neutral-500">
-            <span>Life Tracker © 2025</span>
-            <span className="font-mono">build: {buildId}</span>
-          </div>
-        </div>
-      </footer>
       </div>
     </StrategicDopamineSystem>
   );

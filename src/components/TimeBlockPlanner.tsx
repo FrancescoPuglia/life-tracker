@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Plus, Sparkles } from 'lucide-react';
 import { TimeBlock, Task, Project, Goal, Session } from '@/types';
 import { toDateSafe, formatDateSafe, formatTimeSafe, formatDateStringSafe } from '@/utils/dateUtils';
 import { audioManager } from '@/lib/audioManager';
@@ -64,8 +64,20 @@ export default function TimeBlockPlanner({
   const [newBlockData, setNewBlockData] = useState<TimeBlockModalData>({});
   const plannerRef = useRef<HTMLDivElement>(null);
 
-  const HOUR_HEIGHT = 80;
+  const HOUR_HEIGHT = 64;
   const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+  useEffect(() => {
+    if (viewMode !== 'day' || !plannerRef.current) return;
+    const target = plannerRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      const currentHour = selectedDate.toDateString() === new Date().toDateString()
+        ? new Date().getHours()
+        : 8;
+      target.scrollTop = Math.max(0, (Math.min(currentHour, 22) - 2) * HOUR_HEIGHT);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedDate, viewMode]);
 
   // ============================================================================
   // VIEW MODE UTILITIES - Supreme Detective Implementation  
@@ -140,10 +152,10 @@ export default function TimeBlockPlanner({
         const dates = getViewPeriodDates(selectedDate, 'week');
         const start = dates[0];
         const end = dates[dates.length - 1];
-        return `${start.getDate()} ${start.toLocaleDateString('en-US', { month: 'short' })} - ${end.getDate()} ${end.toLocaleDateString('en-US', { month: 'short' })} ${end.getFullYear()}`;
+        return `${start.getDate()} ${start.toLocaleDateString('it-IT', { month: 'short' })} – ${end.getDate()} ${end.toLocaleDateString('it-IT', { month: 'short' })} ${end.getFullYear()}`;
       }
       case 'month':
-        return selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        return selectedDate.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
       default:
         return formatDate(selectedDate);
     }
@@ -159,7 +171,7 @@ export default function TimeBlockPlanner({
       year: 'numeric',
       month: 'long',
       day: 'numeric'
-    }, 'Invalid Date');
+    }, 'Data non disponibile');
   };
 
   const getTimeFromPosition = (y: number) => {
@@ -347,36 +359,36 @@ export default function TimeBlockPlanner({
       default: return '#3b82f6'; // blue-500
     }
   };
-  
+
   const getBlockColor = (block: TimeBlock) => {
-    const baseClasses = 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2';
+    const baseClasses = 'font-semibold rounded-lg transition-shadow duration-150 border';
     
     // Use custom color if available, otherwise use default type color
     if (block.color) {
-      return `${baseClasses} text-white border-opacity-60`;
+      return `${baseClasses} text-white border-white/30`;
     }
     
     switch (block.type) {
       case 'work': 
-        return `${baseClasses} bg-blue-600 text-white border-blue-400`;
+        return `${baseClasses} bg-blue-600 text-white border-blue-500`;
       case 'break': 
-        return `${baseClasses} bg-green-600 text-white border-green-400`;
+        return `${baseClasses} bg-emerald-600 text-white border-emerald-500`;
       case 'focus': 
-        return `${baseClasses} bg-purple-600 text-white border-purple-400 animate-pulse-slow`;
+        return `${baseClasses} bg-indigo-600 text-white border-indigo-500`;
       case 'deep':
-        return `${baseClasses} bg-indigo-700 text-white border-indigo-500 shadow-lg`;
+        return `${baseClasses} bg-indigo-800 text-white border-indigo-700`;
       case 'shallow':
-        return `${baseClasses} bg-cyan-600 text-white border-cyan-400`;
+        return `${baseClasses} bg-cyan-700 text-white border-cyan-600`;
       case 'meeting': 
-        return `${baseClasses} bg-orange-600 text-white border-orange-400`;
+        return `${baseClasses} bg-amber-600 text-white border-amber-500`;
       case 'admin': 
-        return `${baseClasses} bg-gray-600 text-white border-gray-400`;
+        return `${baseClasses} bg-slate-600 text-white border-slate-500`;
       case 'buffer':
-        return `${baseClasses} bg-yellow-600 text-white border-yellow-400`;
+        return `${baseClasses} bg-amber-700 text-white border-amber-600`;
       case 'travel':
-        return `${baseClasses} bg-teal-600 text-white border-teal-400`;
+        return `${baseClasses} bg-teal-700 text-white border-teal-600`;
       default: 
-        return `${baseClasses} bg-blue-600 text-white border-blue-400`;
+        return `${baseClasses} bg-blue-600 text-white border-blue-500`;
     }
   };
 
@@ -514,80 +526,89 @@ export default function TimeBlockPlanner({
   return (
     <div
       data-testid="time-block-planner"
-      className="glass-card border border-gray-200 shadow-xl"
-      style={{minHeight: '600px', contain: 'layout style'}}
+      className="overflow-hidden rounded-[14px] border border-slate-200 bg-white"
+      style={{ minHeight: '600px', contain: 'layout style' }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50">
-        <div>
-          <div className="flex items-center gap-4 mb-2">
-            <h2 className="text-xl font-bold text-gray-900 flex items-center">
-              📅 Time Planner
-            </h2>
-            
-            {/* View Mode Switcher - Supreme Implementation */}
-            <div className="flex items-center bg-white rounded-lg border border-gray-200 overflow-hidden">
-              {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors capitalize ${
-                    viewMode === mode
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  {mode}
-                </button>
-              ))}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-indigo-50 text-indigo-700" aria-hidden="true">
+            <Calendar size={19} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-semibold tracking-[-0.01em] text-slate-950">
+                Time Planner
+              </h2>
+
+              <div className="flex items-center overflow-hidden rounded-[9px] border border-slate-200 bg-slate-50 p-0.5" aria-label="Vista planner">
+                {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
+                  <button
+                    type="button"
+                    key={mode}
+                    onClick={() => setViewMode(mode)}
+                    className={`min-h-[34px] rounded-[7px] px-3 text-[13px] font-semibold transition-colors ${
+                      viewMode === mode
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {mode === 'day' ? 'Giorno' : mode === 'week' ? 'Settimana' : 'Mese'}
+                  </button>
+                ))}
+              </div>
             </div>
+            <p className="mt-1 truncate text-sm font-medium capitalize text-slate-500">{getViewTitle()}</p>
           </div>
-          <p className="text-sm text-gray-600 font-medium">{getViewTitle()}</p>
         </div>
-        
-        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+
+        <div className="flex flex-wrap items-center gap-2">
           {onNavigate && (
             <button
+              type="button"
               onClick={() => onNavigate('weekly_intel')}
               data-testid="planner-generate-weekly-plan"
-              className="inline-flex items-center gap-1.5 px-3 py-2 border border-indigo-200 bg-white text-indigo-700 text-sm font-medium rounded-lg hover:bg-indigo-50 transition-colors"
+              className="lt-button-secondary min-h-[38px] px-3 text-indigo-700"
             >
-              🧭 Generate Weekly Plan
+              <Sparkles size={16} aria-hidden="true" /> Piano settimanale
             </button>
           )}
           <button
+            type="button"
             onClick={() => handleQuickCreateBlock(new Date().getHours())}
             disabled={!isReady}
             data-testid="planner-add-block"
-            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
+            className={`inline-flex min-h-[38px] items-center gap-2 rounded-[9px] px-4 text-sm font-semibold transition-colors ${
               isReady
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                : 'cursor-not-allowed bg-slate-200 text-slate-400'
             }`}
           >
-            + Add Block
+            <Plus size={16} aria-hidden="true" /> Nuovo blocco
           </button>
-          <div className="border-l border-gray-300 h-6"></div>
+          <span className="mx-1 h-6 w-px bg-slate-200" aria-hidden="true" />
           <button
+            type="button"
             onClick={() => navigateDate('prev')}
-            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
-            title={`Previous ${viewMode}`}
-            aria-label={`Previous ${viewMode}`}
+            className="lt-icon-button min-h-[38px] w-9"
+            title="Periodo precedente"
+            aria-label="Periodo precedente"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button
+            type="button"
             onClick={() => onDateChange(new Date())}
             data-testid="planner-today-button"
-            className="px-3 py-1.5 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium"
+            className="lt-button-secondary min-h-[38px] px-3"
           >
-            Today
+            Oggi
           </button>
           <button
+            type="button"
             onClick={() => navigateDate('next')}
-            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg transition-colors"
-            title={`Next ${viewMode}`}
-            aria-label={`Next ${viewMode}`}
+            className="lt-icon-button min-h-[38px] w-9"
+            title="Periodo successivo"
+            aria-label="Periodo successivo"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -599,23 +620,23 @@ export default function TimeBlockPlanner({
       {viewMode === 'day' && (
         <div
           data-testid="planner-day-summary"
-          className="px-6 py-3 border-b border-gray-100 bg-white flex items-center gap-4 flex-wrap text-xs"
+          className="flex flex-wrap items-center gap-4 border-b border-slate-200 bg-slate-50/70 px-5 py-3 text-xs"
         >
-          <SummaryChip label="Planned" value={minutesLabel(daySummary.plannedMin)} tone="neutral" />
+          <SummaryChip label="Pianificato" value={minutesLabel(daySummary.plannedMin)} tone="neutral" />
           <SummaryChip
-            label={daySummary.availability === 'partial' ? 'Known actual ≥' : 'Known actual'}
-            value={daySummary.actualMin === null ? 'Unavailable' : minutesLabel(daySummary.actualMin)}
+            label={daySummary.availability === 'partial' ? 'Effettivo noto ≥' : 'Effettivo noto'}
+            value={daySummary.actualMin === null ? 'Non disponibile' : minutesLabel(daySummary.actualMin)}
             tone="emerald"
           />
           <SummaryChip
-            label="Adherence"
-            value={daySummary.pct === null ? 'Unavailable' : `${daySummary.pct}%`}
+            label="Aderenza"
+            value={daySummary.pct === null ? 'Non disponibile' : `${daySummary.pct}%`}
             tone={daySummary.pct !== null && daySummary.pct >= 80 ? 'emerald' : daySummary.pct !== null && daySummary.pct >= 50 ? 'blue' : 'neutral'}
             highlight
           />
           <div className="flex-1 min-w-[120px] h-1.5 rounded-full bg-gray-100 overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
+              className="h-full bg-cyan-600"
               style={{ width: `${daySummary.pct === null ? 0 : Math.min(100, Math.max(0, daySummary.pct))}%` }}
               data-testid="planner-day-summary-bar"
             />
@@ -628,8 +649,8 @@ export default function TimeBlockPlanner({
         {viewMode === 'day' && (
         <div 
           ref={plannerRef}
-          className="relative h-96 overflow-y-auto bg-white"
-          style={{ height: `${24 * HOUR_HEIGHT}px` }}
+          className="relative min-h-[560px] overflow-y-auto bg-white"
+          style={{ height: 'calc(100vh - 286px)' }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -643,10 +664,10 @@ export default function TimeBlockPlanner({
           {HOURS.map(hour => (
             <div
               key={hour}
-              className="absolute left-0 right-0 border-t border-gray-100 group hover:bg-blue-50 transition-colors"
+              className="group absolute left-0 right-0 border-t border-slate-100 transition-colors hover:bg-cyan-50/40"
               style={{ top: `${hour * HOUR_HEIGHT}px`, height: `${HOUR_HEIGHT}px` }}
             >
-              <div className="absolute left-2 top-1 text-xs text-gray-500 font-mono">
+              <div className="absolute left-3 top-1.5 text-xs font-medium tabular-nums text-slate-500">
                 {formatTime(hour)}
               </div>
               <button
@@ -654,8 +675,8 @@ export default function TimeBlockPlanner({
                 disabled={!isReady}
                 className={`absolute right-4 top-1 transition-opacity w-6 h-6 rounded-full text-xs flex items-center justify-center ${
                   isReady
-                    ? 'opacity-0 group-hover:opacity-100 bg-blue-500 text-white hover:bg-blue-600'
-                    : 'opacity-50 bg-gray-400 text-gray-200 cursor-not-allowed'
+                    ? 'opacity-0 group-hover:opacity-100 bg-indigo-600 text-white hover:bg-indigo-700'
+                    : 'cursor-not-allowed bg-slate-300 text-slate-100 opacity-50'
                 }`}
                 title={isReady ? `Add block at ${formatTime(hour)}` : 'Please log in first'}
               >
@@ -670,14 +691,13 @@ export default function TimeBlockPlanner({
               data-testid="planner-empty-state"
               className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
             >
-              <div className="rounded-2xl border border-dashed border-blue-200 bg-gradient-to-br from-blue-50/40 via-white to-indigo-50/40 px-8 py-7 text-center max-w-md pointer-events-auto shadow-sm">
-                <div className="text-5xl mb-3">📅</div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">
-                  No blocks for {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}
+              <div className="pointer-events-auto max-w-md rounded-[14px] border border-dashed border-slate-300 bg-white/95 px-8 py-7 text-center shadow-sm">
+                <span className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-xl bg-indigo-50 text-indigo-700" aria-hidden="true"><Calendar size={20} /></span>
+                <h3 className="mb-2 text-base font-semibold text-slate-900">
+                  Nessun blocco per {selectedDate.toLocaleDateString('it-IT', { weekday: 'long' })}
                 </h3>
-                <p className="text-sm text-gray-600 mb-4 leading-relaxed">
-                  Generate your week from Weekly Intelligence or add your
-                  first block. You can also click any hour on the timeline.
+                <p className="mb-4 text-sm leading-6 text-slate-600">
+                  Crea il primo blocco oppure genera la settimana dal Piano settimanale. Puoi anche selezionare un’ora sulla timeline.
                 </p>
                 <div className="flex items-center justify-center gap-2 flex-wrap">
                   <button
@@ -686,19 +706,19 @@ export default function TimeBlockPlanner({
                     data-testid="planner-empty-add-block"
                     className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${
                       isReady
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm hover:from-blue-700 hover:to-indigo-700'
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        : 'cursor-not-allowed bg-slate-200 text-slate-400'
                     }`}
                   >
-                    + Add Block
+                    <Plus size={16} aria-hidden="true" /> Nuovo blocco
                   </button>
                   {onNavigate && (
                     <button
                       onClick={() => onNavigate('weekly_intel')}
                       data-testid="planner-empty-generate-weekly"
-                      className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+                      className="inline-flex min-h-[40px] items-center gap-2 rounded-[10px] border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                     >
-                      🧭 Generate Weekly Plan
+                      <Sparkles size={16} aria-hidden="true" /> Piano settimanale
                     </button>
                   )}
                 </div>
@@ -731,7 +751,7 @@ export default function TimeBlockPlanner({
             return (
             <div
               key={block.id}
-              className={`absolute left-16 right-4 ${block.color ? 'font-bold rounded-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300 border-2 text-white' : getBlockColor(block)} border-2 border-white rounded-xl shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 z-10`}
+              className={`absolute left-16 right-4 z-10 cursor-pointer shadow-sm hover:shadow-md ${block.color ? 'rounded-lg border border-white/30 font-semibold text-white' : getBlockColor(block)}`}
               style={{
                 top: `${getPositionFromTime(startTime)}px`,
                 height: `${getDurationHeight(startTime, displayEndTime)}px`,
@@ -744,19 +764,19 @@ export default function TimeBlockPlanner({
               }}
               onClick={() => setSelectedBlock(block)}
             >
-              <div className="flex items-start justify-between h-full p-3">
+              <div className="flex h-full items-start justify-between p-3">
                 <div className="flex-1 min-w-0">
-                  <div className="text-lg font-bold truncate mb-2 drop-shadow-sm">
+                  <div className="mb-1 truncate text-[15px] font-semibold leading-5">
                     {getBlockIcon(block)} {block.title}
                   </div>
                   {/* Description più piccola e meno prominente */}
                   {block.description && (
-                    <div className="text-xs opacity-75 truncate mb-1 drop-shadow-sm italic">
+                    <div className="mb-1 truncate text-xs opacity-80">
                       {block.description}
                     </div>
                   )}
                   {/* Time display più compatto */}
-                  <div className="text-xs opacity-70 font-mono drop-shadow-sm">
+                  <div className="font-mono text-xs opacity-80">
                     {formatTimeSafe(startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)} - 
                     {formatTimeSafe(endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)}
                   </div>
@@ -773,10 +793,10 @@ export default function TimeBlockPlanner({
                         getVoiceService()?.speakConfirmation('blockCompleted');
                       }
                     }}
-                    className={`text-lg transition-all duration-200 hover:scale-125 relative ${
+                    className={`relative text-base transition-colors ${
                       block.status === 'completed'
                         ? 'text-green-400 hover:text-green-300'
-                        : 'text-gray-400 hover:text-green-400 animate-pulse'
+                        : 'text-white/65 hover:text-white'
                     }`}
                     title={
                       block.status === 'completed'
@@ -785,14 +805,11 @@ export default function TimeBlockPlanner({
                     }
                   >
                     {block.status === 'completed' ? '✅' : '⭕'}
-                    {block.status !== 'completed' && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></span>
-                    )}
                   </button>
                   
                   {/* Status indicator */}
                   <div 
-                    className="text-sm drop-shadow-sm cursor-help opacity-75" 
+                    className="cursor-help text-sm opacity-75"
                     title={
                       block.status === 'completed' ? 'Completed' :
                       block.status === 'in_progress' ? 'In Progress' :
@@ -826,7 +843,7 @@ export default function TimeBlockPlanner({
           {/* Drag Preview */}
           {dragPreview && (
             <div
-              className="absolute left-16 right-4 bg-gradient-to-r from-blue-400 to-indigo-500 border-2 border-blue-300 border-dashed rounded-xl opacity-70 z-20 flex items-center justify-center shadow-lg"
+              className="absolute left-16 right-4 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-indigo-400 bg-indigo-500/80 shadow-sm"
               style={{
                 top: `${getPositionFromTime(dragPreview.startTime)}px`,
                 height: `${getDurationHeight(dragPreview.startTime, dragPreview.endTime)}px`,
@@ -834,7 +851,7 @@ export default function TimeBlockPlanner({
               }}
             >
               <div className="text-white text-center">
-                <div className="text-sm font-bold">✨ New Block</div>
+                <div className="text-sm font-semibold">Nuovo blocco</div>
                 <div className="text-xs opacity-90 font-mono">
                   {formatTimeSafe(dragPreview.startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)} - 
                   {formatTimeSafe(dragPreview.endTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', selectedDate)}
@@ -846,10 +863,11 @@ export default function TimeBlockPlanner({
           {/* Current Time Indicator */}
           {selectedDate.toDateString() === new Date().toDateString() && (
             <div
-              className="absolute left-0 right-0 h-0.5 bg-red-500 z-10"
+              className="pointer-events-none absolute left-0 right-0 z-20 h-0.5 bg-cyan-500"
               style={{ top: `${getPositionFromTime(new Date())}px` }}
             >
-              <div className="absolute -left-2 -top-1 w-4 h-4 bg-red-500 rounded-full"></div>
+              <div className="absolute -left-1.5 -top-1 h-2.5 w-2.5 rounded-full bg-cyan-500"></div>
+              <span className="absolute left-3 -top-4 rounded bg-cyan-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">Ora</span>
             </div>
           )}
         </div>
@@ -857,17 +875,17 @@ export default function TimeBlockPlanner({
 
         {/* Week View - Google Calendar Style */}
         {viewMode === 'week' && (
-          <div className="bg-white" style={{minHeight: '500px', contain: 'layout'}}>
-            <div className="flex">
+          <div className="max-h-[calc(100vh-230px)] min-h-[560px] overflow-auto bg-white" style={{ contain: 'layout' }}>
+            <div className="flex min-w-[980px]">
               {/* Time Column */}
-              <div className="w-16 flex-shrink-0 border-r border-gray-200">
+              <div className="sticky left-0 z-20 w-16 flex-shrink-0 border-r border-slate-200 bg-white">
                 {/* Empty header space */}
-                <div className="h-12 border-b border-gray-200"></div>
+                <div className="sticky top-0 z-30 h-14 border-b border-slate-200 bg-slate-50"></div>
                 {/* Hour slots */}
                 {HOURS.map(hour => (
                   <div
                     key={hour}
-                    className="border-b border-gray-100 text-xs text-gray-500 text-right pr-2 flex items-start justify-end"
+                    className="flex items-start justify-end border-b border-slate-100 pr-2 text-right text-xs tabular-nums text-slate-500"
                     style={{ height: `${HOUR_HEIGHT}px` }}
                   >
                     <span className="mt-1">{formatTime(hour)}</span>
@@ -876,8 +894,8 @@ export default function TimeBlockPlanner({
               </div>
 
               {/* Days Grid */}
-              <div className="flex-1 overflow-x-auto">
-                <div className="grid grid-cols-7 min-w-full" style={{minHeight: '480px', contain: 'layout'}}>
+              <div className="min-w-0 flex-1">
+                <div className="grid min-w-full grid-cols-7" style={{ minHeight: '480px', contain: 'layout' }}>
                   {getViewPeriodDates(selectedDate, 'week').map((date, dayIndex) => {
                     const dayBlocks = filteredBlocks.filter(block => {
                       // Use block's actual creation date as reference, not the current view date
@@ -892,13 +910,13 @@ export default function TimeBlockPlanner({
                     const isToday = date.toDateString() === new Date().toDateString();
                     
                     return (
-                      <div key={dayIndex} className="border-r border-gray-200 relative">
+                      <div key={dayIndex} className={`relative border-r border-slate-200 ${dayIndex >= 5 ? 'bg-slate-50/40' : 'bg-white'}`}>
                         {/* Day Header */}
-                        <div className={`h-12 border-b border-gray-200 flex flex-col items-center justify-center text-center ${isToday ? 'bg-blue-50' : 'bg-gray-50'}`}>
-                          <div className="text-xs text-gray-600 font-medium">
-                            {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                        <div className={`sticky top-0 z-20 flex h-14 flex-col items-center justify-center border-b border-slate-200 text-center ${isToday ? 'bg-indigo-50' : dayIndex >= 5 ? 'bg-slate-100' : 'bg-slate-50'}`}>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                            {date.toLocaleDateString('it-IT', { weekday: 'short' })}
                           </div>
-                          <div className={`text-sm font-bold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                          <div className={`text-sm font-semibold ${isToday ? 'text-indigo-700' : 'text-slate-900'}`}>
                             {date.getDate()}
                           </div>
                         </div>
@@ -909,7 +927,7 @@ export default function TimeBlockPlanner({
                           {HOURS.map(hour => (
                             <div
                               key={hour}
-                              className="absolute left-0 right-0 border-b border-gray-100 hover:bg-blue-50 transition-colors group cursor-pointer"
+                              className="group absolute left-0 right-0 cursor-pointer border-b border-slate-100 transition-colors hover:bg-cyan-50/40"
                               style={{ 
                                 top: `${hour * HOUR_HEIGHT}px`, 
                                 height: `${HOUR_HEIGHT}px` 
@@ -937,8 +955,8 @@ export default function TimeBlockPlanner({
                               <button
                                 className={`absolute right-2 top-1 transition-opacity w-5 h-5 rounded-full text-xs flex items-center justify-center ${
                                   isReady
-                                    ? 'opacity-0 group-hover:opacity-100 bg-blue-500 text-white hover:bg-blue-600'
-                                    : 'opacity-50 bg-gray-400 text-gray-200 cursor-not-allowed'
+                                    ? 'opacity-0 group-hover:opacity-100 bg-indigo-600 text-white hover:bg-indigo-700'
+                                    : 'cursor-not-allowed bg-slate-300 text-slate-100 opacity-50'
                                 }`}
                                 title={isReady ? `Add block at ${formatTime(hour)}` : 'Please log in first'}
                                 onClick={(e) => {
@@ -1012,7 +1030,7 @@ export default function TimeBlockPlanner({
                             return (
                               <div
                                 key={block.id}
-                                className={`absolute left-1 right-1 ${block.color ? 'font-bold rounded-lg hover:shadow-lg transform hover:scale-105 transition-all duration-200 border text-white' : getBlockColor(block)} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 z-10 border`}
+                                className={`absolute left-1 right-1 z-10 cursor-pointer rounded-lg shadow-sm hover:shadow-md ${block.color ? 'border border-white/30 font-semibold text-white' : getBlockColor(block)}`}
                                 style={{
                                   top: `${getPositionFromTime(startTime)}px`,
                                   height: `${finalHeight}px`, // Use calculated safe height
@@ -1027,12 +1045,12 @@ export default function TimeBlockPlanner({
                               >
                                 <div className="p-2 h-full flex flex-col justify-between">
                                   <div className="flex-1 min-w-0">
-                                    <div className="text-xs font-bold truncate mb-1 drop-shadow-sm">
+                                    <div className="mb-1 truncate text-xs font-semibold">
                                       {getBlockIcon(block)} {block.title}
                                       {duration > maxReasonableDuration && <span className="ml-1 text-blue-300" title="Multi-day block auto-repaired">🔧</span>}
                                       {actualDuration > maxDuration && <span className="ml-1 text-orange-300" title="Block duration truncated for display">⚠️</span>}
                                     </div>
-                                    <div className="text-xs opacity-75 font-mono drop-shadow-sm">
+                                    <div className="font-mono text-xs opacity-80">
                                       {formatTimeSafe(startTime, { hour12: false, hour: '2-digit', minute: '2-digit' }, '--:--', date)}
                                       {actualDuration > maxDuration && (
                                         <div className="text-orange-300">Duration: {Math.round(actualDuration / (1000 * 60 * 60) * 10) / 10}h (truncated)</div>
@@ -1052,10 +1070,10 @@ export default function TimeBlockPlanner({
                                           getVoiceService()?.speakConfirmation('blockCompleted');
                                         }
                                       }}
-                                      className={`text-xs hover:scale-125 transition-transform relative ${
+                                      className={`relative text-xs transition-colors ${
                                         block.status === 'completed'
                                           ? 'text-green-400'
-                                          : 'text-gray-400 animate-pulse'
+                                          : 'text-white/65 hover:text-white'
                                       }`}
                                       title={
                                         block.status === 'completed'
@@ -1064,9 +1082,6 @@ export default function TimeBlockPlanner({
                                       }
                                     >
                                       {block.status === 'completed' ? '✅' : '⭕'}
-                                      {block.status !== 'completed' && (
-                                        <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping"></span>
-                                      )}
                                     </button>
                                     
                                     {/* Requested feature */}
@@ -1091,10 +1106,10 @@ export default function TimeBlockPlanner({
                           {/* Current time line (only for today) */}
                           {isToday && (
                             <div
-                              className="absolute left-0 right-0 h-0.5 bg-red-500 z-20 pointer-events-none"
+                              className="pointer-events-none absolute left-0 right-0 z-20 h-0.5 bg-cyan-500"
                               style={{ top: `${getPositionFromTime(new Date())}px` }}
                             >
-                              <div className="absolute -left-1 -top-1 w-3 h-3 bg-red-500 rounded-full"></div>
+                              <div className="absolute -left-1 -top-1 h-2.5 w-2.5 rounded-full bg-cyan-500"></div>
                             </div>
                           )}
                         </div>
@@ -1110,18 +1125,18 @@ export default function TimeBlockPlanner({
         {/* Month View */}
         {viewMode === 'month' && (
           <div className="bg-white p-4">
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-7 border-x border-t border-slate-200 bg-slate-50">
               {/* Day headers */}
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
-                <div key={day} className="text-center text-sm font-medium text-gray-600 py-2">
+              {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map((day, index) => (
+                <div key={day} className={`border-r border-slate-200 py-2.5 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 ${index >= 5 ? 'bg-slate-100' : ''}`}>
                   {day}
                 </div>
               ))}
-              
+            </div>
+            <div data-testid="planner-month-grid" className="grid grid-cols-7 overflow-hidden rounded-b-[10px] border-l border-t border-slate-200">
               {/* Calendar grid */}
               {(() => {
                 const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
-                const lastDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
                 const startDay = new Date(firstDay);
                 const mondayOffset = firstDay.getDay() === 0 ? -6 : 1 - firstDay.getDay();
                 startDay.setDate(startDay.getDate() + mondayOffset);
@@ -1141,25 +1156,30 @@ export default function TimeBlockPlanner({
                   });
                   
                   cells.push(
-                    <div
+                    <button
+                      type="button"
                       key={i}
-                      className={`min-h-24 p-1 border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
-                        !isCurrentMonth ? 'bg-gray-50 text-gray-400' : isToday ? 'bg-blue-50 border-blue-200' : 'bg-white'
+                      className={`min-h-[112px] border-b border-r border-slate-200 p-2 text-left align-top transition-colors xl:min-h-[126px] ${
+                        !isCurrentMonth
+                          ? 'bg-slate-50/80 text-slate-400 hover:bg-slate-100'
+                          : isToday
+                            ? 'bg-indigo-50/80 hover:bg-indigo-50'
+                            : 'bg-white hover:bg-slate-50'
                       }`}
                       onClick={() => {
                         onDateChange(cellDate);
                         setViewMode('day');
                       }}
                     >
-                      <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
-                        {cellDate.getDate()}
-                      </div>
+                      <span className={`mb-2 grid h-7 w-7 place-items-center rounded-full text-sm font-semibold ${
+                        isToday ? 'bg-indigo-600 text-white' : isCurrentMonth ? 'text-slate-900' : 'text-slate-400'
+                      }`}>{cellDate.getDate()}</span>
                       
                       <div className="space-y-0.5">
                         {dayBlocks.slice(0, 3).map((block, idx) => (
                           <div
                             key={idx}
-                            className="text-xs p-1 rounded truncate text-white"
+                            className="truncate rounded px-1.5 py-1 text-xs font-medium text-white"
                             style={{ backgroundColor: block.color || getDefaultColorForType(block.type) }}
                             title={block.title}
                           >
@@ -1167,12 +1187,12 @@ export default function TimeBlockPlanner({
                           </div>
                         ))}
                         {dayBlocks.length > 3 && (
-                          <div className="text-xs text-gray-500 text-center">
-                            +{dayBlocks.length - 3} more
+                          <div className="pt-0.5 text-center text-xs font-medium text-slate-500">
+                            +{dayBlocks.length - 3} altri
                           </div>
                         )}
                       </div>
-                    </div>
+                    </button>
                   );
                   
                   currentDate.setDate(currentDate.getDate() + 1);
@@ -1184,20 +1204,6 @@ export default function TimeBlockPlanner({
           </div>
         )}
       </div>
-
-      {/* Help Section */}
-      {filteredBlocks.length === 0 && (
-        <div className="p-4 bg-gray-50 border-t border-gray-200">
-          <div className="text-center text-gray-500">
-            <p className="text-sm mb-2">📅 <strong>Come creare time blocks:</strong></p>
-            <div className="text-xs space-y-1">
-              <p>• Clicca e trascina sulla griglia per creare un blocco</p>
-              <p>• Usa il pulsante "+ Add Block" nell'header</p>
-              <p>• Hover su un'ora e clicca il pulsante "+" che appare</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Create Block Modal - Using Portal like OKRManager */}
       {showCreateModal && typeof window !== 'undefined' && createPortal(

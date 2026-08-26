@@ -13,11 +13,11 @@ describe('Today Command Center', () => {
     });
 
     const pulse = screen.getByTestId('today-execution-pulse');
-    expect(within(pulse).getByText('Known actual')).toBeInTheDocument();
+    expect(within(pulse).getByText('Effettivo noto')).toBeInTheDocument();
     expect(within(pulse).getByText('0 min')).toBeInTheDocument();
-    expect(within(pulse).getByText('Adherence').parentElement).toHaveTextContent('—');
+    expect(within(pulse).getByText('Aderenza').parentElement).toHaveTextContent('—');
     expect(screen.getByTestId('today-execution-quality')).toHaveTextContent(
-      '1 executed block missing actual evidence',
+      '1 blocco eseguito senza evidenza effettiva',
     );
   });
 
@@ -28,12 +28,12 @@ describe('Today Command Center', () => {
       sessionCoverage: 'error',
     });
 
-    expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Non disponibile').length).toBeGreaterThan(0);
     expect(screen.getByTestId('today-execution-quality')).toHaveTextContent(
-      'execution is not reported as zero',
+      'l’esecuzione non viene indicata come zero',
     );
     expect(screen.getByTestId('today-start-focus')).toBeDisabled();
-    expect(screen.getByTestId('today-start-focus')).toHaveTextContent('Sessions unavailable');
+    expect(screen.getByTestId('today-start-focus')).toHaveTextContent('Sessioni non disponibili');
   });
 
   it('links Start to the active TimeBlock and exposes Ask AI and upcoming commitments', () => {
@@ -66,29 +66,29 @@ describe('Today Command Center', () => {
     renderToday({ onOpenTab });
 
     const reminder = screen.getByTestId('today-reminder-state');
-    expect(reminder).toHaveTextContent('Desktopready');
-    expect(reminder).toHaveTextContent('Before block15m');
+    expect(reminder).toHaveTextContent('Desktopattivo');
+    expect(reminder).toHaveTextContent('Prima del blocco15m');
     expect(reminder).toHaveTextContent('Europe/Rome');
-    fireEvent.click(screen.getByRole('button', { name: 'Open reminder settings →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apri impostazioni →' }));
     expect(onOpenTab).toHaveBeenCalledWith('settings');
   });
 
   it('captures a note through the bounded parent action and normalizes failures', async () => {
     const onQuickCapture = vi.fn(async () => undefined);
     const view = renderToday({ onQuickCapture });
-    fireEvent.change(screen.getByLabelText('Quick capture note'), {
+    fireEvent.change(screen.getByLabelText('Nota rapida'), {
       target: { value: 'A useful thought' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Capture' }));
-    await screen.findByText('Captured in Notes.');
+    fireEvent.click(screen.getByRole('button', { name: 'Salva nota' }));
+    await screen.findByText('Nota salvata nel Second Brain.');
     expect(onQuickCapture).toHaveBeenCalledWith('A useful thought');
 
     onQuickCapture.mockRejectedValueOnce(new Error('private provider detail'));
-    fireEvent.change(screen.getByLabelText('Quick capture note'), {
+    fireEvent.change(screen.getByLabelText('Nota rapida'), {
       target: { value: 'Try again' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Capture' }));
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('failed safely'));
+    fireEvent.click(screen.getByRole('button', { name: 'Salva nota' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('restano invariati'));
     expect(view.container).not.toHaveTextContent('private provider detail');
   });
 });

@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
+import { Brain, Play } from 'lucide-react';
 import type { Goal, Project, Session, Task, TimeBlock } from '@/types';
 import type { StreakData } from '@/lib/streakCalculator';
 import type { DesktopNativeStatus } from '@/lib/desktop/nativeBridge';
@@ -85,119 +86,175 @@ export default function TodayCommandCenter({
 
   return (
     <section
-      className="space-y-6"
+      className="space-y-4"
       data-testid="today-command-center"
-      aria-label="Today Command Center"
+      aria-label="Centro di comando di oggi"
     >
-      <Hero
-        active={todayMetrics.active}
-        next={todayMetrics.next}
-        currentSessionStatus={currentSessionStatus}
-        sessionCoverage={sessionCoverage}
-        onOpenAskAI={onOpenAskAI}
-        onStartFocus={onStartFocus}
+      <DayIntro
+        now={effectiveNow}
+        locale={locale}
+        timezone={timezone}
+        plannedMinutes={todayMetrics.plannedMinutes}
+        actualMinutes={todayMetrics.actualMinutes}
+        adherencePct={todayMetrics.adherencePct}
       />
 
+      <div className="grid gap-4 xl:grid-cols-12">
+        <div className="xl:col-span-8">
+          <Hero
+            now={effectiveNow}
+            active={todayMetrics.active}
+            currentSessionStatus={currentSessionStatus}
+            sessionCoverage={sessionCoverage}
+            locale={locale}
+            timezone={timezone}
+            onOpenAskAI={onOpenAskAI}
+            onStartFocus={onStartFocus}
+          />
+        </div>
+        <div className="xl:col-span-4">
+          <UpcomingCommitmentsCard
+            blocks={todayMetrics.upcoming.slice(0, 3)}
+            locale={locale}
+            timezone={timezone}
+            onOpenTab={onOpenTab}
+          />
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
-        <TodayMissionCard topTasks={topTasks} onOpenTab={onOpenTab} />
         <ExecutionPulseCard
           metrics={todayMetrics}
           streak={streakData.currentStreak}
           bestStreak={streakData.bestStreak}
         />
+        <TodayMissionCard topTasks={topTasks} onOpenTab={onOpenTab} />
         <StrategicGoalsCard goals={goalsView} onOpenTab={onOpenTab} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <UpcomingCommitmentsCard
-          blocks={todayMetrics.upcoming.slice(0, 3)}
-          locale={locale}
-          timezone={timezone}
-          onOpenTab={onOpenTab}
-        />
+        <div className="lg:col-span-2">
+          <QuickCaptureCard onCapture={onQuickCapture} onOpenNotes={() => onOpenTab('notes')} />
+        </div>
         <ReminderStatusCard
           preferences={reminderPreferences}
           preferenceStatus={preferenceStatus}
           nativeStatus={nativeStatus}
           onOpenSettings={() => onOpenTab('settings')}
         />
-        <QuickCaptureCard onCapture={onQuickCapture} onOpenNotes={() => onOpenTab('notes')} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ExecutionSnapshot
-          plannedMinutes={todayMetrics.plannedMinutes}
-          actualMinutes={todayMetrics.actualMinutes}
-          actualAvailability={todayMetrics.actualAvailability}
-          onOpenTab={onOpenTab}
-        />
-        <QuickActions
-          onOpenTab={onOpenTab}
-          onOpenAskAI={onOpenAskAI}
-          projectsCount={projects.filter((project) => !project.deleted).length}
-          goalsCount={goals.filter((goal) => !goal.deleted).length}
-        />
       </div>
     </section>
   );
 }
 
+function DayIntro({
+  now,
+  locale,
+  timezone,
+  plannedMinutes,
+  actualMinutes,
+  adherencePct,
+}: {
+  now: Date;
+  locale: string;
+  timezone: string;
+  plannedMinutes: number;
+  actualMinutes: number | null;
+  adherencePct: number | null;
+}) {
+  const hour = Number(new Intl.DateTimeFormat('it-IT', { timeZone: timezone, hour: '2-digit', hour12: false }).format(now));
+  const greeting = hour < 12 ? 'Buongiorno' : hour < 18 ? 'Buon pomeriggio' : 'Buonasera';
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Precision Performance OS</p>
+        <h1 className="mt-1 text-[28px] font-semibold leading-9 tracking-[-0.02em] text-slate-950">{greeting}</h1>
+        <p className="mt-1 text-sm capitalize text-slate-500">{formatDateLabel(now, locale, timezone)}</p>
+      </div>
+      <dl className="grid grid-cols-3 divide-x divide-slate-200 rounded-xl border border-slate-200 bg-slate-50/80 px-1 py-2">
+        <Metric label="Pianificato" value={minutesLabel(plannedMinutes)} />
+        <Metric label="Eseguito" value={actualMinutes === null ? '—' : minutesLabel(actualMinutes)} />
+        <Metric label="Aderenza" value={adherencePct === null ? '—' : `${Math.round(adherencePct)}%`} emphasis />
+      </dl>
+    </header>
+  );
+}
+
+function Metric({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  return (
+    <div className="min-w-[108px] px-4 text-right">
+      <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
+      <dd className={`mt-0.5 text-base font-semibold tabular-nums ${emphasis ? 'text-indigo-700' : 'text-slate-900'}`}>{value}</dd>
+    </div>
+  );
+}
+
 function Hero({
+  now,
   active,
-  next,
   currentSessionStatus,
   sessionCoverage,
+  locale,
+  timezone,
   onOpenAskAI,
   onStartFocus,
 }: {
+  now: Date;
   active: TimeBlock | undefined;
-  next: TimeBlock | undefined;
   currentSessionStatus: Session['status'] | null;
   sessionCoverage: TodaySessionCoverage;
+  locale: string;
+  timezone: string;
   onOpenAskAI: () => void;
   onStartFocus: (taskId?: string, timeBlockId?: string) => void;
 }) {
   const sessionActive = currentSessionStatus === 'active';
   const sessionPaused = currentSessionStatus === 'paused';
   const sessionAuthorityReady = sessionCoverage === 'ready' || sessionPaused;
-  let startLabel = active ? 'Start current block' : 'Start unplanned session';
-  if (sessionPaused) startLabel = 'Resume session';
+  let startLabel = active ? 'Avvia blocco' : 'Avvia sessione libera';
+  if (sessionPaused) startLabel = 'Riprendi sessione';
   if (!sessionAuthorityReady) {
-    startLabel = sessionCoverage === 'loading' ? 'Checking Sessions' : 'Sessions unavailable';
+    startLabel = sessionCoverage === 'loading' ? 'Verifica sessioni…' : 'Sessioni non disponibili';
   }
-  if (sessionActive) startLabel = 'Session active';
+  if (sessionActive) startLabel = 'Sessione attiva';
+  const progress = active ? progressWithin(active, now) : 0;
   return (
     <header
       data-testid="today-hero"
-      className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 px-6 py-5 shadow-sm"
+      className="flex h-full min-h-[278px] flex-col justify-between overflow-hidden rounded-[16px] border border-slate-900 bg-slate-950 px-6 py-6 text-white shadow-lg"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-700">Today</p>
-          <h2 className="mt-1 text-2xl font-bold text-gray-900">What matters now</h2>
-          <p className="mt-1 max-w-2xl text-sm text-gray-600">
-            Your current block, tracked execution, reminders, and next commitments in one place.
-          </p>
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Ora</p>
+          <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium ${active ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200' : 'border-slate-700 bg-slate-800 text-slate-300'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-cyan-300' : 'bg-slate-500'}`} aria-hidden="true" />
+            {active ? 'Blocco attuale' : 'Spazio disponibile'}
+          </span>
         </div>
-        <div className="flex flex-col items-end gap-2 text-sm">
-          <StatusLine
-            label="Active"
-            value={active?.title ?? 'No active block'}
-            tone={active ? 'emerald' : 'neutral'}
-          />
-          <StatusLine
-            label="Next"
-            value={next?.title ?? 'No upcoming block'}
-            tone={next ? 'blue' : 'neutral'}
-          />
-          <div className="flex flex-wrap justify-end gap-2">
+        <h2 className="mt-5 max-w-3xl text-[32px] font-semibold leading-[1.15] tracking-[-0.025em] text-white">
+          {active?.title ?? 'Scegli il prossimo risultato da produrre'}
+        </h2>
+        <p className="mt-2 text-sm text-slate-300">
+          {active
+            ? `${formatTime(active.startTime, locale, timezone)}–${formatTime(active.endTime, locale, timezone)}`
+            : 'Nessun TimeBlock è attivo in questo momento.'}
+        </p>
+        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-slate-800" aria-label={`Avanzamento blocco ${progress}%`}>
+          <div className="h-full rounded-full bg-cyan-400 transition-[width] duration-200" style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-slate-400">
+          {sessionActive ? 'Il tempo effettivo viene misurato dalla Sessione attiva.' : 'Avvia una Sessione per misurare l’esecuzione reale.'}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
               onClick={onOpenAskAI}
               data-testid="today-ask-ai"
-              className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-[10px] border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-600 hover:bg-slate-800"
             >
-              Ask AI
+              <Brain size={16} aria-hidden="true" /> Chiedi all’AI
             </button>
             <button
               type="button"
@@ -207,36 +264,13 @@ function Hero({
               )}
               disabled={sessionActive || !sessionAuthorityReady}
               data-testid="today-start-focus"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:from-emerald-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-[10px] bg-indigo-500 px-4 text-sm font-semibold text-white transition-colors hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              ▶ {startLabel}
+              <Play size={16} fill="currentColor" aria-hidden="true" /> {startLabel}
             </button>
-          </div>
         </div>
       </div>
     </header>
-  );
-}
-
-function StatusLine({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: 'emerald' | 'blue' | 'neutral';
-}) {
-  const cls = tone === 'emerald'
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-    : tone === 'blue'
-      ? 'border-blue-200 bg-blue-50 text-blue-700'
-      : 'border-gray-200 bg-gray-50 text-gray-600';
-  return (
-    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${cls}`}>
-      <span className="opacity-70">{label}</span>
-      <span className="max-w-[220px] truncate font-semibold">{value}</span>
-    </span>
   );
 }
 
@@ -248,11 +282,11 @@ function TodayMissionCard({
   onOpenTab: (tabId: string) => void;
 }) {
   return (
-    <Card title="Today Mission" subtitle="Top 3 priorities">
+    <Card title="Priorità di oggi" subtitle="Massimo tre risultati da proteggere">
       {topTasks.length === 0 ? (
         <EmptyHint
-          message="No prioritized tasks are open."
-          ctaLabel="Open Goals & Projects"
+          message="Non ci sono attività prioritarie aperte."
+          ctaLabel="Apri Obiettivi e progetti"
           onCta={() => onOpenTab('okr')}
         />
       ) : (
@@ -260,7 +294,7 @@ function TodayMissionCard({
           {topTasks.map((task) => (
             <li
               key={task.id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs"
+              className="flex min-h-[42px] items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm"
             >
               <span className="truncate font-medium text-gray-800">{task.title}</span>
               <PriorityChip priority={task.priority} />
@@ -283,7 +317,7 @@ function PriorityChip({ priority }: { priority: Task['priority'] | undefined }) 
         : 'border-slate-200 bg-slate-50 text-slate-700';
   return (
     <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>
-      {priority}
+      {priority === 'critical' ? 'critica' : priority === 'high' ? 'alta' : priority === 'medium' ? 'media' : 'bassa'}
     </span>
   );
 }
@@ -303,31 +337,31 @@ function ExecutionPulseCard({
     ? 0
     : Math.min(100, Math.max(0, Math.round(metrics.adherencePct)));
   return (
-    <Card title="Execution Pulse" subtitle="Persisted evidence only">
-      <div className="space-y-2 text-xs" data-testid="today-execution-pulse">
-        <Row label="Planned today" value={minutesLabel(metrics.plannedMinutes)} />
+    <Card title="Ritmo di esecuzione" subtitle="Solo evidenza persistita">
+      <div className="space-y-2.5 text-sm" data-testid="today-execution-pulse">
+        <Row label="Pianificato oggi" value={minutesLabel(metrics.plannedMinutes)} />
         <Row
-          label={complete ? 'Tracked actual' : 'Known actual'}
-          value={metrics.actualMinutes === null ? 'Unavailable' : minutesLabel(metrics.actualMinutes)}
+          label={complete ? 'Effettivo misurato' : 'Effettivo noto'}
+          value={metrics.actualMinutes === null ? 'Non disponibile' : minutesLabel(metrics.actualMinutes)}
         />
         <Row
-          label="Adherence"
+          label="Aderenza"
           value={metrics.adherencePct === null ? '—' : `${Math.round(metrics.adherencePct)}%`}
           highlight
         />
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100" aria-hidden="true">
           <div
-            className="h-full bg-gradient-to-r from-emerald-500 to-blue-500"
+            className="h-full bg-cyan-600"
             style={{ width: `${progress}%` }}
           />
         </div>
         <p
-          className={complete ? 'text-[11px] text-emerald-700' : 'text-[11px] text-amber-700'}
+          className={complete ? 'text-xs leading-5 text-emerald-700' : 'text-xs leading-5 text-amber-700'}
           data-testid="today-execution-quality"
         >
           {qualityMessage}
         </p>
-        <Row label="Streak" value={`${streak} days · best ${bestStreak}`} />
+        <Row label="Continuità" value={`${streak} giorni · record ${bestStreak}`} />
       </div>
     </Card>
   );
@@ -336,27 +370,29 @@ function ExecutionPulseCard({
 function executionQualityMessage(
   metrics: ReturnType<typeof computeTodayExecutionMetrics>,
 ): string {
-  if (metrics.actualAvailability === 'loading') return 'Loading persisted Sessions…';
+  if (metrics.actualAvailability === 'loading') return 'Caricamento delle Sessioni persistite…';
   if (metrics.actualAvailability === 'unavailable') {
-    return 'Session data is unavailable; execution is not reported as zero.';
+    return 'Le Sessioni non sono disponibili: l’esecuzione non viene indicata come zero.';
   }
   if (metrics.actualAvailability === 'complete') {
-    return 'Actual time comes from completed Sessions or explicit actual intervals.';
+    return 'Il tempo effettivo proviene da Sessioni concluse o intervalli espliciti.';
   }
   const issues: string[] = [];
   if (metrics.blocksMissingActualCount > 0) {
-    issues.push(`${metrics.blocksMissingActualCount} executed block${metrics.blocksMissingActualCount === 1 ? '' : 's'} missing actual evidence`);
+    issues.push(metrics.blocksMissingActualCount === 1
+      ? '1 blocco eseguito senza evidenza effettiva'
+      : `${metrics.blocksMissingActualCount} blocchi eseguiti senza evidenza effettiva`);
   }
   if (metrics.openSessionCount > 0) {
-    issues.push(`${metrics.openSessionCount} open Session${metrics.openSessionCount === 1 ? '' : 's'} excluded`);
+    issues.push(`${metrics.openSessionCount} Sessioni aperte escluse`);
   }
   if (metrics.invalidActualSourceCount > 0) {
-    issues.push(`${metrics.invalidActualSourceCount} invalid actual source${metrics.invalidActualSourceCount === 1 ? '' : 's'} excluded`);
+    issues.push(`${metrics.invalidActualSourceCount} fonti effettive non valide escluse`);
   }
   if (metrics.invalidPlannedBlockCount > 0) {
-    issues.push(`${metrics.invalidPlannedBlockCount} invalid planned block${metrics.invalidPlannedBlockCount === 1 ? '' : 's'} excluded`);
+    issues.push(`${metrics.invalidPlannedBlockCount} blocchi pianificati non validi esclusi`);
   }
-  return `Partial data: ${issues.join('; ')}.`;
+  return `Dati parziali: ${issues.join('; ')}.`;
 }
 
 function StrategicGoalsCard({
@@ -367,11 +403,11 @@ function StrategicGoalsCard({
   onOpenTab: (tabId: string) => void;
 }) {
   return (
-    <Card title="Strategic Goals" subtitle="Top active focus">
+    <Card title="Rischio e direzione" subtitle="Focus strategico attivo">
       {goals.active.length === 0 ? (
         <EmptyHint
-          message="No active goals yet."
-          ctaLabel="Open Goal Architect"
+          message="Nessun obiettivo attivo."
+          ctaLabel="Apri Goal Architect"
           onCta={() => onOpenTab('goal_architect')}
         />
       ) : (
@@ -380,7 +416,7 @@ function StrategicGoalsCard({
             {goals.active.slice(0, 3).map((goal) => (
               <li
                 key={goal.id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs"
+                className="flex min-h-[42px] items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2 text-sm"
               >
                 <span className="truncate font-medium text-gray-800">{goal.title}</span>
                 <PriorityChip priority={goal.priority} />
@@ -389,7 +425,7 @@ function StrategicGoalsCard({
           </ul>
           {goals.atRiskCount > 0 && (
             <p className="mt-2 text-[11px] text-amber-700" data-testid="today-at-risk">
-              ⚠ {goals.atRiskCount} goal{goals.atRiskCount === 1 ? '' : 's'} at risk
+              {goals.atRiskCount} obiettiv{goals.atRiskCount === 1 ? 'o' : 'i'} a rischio: verifica il piano.
             </p>
           )}
         </>
@@ -410,19 +446,19 @@ function UpcomingCommitmentsCard({
   onOpenTab: (tabId: string) => void;
 }) {
   return (
-    <Card title="Upcoming Commitments" subtitle="Next three today">
+    <Card title="Prossimi impegni" subtitle="I prossimi tre di oggi">
       {blocks.length === 0 ? (
         <EmptyHint
-          message="No more commitments today."
-          ctaLabel="Open Time Planner"
+          message="Nessun altro impegno pianificato oggi."
+          ctaLabel="Apri Time Planner"
           onCta={() => onOpenTab('planner')}
         />
       ) : (
         <ul className="space-y-2" data-testid="today-upcoming-commitments">
           {blocks.map((block) => (
-            <li key={block.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs">
+            <li key={block.id} className="relative rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2.5 pl-4 text-sm before:absolute before:bottom-2 before:left-0 before:top-2 before:w-0.5 before:rounded-full before:bg-cyan-500">
               <p className="truncate font-semibold text-slate-800">{block.title}</p>
-              <p className="mt-0.5 text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-500">
                 {formatTime(block.startTime, locale, timezone)}–{formatTime(block.endTime, locale, timezone)}
               </p>
             </li>
@@ -445,53 +481,44 @@ function ReminderStatusCard({
   onOpenSettings: () => void;
 }) {
   const desktopState = preferenceStatus === 'loading'
-    ? 'loading'
+    ? 'caricamento'
     : preferenceStatus === 'error'
-      ? 'unavailable'
+      ? 'non disponibile'
       : !preferences.desktopEnabled
-        ? 'disabled'
+        ? 'disattivato'
         : nativeStatus.notificationPermission === 'granted'
-          ? 'ready'
-          : `permission ${nativeStatus.notificationPermission}`;
+          ? 'attivo'
+          : `permesso ${nativeStatus.notificationPermission}`;
   return (
-    <Card title="Reminder State" subtitle="Policy and native permission">
-      <div className="space-y-2 text-xs" data-testid="today-reminder-state">
-        <Row label="Desktop" value={desktopState} highlight={desktopState === 'ready'} />
+    <Card title="Promemoria" subtitle="Stato operativo essenziale">
+      <div className="space-y-2.5 text-sm" data-testid="today-reminder-state">
+        <Row label="Desktop" value={desktopState} highlight={desktopState === 'attivo'} />
         <Row
-          label="Before block"
+          label="Prima del blocco"
           value={preferences.reminderOffsetsMinutes.map((minutes) => `${minutes}m`).join(', ')}
         />
-        <Row label="At start" value={preferences.atStartEnabled ? 'enabled' : 'disabled'} />
         <Row
-          label="Missed start"
-          value={preferences.missedStart.enabled
-            ? `after ${preferences.missedStart.afterMinutes}m`
-            : 'disabled'}
-        />
-        <Row
-          label="Quiet hours"
+          label="Ore silenziose"
           value={preferences.quietHours.enabled
             ? `${preferences.quietHours.start}–${preferences.quietHours.end}`
-            : 'disabled'}
+            : 'disattivate'}
         />
-        <div className="flex flex-wrap gap-1 pt-1 text-[10px]">
-          <ChannelChip label="WhatsApp" enabled={preferences.whatsappEnabled} />
-          <ChannelChip label="Email" enabled={preferences.emailEnabled} />
+        <div className="flex flex-wrap gap-1 pt-1 text-xs">
           <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
             {preferences.timezone}
           </span>
         </div>
         {preferenceStatus === 'error' && (
           <p className="text-[11px] text-amber-700">
-            Preferences could not be read; shown values are fallback only.
+            Preferenze non leggibili; i valori mostrati sono solo di sicurezza.
           </p>
         )}
         <button
           type="button"
           onClick={onOpenSettings}
-          className="pt-1 text-xs font-medium text-blue-700 hover:text-blue-900"
+          className="pt-1 text-sm font-medium text-indigo-700 hover:text-indigo-900"
         >
-          Open reminder settings →
+          Apri impostazioni →
         </button>
       </div>
     </Card>
@@ -530,12 +557,12 @@ function QuickCaptureCard({
     }
   };
   return (
-    <Card title="Quick Capture" subtitle="Save an untrusted note, never an instruction">
+    <Card title="Cattura rapida" subtitle="Salva un pensiero senza interrompere il flusso">
       <form onSubmit={submit} className="space-y-2">
-        <label htmlFor="today-quick-capture" className="sr-only">Quick capture note</label>
+        <label htmlFor="today-quick-capture" className="sr-only">Nota rapida</label>
         <textarea
           id="today-quick-capture"
-          aria-label="Quick capture note"
+          aria-label="Nota rapida"
           value={text}
           maxLength={1_000}
           rows={3}
@@ -543,8 +570,8 @@ function QuickCaptureCard({
             setText(event.target.value);
             if (status !== 'saving') setStatus('idle');
           }}
-          placeholder="Capture a thought or commitment…"
-          className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-blue-400 focus:outline-none"
+          placeholder="Annota un pensiero, un impegno o un’idea…"
+          className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-800 focus:border-indigo-400 focus:bg-white focus:outline-none"
         />
         <div className="flex items-center justify-between gap-2">
           <button
@@ -552,20 +579,20 @@ function QuickCaptureCard({
             onClick={onOpenNotes}
             className="text-xs font-medium text-blue-700 hover:text-blue-900"
           >
-            Open notes
+            Apri note
           </button>
           <button
             type="submit"
             disabled={!text.trim() || status === 'saving'}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-[40px] rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {status === 'saving' ? 'Saving…' : 'Capture'}
+            {status === 'saving' ? 'Salvataggio…' : 'Salva nota'}
           </button>
         </div>
-        {status === 'saved' && <p role="status" className="text-[11px] text-emerald-700">Captured in Notes.</p>}
+        {status === 'saved' && <p role="status" className="text-xs text-emerald-700">Nota salvata nel Second Brain.</p>}
         {status === 'error' && (
           <p role="alert" className="text-[11px] text-rose-700">
-            Capture failed safely. Tracking data was not changed.
+            Salvataggio non riuscito. I dati di tracking restano invariati.
           </p>
         )}
       </form>
@@ -670,12 +697,12 @@ function Card({
   children: ReactNode;
 }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-      <header className="border-b border-gray-100 px-4 py-3">
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        {subtitle && <p className="mt-0.5 text-[11px] text-gray-500">{subtitle}</p>}
+    <article className="h-full overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-sm">
+      <header className="border-b border-slate-100 px-4 py-3.5">
+        <h3 className="text-[15px] font-semibold leading-5 text-slate-900">{title}</h3>
+        {subtitle && <p className="mt-0.5 text-xs leading-4 text-slate-500">{subtitle}</p>}
       </header>
-      <div className="px-4 py-3">{children}</div>
+      <div className="px-4 py-4">{children}</div>
     </article>
   );
 }
@@ -711,12 +738,12 @@ function EmptyHint({
   onCta: () => void;
 }) {
   return (
-    <div className="text-xs text-gray-500">
+    <div className="text-sm leading-5 text-slate-500">
       <p>{message}</p>
       <button
         type="button"
         onClick={onCta}
-        className="mt-1.5 inline-flex items-center gap-1 font-medium text-blue-700 hover:text-blue-900"
+        className="mt-2 inline-flex min-h-[32px] items-center gap-1 font-semibold text-indigo-700 hover:text-indigo-900"
       >
         {ctaLabel} →
       </button>
@@ -752,11 +779,39 @@ function summarizeGoals(goals: ReadonlyArray<Goal>): GoalsView {
 }
 
 function formatTime(date: Date, locale: string, timezone: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  } catch {
+    return '—';
+  }
+}
+
+function formatDateLabel(date: Date, locale: string, timezone: string): string {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return 'Data non disponibile';
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      timeZone: timezone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).format(date);
+  } catch {
+    return 'Data non disponibile';
+  }
+}
+
+function progressWithin(block: TimeBlock, now: Date): number {
+  const start = block.startTime instanceof Date ? block.startTime.getTime() : Number.NaN;
+  const end = block.endTime instanceof Date ? block.endTime.getTime() : Number.NaN;
+  const current = now.getTime();
+  if (![start, end, current].every(Number.isFinite) || end <= start) return 0;
+  return Math.round(Math.min(100, Math.max(0, ((current - start) / (end - start)) * 100)));
 }
 
 function minutesLabel(minutes: number): string {
