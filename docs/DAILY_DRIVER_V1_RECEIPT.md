@@ -11,8 +11,8 @@ production mutation without a separate human gate.
 - Release branch: `codex/daily-driver-v1`
 - Starting SHA: `9f90dbc885cf1b5b70eb436b502e7a1a0026c375`
 - Final SHA: pending final receipt commit
-- Remote HEAD at Production Desktop READY checkpoint:
-  `0d009fb76a92e9c33cea980812bdf3a7afcdb0dd`
+- Remote HEAD at production MCP deployment checkpoint:
+  `3c06f9c`
 - Worktree: clean at sprint start; tracked tree clean before this receipt
   update; final state pending
 
@@ -299,11 +299,21 @@ Milestone: `LIFE TRACKER STAGING DESKTOP RELEASE GATE PASSED`
   reviewed stable redirect, public-client method, and authorization-code
   contract. The official connection procedure is documented by
   [OpenAI's ChatGPT plugin connection guide](https://developers.openai.com/plugins/deploy/connect-chatgpt).
-- MCP real-client acceptance: PENDING one interactive ChatGPT Developer Mode
-  connection, Firebase owner consent, discovered-tool review, and bounded read
-  smoke. The local Windows/WSL interop bridge failed before the optional
-  automated owner-flow verifier could start; it created no token or request.
-  Public endpoint and negative-boundary verification completed independently.
+- MCP live owner/OAuth acceptance: PASS. After an initial Windows/WSL interop
+  failure that occurred before the verifier started and created no token or
+  request, the bridge recovered. A fresh live flow used Francesco's current
+  installed-app Firebase identity entirely in process memory, completed exact
+  ChatGPT-client authorization-code consent with S256 PKCE, exchanged opaque
+  tokens, initialized Streamable HTTP, and listed exactly the 12 reviewed
+  tools with read-only/non-destructive/closed-world/idempotent annotations.
+  `get_goals` returned verified-owner production data without Notes or raw
+  paths; `apply_plan` and an excessive analysis range failed closed. Both
+  temporary access and refresh tokens were revoked, and the revoked access
+  token returned 401. No UID, token, or personal record content was printed.
+- MCP ChatGPT-client acceptance: PENDING only the interactive ChatGPT
+  Developer Mode connection, discovered-tool review, and one bounded real-data
+  read. Server-side OAuth, owner authorization, and live read behavior are now
+  independently production-verified.
 - MCP rollback: set only `MCP_READ_RUNTIME_ENABLED=false` in the ignored local
   production runtime config and redeploy with `firebase.mcp.json`, explicit
   `--project life-tracker-12000 --only functions`; verify 503 before any owner
