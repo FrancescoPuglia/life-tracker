@@ -10,6 +10,7 @@ describe('Desktop native bridge', () => {
     requestPermission: vi.fn(async () => 'granted' as NotificationPermission),
     sendNotification: vi.fn(),
     onAction: vi.fn(),
+    onExecutionAlarmStop: vi.fn(),
     isAutostartEnabled: vi.fn(async () => false),
     enableAutostart: vi.fn(async () => undefined),
     disableAutostart: vi.fn(async () => undefined),
@@ -25,6 +26,7 @@ describe('Desktop native bridge', () => {
   };
   const unregister = vi.fn(async () => undefined);
   let actionCallback: (() => void) | undefined;
+  let alarmStopCallback: (() => void) | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -36,7 +38,12 @@ describe('Desktop native bridge', () => {
       actionCallback = callback;
       return { unregister };
     });
+    dependencies.onExecutionAlarmStop.mockImplementation(async (callback: () => void) => {
+      alarmStopCallback = callback;
+      return async () => undefined;
+    });
     actionCallback = undefined;
+    alarmStopCallback = undefined;
   });
 
   it('requires both a Desktop build and the private Tauri runtime marker', () => {
@@ -144,6 +151,14 @@ describe('Desktop native bridge', () => {
 
     await unsubscribe();
     expect(unregister).toHaveBeenCalledTimes(1);
+  });
+
+  it('subscribes to the narrow tray alarm-stop event without a mutation command', async () => {
+    const callback = vi.fn();
+    const unsubscribe = await availableBridge().subscribeToExecutionAlarmStops(callback);
+    alarmStopCallback?.();
+    expect(callback).toHaveBeenCalledTimes(1);
+    await unsubscribe();
   });
 
   function availableBridge() {

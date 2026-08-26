@@ -21,6 +21,13 @@ export interface DesktopReminderCoordinatorDependencies {
   readonly isOnline?: () => boolean;
   readonly setTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   readonly clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
+  /**
+   * Runs only after the server claim and local durable consumption. Returning
+   * false suppresses the native edge without replaying the claimed occurrence.
+   */
+  readonly onClaimedDispatch?: (
+    dispatch: DesktopReminderDispatch,
+  ) => boolean | Promise<boolean>;
   readonly logger?: DesktopReminderCoordinatorLogger;
 }
 
@@ -130,6 +137,14 @@ export class DesktopReminderCoordinator {
         attemptId: result.dispatch.attemptId,
         consumedAt: feed.serverNow,
       });
+      let sendNative = true;
+      try {
+        sendNative = (await this.dependencies.onClaimedDispatch?.(result.dispatch)) !== false;
+      } catch {
+        sendNative = false;
+        this.logger.warn('Desktop reminder presentation policy failed closed.');
+      }
+      if (!sendNative) continue;
       try {
         await this.dependencies.bridge.sendReminderNotification({
           jobId: result.dispatch.jobId,

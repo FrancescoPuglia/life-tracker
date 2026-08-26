@@ -25,6 +25,7 @@ describe('Desktop settings', () => {
     setAutostart: vi.fn(async (enabled) => enabled),
     focusWindow: vi.fn(async () => undefined),
     subscribeToNotificationClicks: vi.fn(async () => async () => undefined),
+    subscribeToExecutionAlarmStops: vi.fn(async () => async () => undefined),
   };
   const preferencesStore: NotificationPreferencesStore = {
     load: vi.fn(async () => defaultNotificationPreferences()),

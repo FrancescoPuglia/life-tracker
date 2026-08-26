@@ -75,6 +75,36 @@ describe('Desktop reminder coordinator', () => {
     });
   });
 
+  it('applies presentation policy only after durable consumption and can suppress native output', async () => {
+    const onClaimedDispatch = vi.fn(() => false);
+    const fixture = setup({
+      jobs: [{ jobId: JOB_ID, scheduledFor: SERVER_NOW }],
+      onClaimedDispatch,
+    });
+    onClaimedDispatch.mockImplementation(() => {
+      expect(fixture.store.has(UID, JOB_ID)).toBe(true);
+      return false;
+    });
+    fixture.coordinator.start();
+    await flush();
+
+    expect(onClaimedDispatch).toHaveBeenCalledWith(expect.objectContaining({ jobId: JOB_ID }));
+    expect(fixture.bridge.sendReminderNotification).not.toHaveBeenCalled();
+    expect(fixture.store.has(UID, JOB_ID)).toBe(true);
+  });
+
+  it('fails closed when the owner-local presentation policy throws', async () => {
+    const fixture = setup({
+      jobs: [{ jobId: JOB_ID, scheduledFor: SERVER_NOW }],
+      onClaimedDispatch: () => { throw new Error('invalid local policy'); },
+    });
+    fixture.coordinator.start();
+    await flush();
+
+    expect(fixture.bridge.sendReminderNotification).not.toHaveBeenCalled();
+    expect(fixture.store.has(UID, JOB_ID)).toBe(true);
+  });
+
   it('never reclaims a locally consumed job after restart', async () => {
     const fixture = setup({ jobs: [{ jobId: JOB_ID, scheduledFor: SERVER_NOW }] });
     fixture.store.mark({
@@ -118,6 +148,7 @@ function setup(options: {
   permission?: 'granted' | 'denied' | 'prompt';
   online?: boolean;
   jobs?: ReadonlyArray<{ jobId: string; scheduledFor: string }>;
+  onClaimedDispatch?: (value: ReturnType<typeof dispatch>) => boolean | Promise<boolean>;
 } = {}) {
   const store = new MemoryLocalStore();
   const api: { list: ReturnType<typeof vi.fn>; claim: ReturnType<typeof vi.fn> } = {
@@ -152,6 +183,7 @@ function setup(options: {
     setAutostart: vi.fn(async () => false),
     focusWindow: vi.fn(async () => undefined),
     subscribeToNotificationClicks: vi.fn(async () => async () => undefined),
+    subscribeToExecutionAlarmStops: vi.fn(async () => async () => undefined),
   };
   const scheduler = new ManualScheduler();
   const coordinator = new DesktopReminderCoordinator({
@@ -162,6 +194,7 @@ function setup(options: {
     isOnline: () => options.online ?? true,
     setTimer: scheduler.set,
     clearTimer: scheduler.clear,
+    onClaimedDispatch: options.onClaimedDispatch,
   });
   return { coordinator, api, bridge, store, scheduler };
 }

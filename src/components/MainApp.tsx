@@ -36,6 +36,14 @@ import {
 } from '@/lib/desktop/nativeBridge';
 import { DESKTOP_REMINDER_REFRESH_EVENT } from '@/lib/desktop/reminderCoordinator';
 import {
+  EXECUTION_ALARM_PREFERENCES_EVENT,
+  EXECUTION_ALARM_STOP_EVENT,
+  defaultExecutionAlarmPreferences,
+  executionAlarmPreferencesStore,
+  normalizeExecutionAlarmPreferences,
+  type ExecutionAlarmPreferences,
+} from '@/lib/desktop/executionAlarm';
+import {
   buildQuickCaptureNote,
   completedSessionNetMinutes,
   type TodaySessionCoverage,
@@ -69,6 +77,7 @@ const DesktopSettings = lazy(() => import('@/components/settings/DesktopSettings
 import SidebarNavigation, { type SidebarNavId } from '@/components/shell/SidebarNavigation';
 import AskAIDrawer from '@/components/shell/AskAIDrawer';
 import TodayCommandCenter from '@/components/shell/TodayCommandCenter';
+import ExecutionAlarmHost from '@/components/desktop/ExecutionAlarmHost';
 
 // ============================================================================
 // TYPES
@@ -127,6 +136,9 @@ export default function MainApp({ buildId }: MainAppProps) {
   const [timeBlockError, setTimeBlockError] = useState<string | null>(null);
   const [sessionActionError, setSessionActionError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(() => audioManager.isEnabled());
+  const [alarmPreferences, setAlarmPreferences] = useState<ExecutionAlarmPreferences>(
+    defaultExecutionAlarmPreferences,
+  );
   
   // Session state
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
@@ -228,6 +240,30 @@ export default function MainApp({ buildId }: MainAppProps) {
     window.addEventListener(DESKTOP_REMINDER_REFRESH_EVENT, refresh);
     return () => window.removeEventListener(DESKTOP_REMINDER_REFRESH_EVENT, refresh);
   }, [data.status, reloadTodayRuntimeStatus]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const initial = executionAlarmPreferencesStore.load(user.uid);
+    setAlarmPreferences(initial);
+    const initialSoundEnabled = initial.soundEnabled && !initial.muted;
+    setSoundEnabled(initialSoundEnabled);
+    audioManager.setEnabled(initialSoundEnabled);
+    const update = (event: Event) => {
+      try {
+        const next = normalizeExecutionAlarmPreferences(
+          (event as CustomEvent<unknown>).detail,
+        );
+        setAlarmPreferences(next);
+        const nextSoundEnabled = next.soundEnabled && !next.muted;
+        setSoundEnabled(nextSoundEnabled);
+        audioManager.setEnabled(nextSoundEnabled);
+      } catch {
+        // Ignore malformed local events; the current validated policy remains active.
+      }
+    };
+    window.addEventListener(EXECUTION_ALARM_PREFERENCES_EVENT, update);
+    return () => window.removeEventListener(EXECUTION_ALARM_PREFERENCES_EVENT, update);
+  }, [user]);
   
   // Update current time block
   useEffect(() => {
@@ -410,7 +446,7 @@ export default function MainApp({ buildId }: MainAppProps) {
     ]);
   };
 
-  const handleStartSession = async (taskId?: string, timeBlockId?: string) => {
+  const handleStartSession = async (taskId?: string, timeBlockId?: string): Promise<boolean> => {
     setSessionActionError(null);
     try {
       const session = currentSession?.status === 'paused'
@@ -420,8 +456,10 @@ export default function MainApp({ buildId }: MainAppProps) {
       setCurrentSession(session);
       audioManager.buttonFeedback();
       await refreshExecutionState();
+      return true;
     } catch {
       setSessionActionError('The Session could not be started safely. No completion was recorded.');
+      return false;
     }
   };
 
@@ -506,6 +544,19 @@ export default function MainApp({ buildId }: MainAppProps) {
         <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
         <DailyMotivation />
         <BlockCountdown />
+        <ExecutionAlarmHost
+          uid={data.userId}
+          preferences={alarmPreferences}
+          timeBlocks={data.timeBlocks}
+          tasks={data.tasks}
+          projects={data.projects}
+          goals={data.goals}
+          timezone={notificationPreferences.timezone}
+          locale={notificationPreferences.locale}
+          currentSession={currentSession}
+          onStartSession={handleStartSession}
+          onOpenPlanner={() => setActiveTab('planner')}
+        />
 
         <header className="lt-topbar">
           <div className="lt-topbar-inner">
@@ -534,16 +585,24 @@ export default function MainApp({ buildId }: MainAppProps) {
               <button
                 type="button"
                 onClick={() => {
-                  const next = !soundEnabled;
+                  const next = !(soundEnabled && !alarmPreferences.muted);
                   setSoundEnabled(next);
                   audioManager.setEnabled(next);
+                  setAlarmPreferences(executionAlarmPreferencesStore.save(data.userId, {
+                    ...alarmPreferences,
+                    soundEnabled: next,
+                    muted: !next,
+                  }));
+                  if (!next) window.dispatchEvent(new Event(EXECUTION_ALARM_STOP_EVENT));
                   if (next) audioManager.buttonFeedback();
                 }}
                 className="lt-icon-button min-h-[36px] w-9"
-                aria-label={soundEnabled ? 'Disattiva suoni' : 'Attiva suoni'}
-                title={soundEnabled ? 'Suoni attivi' : 'Suoni disattivati'}
+                aria-label={soundEnabled && !alarmPreferences.muted ? 'Silenzia allarmi e suoni' : 'Riattiva allarmi e suoni'}
+                title={soundEnabled && !alarmPreferences.muted ? 'Allarmi e suoni attivi' : 'Allarmi e suoni silenziati'}
               >
-                {soundEnabled ? <Volume2 size={16} aria-hidden="true" /> : <VolumeX size={16} aria-hidden="true" />}
+                {soundEnabled && !alarmPreferences.muted
+                  ? <Volume2 size={16} aria-hidden="true" />
+                  : <VolumeX size={16} aria-hidden="true" />}
               </button>
               <button
                 type="button"

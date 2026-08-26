@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { AlarmClock, BellRing, Volume2, VolumeX } from 'lucide-react';
 import { AI_BACKEND_BUILD_ID } from '@/lib/ai/backendConfig';
 import {
   DEPLOYMENT_ENVIRONMENT,
@@ -12,6 +13,16 @@ import {
   type DesktopNativeStatus,
 } from '@/lib/desktop/nativeBridge';
 import { DESKTOP_REMINDER_REFRESH_EVENT } from '@/lib/desktop/reminderCoordinator';
+import {
+  EXECUTION_ALARM_PREFERENCES_EVENT,
+  EXECUTION_ALARM_STOP_EVENT,
+  defaultExecutionAlarmPreferences,
+  dispatchExecutionAlarmSignal,
+  executionAlarmPreferencesStore,
+  normalizeExecutionAlarmPreferences,
+  type ExecutionAlarmMode,
+  type ExecutionAlarmPreferences,
+} from '@/lib/desktop/executionAlarm';
 import {
   defaultNotificationPreferences,
   normalizeEditableNotificationPreferences,
@@ -47,6 +58,9 @@ export default function DesktopSettings({
   );
   const [offsetText, setOffsetText] = useState('15');
   const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [alarmPreferences, setAlarmPreferences] = useState<ExecutionAlarmPreferences>(
+    defaultExecutionAlarmPreferences,
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -84,6 +98,21 @@ export default function DesktopSettings({
       });
     return () => { disposed = true; };
   }, [preferencesStore, userId]);
+
+  useEffect(() => {
+    setAlarmPreferences(executionAlarmPreferencesStore.load(userId));
+    const update = (event: Event) => {
+      try {
+        setAlarmPreferences(normalizeExecutionAlarmPreferences(
+          (event as CustomEvent<unknown>).detail,
+        ));
+      } catch {
+        // Keep the current validated owner-local settings.
+      }
+    };
+    window.addEventListener(EXECUTION_ALARM_PREFERENCES_EVENT, update);
+    return () => window.removeEventListener(EXECUTION_ALARM_PREFERENCES_EVENT, update);
+  }, [userId]);
 
   const run = async (name: string, action: () => Promise<void>) => {
     setBusyAction(name);
@@ -137,6 +166,51 @@ export default function DesktopSettings({
     window.dispatchEvent(new Event(DESKTOP_REMINDER_REFRESH_EVENT));
   });
 
+  const saveAlarmPolicy = () => run('execution-alarm', async () => {
+    const saved = executionAlarmPreferencesStore.save(userId, alarmPreferences);
+    setAlarmPreferences(saved);
+    if (saved.mode === 'off' || saved.muted) {
+      window.dispatchEvent(new Event(EXECUTION_ALARM_STOP_EVENT));
+    }
+    setMessage('Execution Alarm salvato per questo Desktop. La pianificazione server resta invariata.');
+  });
+
+  const testExecutionAlarm = () => {
+    const now = new Date();
+    dispatchExecutionAlarmSignal({
+      dispatch: {
+        jobId: 'e'.repeat(64),
+        attemptId: 'f'.repeat(64),
+        kind: 'at_start',
+        offsetMinutes: 0,
+        scheduledFor: now.toISOString(),
+        startTime: now.toISOString(),
+        title: 'Focus strategico — test',
+        plannedMinutes: 45,
+        timezone: preferences.timezone,
+        locale: preferences.locale,
+      },
+      context: {
+        timeBlockId: null,
+        taskId: null,
+        goalTitle: 'Precision Performance OS',
+        projectTitle: 'Execution Alarm',
+        priority: 'high',
+      },
+      presentation: 'test',
+    });
+  };
+
+  const muteAll = () => {
+    const saved = executionAlarmPreferencesStore.save(userId, {
+      ...alarmPreferences,
+      muted: true,
+    });
+    setAlarmPreferences(saved);
+    window.dispatchEvent(new Event(EXECUTION_ALARM_STOP_EVENT));
+    setMessage('Execution Alarm silenziato. Il tracking e i promemoria pianificati restano integri.');
+  };
+
   return (
     <section className="space-y-6" aria-labelledby="desktop-settings-title">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -155,6 +229,119 @@ export default function DesktopSettings({
             value={loading ? 'checking' : status.available ? 'available' : 'unavailable'}
           />
         </dl>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-950 px-5 py-4 text-white">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-400/15 text-cyan-300">
+              <AlarmClock size={21} aria-hidden="true" />
+            </span>
+            <div>
+              <h3 className="text-lg font-semibold">Execution Alarm</h3>
+              <p className="mt-0.5 text-sm text-slate-300">
+                Un solo livello di esecuzione sopra i promemoria già pianificati.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-5">
+          <fieldset>
+            <legend className="text-sm font-semibold text-slate-900">Modalità</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {([
+                ['off', 'Off', 'Nessun segnale Desktop'],
+                ['normal', 'Normal', 'Notifica e un suono'],
+                ['strong', 'Strong', 'UI persistente e suono limitato'],
+                ['critical_only', 'Critical only', 'Strong solo su priorità alte'],
+              ] as const).map(([value, label, description]) => (
+                <label
+                  key={value}
+                  className={`cursor-pointer rounded-xl border p-3 transition-colors ${
+                    alarmPreferences.mode === value
+                      ? 'border-indigo-300 bg-indigo-50'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="execution-alarm-mode"
+                      value={value}
+                      checked={alarmPreferences.mode === value}
+                      onChange={() => setAlarmPreferences((current) => ({
+                        ...current,
+                        mode: value as ExecutionAlarmMode,
+                        muted: false,
+                      }))}
+                    />
+                    <span className="text-sm font-semibold text-slate-900">{label}</span>
+                  </span>
+                  <span className="mt-1 block pl-6 text-xs leading-4 text-slate-500">{description}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="rounded-xl border border-slate-200 p-4">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                {alarmPreferences.soundEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
+                Suono
+              </span>
+              <span className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={alarmPreferences.soundEnabled}
+                  onChange={(event) => setAlarmPreferences((current) => ({
+                    ...current,
+                    soundEnabled: event.target.checked,
+                    muted: event.target.checked ? false : current.muted,
+                  }))}
+                />
+                Attiva il segnale originale Life Tracker
+              </span>
+            </label>
+            <label className="rounded-xl border border-slate-200 p-4 text-sm font-semibold text-slate-900">
+              Snooze predefinito
+              <select
+                value={alarmPreferences.snoozeMinutes}
+                onChange={(event) => setAlarmPreferences((current) => ({
+                  ...current,
+                  snoozeMinutes: Number(event.target.value) as 5 | 10 | 15,
+                }))}
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal"
+              >
+                <option value={5}>5 minuti</option>
+                <option value={10}>10 minuti</option>
+                <option value={15}>15 minuti</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void saveAlarmPolicy()}
+              disabled={busyAction !== null}
+              className="lt-button-primary min-h-[42px] px-4"
+            >
+              {busyAction === 'execution-alarm' ? 'Salvataggio…' : 'Salva Execution Alarm'}
+            </button>
+            <button type="button" onClick={testExecutionAlarm} className="lt-button-secondary min-h-[42px] px-4">
+              <BellRing size={16} aria-hidden="true" /> Test alarm
+            </button>
+            <button type="button" onClick={muteAll} className="lt-button-secondary min-h-[42px] px-4 text-slate-700">
+              <VolumeX size={16} aria-hidden="true" /> Mute all
+            </button>
+          </div>
+
+          <p className="text-xs leading-5 text-slate-500">
+            Modalità, suono e snooze restano owner-locali su questo Desktop. Orari, quiet hours,
+            dedupe e validazione del TimeBlock continuano a usare l’autorità notifiche esistente.
+          </p>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

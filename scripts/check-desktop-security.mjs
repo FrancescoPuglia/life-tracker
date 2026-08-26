@@ -19,6 +19,7 @@ const allowedPermissions = new Set([
   'core:window:allow-set-focus',
   'core:window:allow-show',
   'core:window:allow-unminimize',
+  'core:event:allow-listen',
   'notification:allow-is-permission-granted',
   'notification:allow-notify',
   'notification:allow-request-permission',

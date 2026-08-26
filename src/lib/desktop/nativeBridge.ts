@@ -27,6 +27,7 @@ export interface DesktopNativeBridge {
   setAutostart(enabled: boolean): Promise<boolean>;
   focusWindow(): Promise<void>;
   subscribeToNotificationClicks(): Promise<() => Promise<void>>;
+  subscribeToExecutionAlarmStops(callback: () => void): Promise<() => Promise<void>>;
 }
 
 interface NativeWindow {
@@ -51,6 +52,7 @@ interface NativeDependencies {
     extra: Readonly<Record<string, string>>;
   }): void;
   onAction(callback: () => void): Promise<NotificationListener>;
+  onExecutionAlarmStop(callback: () => void): Promise<() => Promise<void>>;
   isAutostartEnabled(): Promise<boolean>;
   enableAutostart(): Promise<void>;
   disableAutostart(): Promise<void>;
@@ -180,14 +182,20 @@ export function createDesktopNativeBridge(options: BridgeOptions): DesktopNative
       });
       return () => listener.unregister();
     },
+
+    async subscribeToExecutionAlarmStops(callback) {
+      const dependencies = await load();
+      return dependencies.onExecutionAlarmStop(callback);
+    },
   };
 }
 
 async function loadTauriDependencies(): Promise<NativeDependencies> {
-  const [notification, autostart, windowApi] = await Promise.all([
+  const [notification, autostart, windowApi, eventApi] = await Promise.all([
     import('@tauri-apps/plugin-notification'),
     import('@tauri-apps/plugin-autostart'),
     import('@tauri-apps/api/window'),
+    import('@tauri-apps/api/event'),
   ]);
 
   return {
@@ -195,6 +203,10 @@ async function loadTauriDependencies(): Promise<NativeDependencies> {
     requestPermission: notification.requestPermission,
     sendNotification: notification.sendNotification,
     onAction: (callback) => notification.onAction(callback),
+    onExecutionAlarmStop: async (callback) => {
+      const unlisten = await eventApi.listen('life-tracker://stop-execution-alarm', callback);
+      return async () => { unlisten(); };
+    },
     isAutostartEnabled: autostart.isEnabled,
     enableAutostart: autostart.enable,
     disableAutostart: autostart.disable,
