@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import { Brain, Play } from 'lucide-react';
+import { BarChart3, Brain, CalendarDays, Play, Settings, Sparkles, Target } from 'lucide-react';
 import type { Goal, Project, Session, Task, TimeBlock } from '@/types';
 import type { StreakData } from '@/lib/streakCalculator';
 import type { DesktopNativeStatus } from '@/lib/desktop/nativeBridge';
@@ -612,12 +612,12 @@ function ExecutionSnapshot({
   onOpenTab: (tabId: string) => void;
 }) {
   return (
-    <Card title="Execution Snapshot" subtitle="Today, before the scientific report">
+    <Card title="Snapshot di esecuzione" subtitle="Oggi, prima della review scientifica">
       <div className="space-y-2 text-xs">
-        <Row label="Planned" value={minutesLabel(plannedMinutes)} />
+        <Row label="Pianificato" value={minutesLabel(plannedMinutes)} />
         <Row
-          label={actualAvailability === 'complete' ? 'Tracked actual' : 'Known actual'}
-          value={actualMinutes === null ? 'Unavailable' : minutesLabel(actualMinutes)}
+          label={actualAvailability === 'complete' ? 'Eseguito tracciato' : 'Eseguito noto'}
+          value={actualMinutes === null ? 'Non disponibile' : minutesLabel(actualMinutes)}
           highlight
         />
         <button
@@ -626,7 +626,7 @@ function ExecutionSnapshot({
           className="mt-1 inline-flex items-center gap-2 text-xs font-medium text-blue-700 hover:text-blue-900"
           data-testid="today-open-reports"
         >
-          Open scientific reports →
+          Apri le review scientifiche →
         </button>
       </div>
     </Card>
@@ -645,17 +645,17 @@ function QuickActions({
   goalsCount: number;
 }) {
   return (
-    <Card title="Quick Actions" subtitle="Jump to what you need">
+    <Card title="Azioni rapide" subtitle="Vai subito a ciò che serve">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="today-quick-actions">
-        <ActionTile icon="✨" label="Ask AI" subtitle="Secure assistant" onClick={onOpenAskAI} />
-        <ActionTile icon="🏗️" label="Create Goal" subtitle="Goal Architect" onClick={() => onOpenTab('goal_architect')} />
-        <ActionTile icon="🧭" label="Plan Week" subtitle="Weekly Intelligence" onClick={() => onOpenTab('weekly_intel')} />
-        <ActionTile icon="📅" label="Time Planner" subtitle="Add a TimeBlock" onClick={() => onOpenTab('planner')} />
-        <ActionTile icon="📈" label="Review Week" subtitle="Weekly Execution" onClick={() => onOpenTab('weekly')} />
-        <ActionTile icon="⚙️" label="Settings" subtitle="Reminders and reports" onClick={() => onOpenTab('settings')} />
+        <ActionTile icon={<Sparkles size={17} />} label="Chiedi all’AI" subtitle="Assistente sicuro" onClick={onOpenAskAI} />
+        <ActionTile icon={<Target size={17} />} label="Crea obiettivo" subtitle="Architetto obiettivi" onClick={() => onOpenTab('goal_architect')} />
+        <ActionTile icon={<CalendarDays size={17} />} label="Pianifica settimana" subtitle="Intelligenza settimanale" onClick={() => onOpenTab('weekly_intel')} />
+        <ActionTile icon={<CalendarDays size={17} />} label="Pianificazione" subtitle="Aggiungi un TimeBlock" onClick={() => onOpenTab('planner')} />
+        <ActionTile icon={<BarChart3 size={17} />} label="Rivedi settimana" subtitle="Esecuzione settimanale" onClick={() => onOpenTab('weekly')} />
+        <ActionTile icon={<Settings size={17} />} label="Impostazioni" subtitle="Avvisi e review" onClick={() => onOpenTab('settings')} />
       </div>
       <p className="mt-3 text-[11px] text-gray-400">
-        {goalsCount} goal{goalsCount === 1 ? '' : 's'} · {projectsCount} project{projectsCount === 1 ? '' : 's'}.
+        {goalsCount} obiettiv{goalsCount === 1 ? 'o' : 'i'} · {projectsCount} progett{projectsCount === 1 ? 'o' : 'i'}.
       </p>
     </Card>
   );
@@ -667,7 +667,7 @@ function ActionTile({
   subtitle,
   onClick,
 }: {
-  icon: string;
+  icon: ReactNode;
   label: string;
   subtitle: string;
   onClick: () => void;
@@ -679,7 +679,7 @@ function ActionTile({
       className="rounded-lg border border-gray-100 bg-white px-3 py-2.5 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
     >
       <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-        <span>{icon}</span>
+        <span className="text-indigo-600" aria-hidden="true">{icon}</span>
         <span>{label}</span>
       </div>
       <p className="mt-0.5 text-[11px] text-gray-500">{subtitle}</p>

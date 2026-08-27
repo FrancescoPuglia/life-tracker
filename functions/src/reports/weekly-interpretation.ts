@@ -16,11 +16,11 @@ import type {
 } from './types';
 
 export const WEEKLY_INTERPRETATION_SCHEMA_VERSION =
-  'weekly-strategic-interpretation-v1' as const;
+  'weekly-strategic-interpretation-v2' as const;
 export const WEEKLY_INTERPRETATION_OUTPUT_SCHEMA_VERSION =
-  'weekly-strategic-interpretation-output-v1' as const;
+  'weekly-strategic-interpretation-output-v2' as const;
 export const WEEKLY_INTERPRETATION_PROMPT_VERSION =
-  'life-tracker-weekly-strategy-2026-08-25' as const;
+  'life-tracker-weekly-executive-review-v3.1-2026-08-27' as const;
 export const WEEKLY_INTERPRETATION_METRIC_CONTEXT_SCHEMA_VERSION =
   'weekly-strategic-metric-context-v1' as const;
 export const WEEKLY_INTERPRETATION_CONTROL_SCHEMA_VERSION =
@@ -142,8 +142,16 @@ export interface WeeklyInterpretationStatement {
 
 export interface WeeklyInterpretationDraft {
   readonly summary: string;
+  readonly biggestWin: WeeklyInterpretationStatement;
+  readonly biggestMiss: WeeklyInterpretationStatement;
+  readonly priorityMismatch: WeeklyInterpretationStatement;
   readonly strongestPattern: WeeklyInterpretationStatement;
   readonly largestUncertainty: WeeklyInterpretationStatement;
+  readonly topCorrections: readonly [
+    WeeklyInterpretationStatement,
+    WeeklyInterpretationStatement,
+    WeeklyInterpretationStatement,
+  ];
   readonly nextWeekExperiment: WeeklyInterpretationStatement;
 }
 
@@ -184,8 +192,12 @@ export interface WeeklyStrategicInterpretation {
   readonly latencyMs: number;
   readonly summaryKind: 'INFERENCE';
   readonly summary: string;
+  readonly biggestWin: WeeklyInterpretationStatement;
+  readonly biggestMiss: WeeklyInterpretationStatement;
+  readonly priorityMismatch: WeeklyInterpretationStatement;
   readonly strongestPattern: WeeklyInterpretationStatement;
   readonly largestUncertainty: WeeklyInterpretationStatement;
+  readonly topCorrections: WeeklyInterpretationDraft['topCorrections'];
   readonly nextWeekExperiment: WeeklyInterpretationStatement;
   readonly untrustedTextPolicy: 'metrics_are_data_not_instructions';
   readonly generatedAt: string;
@@ -472,8 +484,12 @@ export function createWeeklyStrategicInterpretation(
     ...usage,
     summaryKind: 'INFERENCE' as const,
     summary: draft.summary,
+    biggestWin: draft.biggestWin,
+    biggestMiss: draft.biggestMiss,
+    priorityMismatch: draft.priorityMismatch,
     strongestPattern: draft.strongestPattern,
     largestUncertainty: draft.largestUncertainty,
+    topCorrections: draft.topCorrections,
     nextWeekExperiment: draft.nextWeekExperiment,
     untrustedTextPolicy: 'metrics_are_data_not_instructions' as const,
     generatedAt: instant,
@@ -491,20 +507,24 @@ export function validateWeeklyStrategicInterpretation(
 ): WeeklyStrategicInterpretation {
   validateWeeklyArchive(uid, archive);
   const value = exactRecord(input, [
-    'artifactHash', 'cachedInputTokens', 'evaluationReceiptId', 'generatedAt', 'id',
+    'artifactHash', 'biggestMiss', 'biggestWin', 'cachedInputTokens', 'evaluationReceiptId', 'generatedAt', 'id',
     'inputTokens', 'largestUncertainty', 'latencyMs', 'metricContextHash', 'metricHash',
     'model', 'nextWeekExperiment', 'outputSchemaVersion', 'outputTokens', 'ownerHash',
-    'promptVersion', 'providerModel', 'providerResponseId', 'reasoningEffort',
+    'priorityMismatch', 'promptVersion', 'providerModel', 'providerResponseId', 'reasoningEffort',
     'reasoningTokens', 'reportArtifactHash', 'reportId', 'routingConfigId', 'schemaVersion',
-    'strongestPattern', 'summary', 'summaryKind', 'totalTokens', 'untrustedTextPolicy', 'workload',
+    'strongestPattern', 'summary', 'summaryKind', 'topCorrections', 'totalTokens', 'untrustedTextPolicy', 'workload',
   ], 'Stored weekly interpretation');
   const artifact = input as WeeklyStrategicInterpretation;
   const context = buildWeeklyInterpretationMetricContext(uid, archive);
   const allowedMetricIds = new Set(context.scalarMetrics.map((metric) => metric.id));
   validateWeeklyInterpretationDraft({
     summary: artifact.summary,
+    biggestWin: artifact.biggestWin,
+    biggestMiss: artifact.biggestMiss,
+    priorityMismatch: artifact.priorityMismatch,
     strongestPattern: artifact.strongestPattern,
     largestUncertainty: artifact.largestUncertainty,
+    topCorrections: artifact.topCorrections,
     nextWeekExperiment: artifact.nextWeekExperiment,
   }, allowedMetricIds);
   const profile: LifeTrackerAiExecutionProfile = {
@@ -531,8 +551,12 @@ export function validateWeeklyStrategicInterpretation(
     latencyMs: artifact.latencyMs,
     draft: {
       summary: artifact.summary,
+      biggestWin: artifact.biggestWin,
+      biggestMiss: artifact.biggestMiss,
+      priorityMismatch: artifact.priorityMismatch,
       strongestPattern: artifact.strongestPattern,
       largestUncertainty: artifact.largestUncertainty,
+      topCorrections: artifact.topCorrections,
       nextWeekExperiment: artifact.nextWeekExperiment,
     },
   }, profile);
@@ -715,8 +739,17 @@ function validateWeeklyInterpretationDraft(
   allowedMetricIds: ReadonlySet<string>,
 ): WeeklyInterpretationDraft {
   exactRecord(input, [
-    'largestUncertainty', 'nextWeekExperiment', 'strongestPattern', 'summary',
+    'biggestMiss', 'biggestWin', 'largestUncertainty', 'nextWeekExperiment',
+    'priorityMismatch', 'strongestPattern', 'summary', 'topCorrections',
   ], 'Weekly interpretation output');
+  const biggestWin = statement(input.biggestWin, 'INFERENCE', allowedMetricIds, 'biggest win');
+  const biggestMiss = statement(input.biggestMiss, 'INFERENCE', allowedMetricIds, 'biggest miss');
+  const priorityMismatch = statement(
+    input.priorityMismatch,
+    'INFERENCE',
+    allowedMetricIds,
+    'priority mismatch',
+  );
   const strongestPattern = statement(
     input.strongestPattern,
     'INFERENCE',
@@ -735,10 +768,23 @@ function validateWeeklyInterpretationDraft(
     allowedMetricIds,
     'next-week experiment',
   );
+  if (!Array.isArray(input.topCorrections) || input.topCorrections.length !== 3) {
+    throw new Error('Weekly interpretation top corrections are invalid.');
+  }
+  const topCorrections = Object.freeze(input.topCorrections.map((correction, index) => statement(
+    correction,
+    'RECOMMENDATION',
+    allowedMetricIds,
+    `top correction ${index + 1}`,
+  ))) as WeeklyInterpretationDraft['topCorrections'];
   return Object.freeze({
     summary: safeNarrative(input.summary, 'summary', 40, 600),
+    biggestWin,
+    biggestMiss,
+    priorityMismatch,
     strongestPattern,
     largestUncertainty,
+    topCorrections,
     nextWeekExperiment,
   });
 }

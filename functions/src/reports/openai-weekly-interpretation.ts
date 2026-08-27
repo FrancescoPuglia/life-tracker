@@ -31,11 +31,23 @@ const STATEMENT_PROPERTIES = Object.freeze({
 export const WEEKLY_INTERPRETATION_JSON_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'strongestPattern', 'largestUncertainty', 'nextWeekExperiment'],
+  required: [
+    'summary', 'biggestWin', 'biggestMiss', 'priorityMismatch', 'strongestPattern',
+    'largestUncertainty', 'topCorrections', 'nextWeekExperiment',
+  ],
   properties: {
     summary: { type: 'string', minLength: 40, maxLength: 600 },
+    biggestWin: statementSchema('INFERENCE'),
+    biggestMiss: statementSchema('INFERENCE'),
+    priorityMismatch: statementSchema('INFERENCE'),
     strongestPattern: statementSchema('INFERENCE'),
     largestUncertainty: statementSchema('INFERENCE'),
+    topCorrections: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 3,
+      items: statementSchema('RECOMMENDATION'),
+    },
     nextWeekExperiment: statementSchema('RECOMMENDATION'),
   },
 });
@@ -47,7 +59,8 @@ const SYSTEM_INSTRUCTIONS = [
   'Do not put any digit, percentage, URL, HTML, medical or psychological diagnosis, or causal claim in a text field.',
   'Reference only exact metric IDs present in scalarMetrics.',
   'The summary is a cautious inference, never an observation, derived metric, or recommendation.',
-  'Return one cautious strongest-pattern inference, one largest-uncertainty inference, and one reversible next-week experiment.',
+  'Return cautious metric-bound inferences for biggest win, biggest miss, priority mismatch, strongest pattern, and largest uncertainty.',
+  'Return exactly three bounded corrections and one measurable reversible next-week experiment.',
   'State uncertainty for every statement. Associations are not proof of causation.',
 ].join('\n');
 

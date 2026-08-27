@@ -11,7 +11,7 @@
 // file only owns UI state: period, filters, drill-down selection.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CalendarPlus, PlayCircle } from 'lucide-react';
+import { AlertTriangle, CalendarPlus, Clock3, PlayCircle } from 'lucide-react';
 import type { Session } from '@/types';
 import { db } from '@/lib/database';
 import { toDateSafe } from '@/utils/dateUtils';
@@ -258,8 +258,8 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
     <div className="space-y-4" data-testid="performance-dashboard">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Execution intelligence</p>
-          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Performance</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Intelligenza di esecuzione</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Rendimento</h2>
           <p className="mt-1 text-sm text-slate-600">Aderenza, allocazione e accuratezza stimata da evidenza misurata.</p>
         </div>
       </header>
@@ -281,9 +281,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
           className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center"
           data-testid="performance-empty-state"
         >
-          <div className="text-3xl mb-3" aria-hidden="true">
-            ⏱️
-          </div>
+          <Clock3 className="mx-auto mb-3 h-8 w-8 text-indigo-500" aria-hidden="true" />
           <h3 className="text-base font-bold text-slate-900">Nessun piano o tracking nel periodo</h3>
           <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
             Non risultano TimeBlock pianificati né Sessioni registrate
@@ -309,7 +307,7 @@ export default function PerformanceDashboard({ onNavigate }: PerformanceDashboar
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700"
                 >
                   <CalendarPlus className="w-3.5 h-3.5" aria-hidden="true" />
-                  Apri Time Planner
+                  Apri Pianificazione
                 </button>
                 <button
                   type="button"

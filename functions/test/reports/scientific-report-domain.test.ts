@@ -403,7 +403,7 @@ describe('deterministic scientific metrics', () => {
       value: null,
       availability: 'unavailable',
     });
-    expect(report.charts).toHaveLength(5);
+    expect(report.charts).toHaveLength(6);
     expect(report.charts.every((chart) => chart.metricHash === report.metrics.metricHash)).toBe(true);
     expect(new Set(report.charts.map((chart) => chart.dataHash)).size).toBe(report.charts.length);
     expect(report.narrativeModel).toBeNull();

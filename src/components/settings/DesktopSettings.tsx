@@ -1,8 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlarmClock, BellRing, Volume2, VolumeX } from 'lucide-react';
+import { AlarmClock, BellRing, Monitor, Moon, Sun, Volume2, VolumeX } from 'lucide-react';
 import { AI_BACKEND_BUILD_ID } from '@/lib/ai/backendConfig';
+import {
+  getWeeklyReviewApiClient,
+  type WeeklyReviewApiClient,
+} from '@/lib/reports/weeklyReviewApiClient';
+import type { WeeklyReviewStatusResponse } from '../../../packages/report-contract';
 import {
   DEPLOYMENT_ENVIRONMENT,
   RUNTIME_TARGET,
@@ -30,6 +35,12 @@ import {
   type EditableNotificationPreferences,
   type NotificationPreferencesStore,
 } from '@/lib/notifications/preferences';
+import {
+  applyAppearancePreference,
+  loadAppearancePreference,
+  type LifeTrackerAppearancePreference,
+  type LifeTrackerThemeMode,
+} from '@/lib/themePreference';
 
 const UNAVAILABLE_STATUS: DesktopNativeStatus = {
   available: false,
@@ -41,12 +52,14 @@ interface DesktopSettingsProps {
   readonly userId: string;
   readonly bridge?: DesktopNativeBridge;
   readonly preferencesStore?: NotificationPreferencesStore;
+  readonly weeklyReviewApi?: WeeklyReviewApiClient;
 }
 
 export default function DesktopSettings({
   userId,
   bridge = desktopNativeBridge,
   preferencesStore = notificationPreferencesStore,
+  weeklyReviewApi,
 }: DesktopSettingsProps) {
   const [status, setStatus] = useState<DesktopNativeStatus>(UNAVAILABLE_STATUS);
   const [loading, setLoading] = useState(true);
@@ -61,6 +74,10 @@ export default function DesktopSettings({
   const [alarmPreferences, setAlarmPreferences] = useState<ExecutionAlarmPreferences>(
     defaultExecutionAlarmPreferences,
   );
+  const [weeklyReviewStatus, setWeeklyReviewStatus] = useState<WeeklyReviewStatusResponse | null>(null);
+  const [appearance, setAppearance] = useState<LifeTrackerAppearancePreference>(
+    loadAppearancePreference,
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -68,7 +85,7 @@ export default function DesktopSettings({
       setError(null);
     } catch {
       setStatus(UNAVAILABLE_STATUS);
-      setError('Native Desktop status is unavailable. Restart Life Tracker and try again.');
+      setError('Lo stato Desktop non è disponibile. Riavvia Life Tracker e riprova.');
     } finally {
       setLoading(false);
     }
@@ -90,7 +107,7 @@ export default function DesktopSettings({
       })
       .catch(() => {
         if (!disposed) {
-          setError('Reminder preferences could not be loaded. Tracking data was not changed.');
+          setError('Impossibile caricare le preferenze degli avvisi. I dati non sono stati modificati.');
         }
       })
       .finally(() => {
@@ -122,8 +139,8 @@ export default function DesktopSettings({
       await action();
     } catch {
       setError(name === 'reminder-policy'
-        ? 'The reminder policy is invalid or unavailable. No tracking data was changed.'
-        : 'The native Desktop action failed safely. No tracking data was changed.');
+        ? 'Le preferenze degli avvisi non sono valide o disponibili. Nessun dato è stato modificato.'
+        : 'L’azione Desktop non è riuscita e si è chiusa in sicurezza. Nessun dato è stato modificato.');
     } finally {
       setBusyAction(null);
     }
@@ -133,22 +150,22 @@ export default function DesktopSettings({
     const notificationPermission = await bridge.requestNotificationPermission();
     setStatus((current) => ({ ...current, notificationPermission }));
     setMessage(notificationPermission === 'granted'
-      ? 'Native notifications are enabled.'
-      : 'Notification permission was not granted. You can keep using Life Tracker without it.');
+      ? 'Notifiche native abilitate.'
+      : 'Windows non ha concesso le notifiche. L’allarme in-app resta disponibile.');
     window.dispatchEvent(new Event(DESKTOP_REMINDER_REFRESH_EVENT));
   });
 
   const testNotifications = () => run('test', async () => {
     await bridge.sendTestNotification();
-    setMessage('Test notification sent. Clicking it only opens and focuses Life Tracker.');
+    setMessage('Notifica di test inviata. Il clic apre soltanto Life Tracker.');
   });
 
   const changeAutostart = (enabled: boolean) => run('autostart', async () => {
     const authoritativeState = await bridge.setAutostart(enabled);
     setStatus((current) => ({ ...current, autostartEnabled: authoritativeState }));
     setMessage(authoritativeState
-      ? 'Life Tracker will start when you sign in to Windows.'
-      : 'Windows autostart is disabled.');
+      ? 'Life Tracker si avvierà all’accesso a Windows.'
+      : 'Avvio automatico di Windows disattivato.');
   });
 
   const saveReminderPolicy = () => run('reminder-policy', async () => {
@@ -162,7 +179,7 @@ export default function DesktopSettings({
     await preferencesStore.save(userId, normalized);
     setPreferences(normalized);
     setOffsetText(normalized.reminderOffsetsMinutes.join(', '));
-    setMessage('Notification and report preferences saved. Future work will be reconciled safely.');
+    setMessage('Preferenze di avvisi e review salvate. Le esecuzioni future saranno riconciliate in sicurezza.');
     window.dispatchEvent(new Event(DESKTOP_REMINDER_REFRESH_EVENT));
   });
 
@@ -175,7 +192,29 @@ export default function DesktopSettings({
     setMessage('Execution Alarm salvato per questo Desktop. La pianificazione server resta invariata.');
   });
 
-  const testExecutionAlarm = () => {
+  const refreshWeeklyReviewStatus = () => run('weekly-review-status', async () => {
+    const client = weeklyReviewApi ?? getWeeklyReviewApiClient();
+    const result = await client.status();
+    setWeeklyReviewStatus(result);
+    setMessage('Stato della Weekly Executive Review aggiornato.');
+  });
+
+  const sendWeeklyReviewTest = () => run('weekly-review-test', async () => {
+    const client = weeklyReviewApi ?? getWeeklyReviewApiClient();
+    const result = await client.sendTest();
+    if (result.outcome === 'provider_accepted' || result.outcome === 'already_accepted') {
+      setMessage('Review archiviata e accettata dal provider email.');
+    } else if (result.outcome === 'retry_pending') {
+      setMessage('Review archiviata. Il nuovo tentativo di consegna è programmato.');
+    } else if (result.outcome === 'not_due') {
+      setMessage('Nessuna review settimanale è ancora dovuta con queste preferenze.');
+    } else {
+      throw new Error('Weekly review delivery failed safely.');
+    }
+    setWeeklyReviewStatus(await client.status());
+  });
+
+  const testExecutionAlarm = (kind: 'normal' | 'strong' | 'critical') => {
     const now = new Date();
     dispatchExecutionAlarmSignal({
       dispatch: {
@@ -185,7 +224,7 @@ export default function DesktopSettings({
         offsetMinutes: 0,
         scheduledFor: now.toISOString(),
         startTime: now.toISOString(),
-        title: 'Focus strategico — test',
+        title: `TEST ${kind === 'critical' ? 'CRITICAL' : kind.toUpperCase()} — Focus strategico`,
         plannedMinutes: 45,
         timezone: preferences.timezone,
         locale: preferences.locale,
@@ -195,9 +234,9 @@ export default function DesktopSettings({
         taskId: null,
         goalTitle: 'Precision Performance OS',
         projectTitle: 'Execution Alarm',
-        priority: 'high',
+        priority: kind === 'critical' ? 'critical' : 'high',
       },
-      presentation: 'test',
+      presentation: kind === 'normal' ? 'normal' : 'test',
     });
   };
 
@@ -211,24 +250,69 @@ export default function DesktopSettings({
     setMessage('Execution Alarm silenziato. Il tracking e i promemoria pianificati restano integri.');
   };
 
+  const updateAppearance = (next: Partial<LifeTrackerAppearancePreference>) => {
+    const saved = applyAppearancePreference({ ...appearance, ...next });
+    setAppearance(saved);
+  };
+
   return (
     <section className="space-y-6" aria-labelledby="desktop-settings-title">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 id="desktop-settings-title" className="text-xl font-bold text-slate-900">
-          Desktop
+          Impostazioni Desktop
         </h3>
         <p className="mt-1 text-sm text-slate-600">
-          Native Windows features are optional. Core tracking continues if they are unavailable.
+          Personalizza esecuzione, notifiche e review. Il tracking continua anche senza integrazioni native.
         </p>
 
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-          <StatusItem label="Runtime" value={RUNTIME_TARGET} />
-          <StatusItem label="Environment" value={DEPLOYMENT_ENVIRONMENT} />
-          <StatusItem
-            label="Native bridge"
-            value={loading ? 'checking' : status.available ? 'available' : 'unavailable'}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-indigo-600">Aspetto</p>
+        <h3 className="mt-1 text-lg font-bold text-slate-900">Tema globale</h3>
+        <p className="mt-1 text-sm text-slate-600">
+          La preferenza è disponibile anche offline e si applica a tutte le schermate.
+        </p>
+        <fieldset className="mt-4">
+          <legend className="sr-only">Tema</legend>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {([
+              ['system', 'Sistema', Monitor],
+              ['light', 'Chiaro', Sun],
+              ['dark', 'Scuro', Moon],
+            ] as const).map(([mode, label, Icon]) => (
+              <label
+                key={mode}
+                className={`flex min-h-[52px] cursor-pointer items-center gap-3 rounded-xl border px-4 transition-colors ${
+                  appearance.mode === mode
+                    ? 'border-indigo-300 bg-indigo-50 text-indigo-950'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="life-tracker-theme"
+                  value={mode}
+                  checked={appearance.mode === mode}
+                  onChange={() => updateAppearance({ mode: mode as LifeTrackerThemeMode })}
+                />
+                <Icon size={18} aria-hidden="true" />
+                <span className="font-bold">{label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <label className="mt-4 flex min-h-[48px] cursor-pointer items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 text-sm text-slate-700">
+          <span>
+            <span className="block font-bold text-slate-900">Movimento ridotto</span>
+            <span className="block text-xs text-slate-500">Riduce transizioni, pulsazioni e animazioni decorative.</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={appearance.reducedMotion}
+            onChange={(event) => updateAppearance({ reducedMotion: event.target.checked })}
           />
-        </dl>
+        </label>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -251,10 +335,10 @@ export default function DesktopSettings({
             <legend className="text-sm font-semibold text-slate-900">Modalità</legend>
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {([
-                ['off', 'Off', 'Nessun segnale Desktop'],
-                ['normal', 'Normal', 'Notifica e un suono'],
-                ['strong', 'Strong', 'UI persistente e suono limitato'],
-                ['critical_only', 'Critical only', 'Strong solo su priorità alte'],
+                ['off', 'Disattivato', 'Nessun segnale Desktop'],
+                ['normal', 'Normale', 'Notifica, suono e banner discreto'],
+                ['strong', 'Forte', 'Overlay persistente ed escalation limitata'],
+                ['critical_only', 'Solo criticità', 'Forte sulle priorità alte, normale sulle altre'],
               ] as const).map(([value, label, description]) => (
                 <label
                   key={value}
@@ -329,11 +413,17 @@ export default function DesktopSettings({
             >
               {busyAction === 'execution-alarm' ? 'Salvataggio…' : 'Salva Execution Alarm'}
             </button>
-            <button type="button" onClick={testExecutionAlarm} className="lt-button-secondary min-h-[42px] px-4">
-              <BellRing size={16} aria-hidden="true" /> Test alarm
+            <button type="button" onClick={() => testExecutionAlarm('normal')} className="lt-button-secondary min-h-[42px] px-4">
+              <BellRing size={16} aria-hidden="true" /> TEST NORMALE
+            </button>
+            <button type="button" onClick={() => testExecutionAlarm('strong')} className="lt-button-secondary min-h-[42px] px-4">
+              <BellRing size={16} aria-hidden="true" /> TEST FORTE
+            </button>
+            <button type="button" onClick={() => testExecutionAlarm('critical')} className="lt-button-secondary min-h-[42px] px-4">
+              <BellRing size={16} aria-hidden="true" /> TEST CRITICO
             </button>
             <button type="button" onClick={muteAll} className="lt-button-secondary min-h-[42px] px-4 text-slate-700">
-              <VolumeX size={16} aria-hidden="true" /> Mute all
+              <VolumeX size={16} aria-hidden="true" /> SILENZIA TUTTO
             </button>
           </div>
 
@@ -347,14 +437,14 @@ export default function DesktopSettings({
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Windows notifications</h3>
+            <h3 className="text-lg font-bold text-slate-900">Notifiche Windows</h3>
             <p className="mt-1 max-w-2xl text-sm text-slate-600">
-              Permission is requested only when you choose Enable. A notification never marks a
-              TimeBlock or Session complete.
+              Servono per gli avvisi quando Life Tracker non è in primo piano. L’allarme in-app
+              continua a funzionare anche se Windows le nega.
             </p>
           </div>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase text-slate-700">
-            {status.notificationPermission}
+            {notificationPermissionLabel(status.notificationPermission)}
           </span>
         </div>
         <div className="mt-4 flex flex-wrap gap-3">
@@ -365,7 +455,7 @@ export default function DesktopSettings({
               disabled={!status.available || busyAction !== null}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {busyAction === 'permission' ? 'Checking…' : 'Enable native notifications'}
+              {busyAction === 'permission' ? 'Verifica…' : 'Abilita notifiche'}
             </button>
           )}
           <button
@@ -374,16 +464,17 @@ export default function DesktopSettings({
             disabled={status.notificationPermission !== 'granted' || busyAction !== null}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busyAction === 'test' ? 'Sending…' : 'Send test notification'}
+            {busyAction === 'test' ? 'Invio…' : 'Invia notifica di test'}
           </button>
         </div>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="text-lg font-bold text-slate-900">Reminder policy</h3>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-indigo-600">Esecuzione</p>
+        <h3 className="mt-1 text-lg font-bold text-slate-900">Avvisi pianificati</h3>
         <p className="mt-1 text-sm text-slate-600">
-          The backend creates version-bound jobs and rereads the current TimeBlock before display.
-          Moved, completed, cancelled, or deleted blocks are suppressed.
+          Il sistema rilegge il TimeBlock corrente prima di mostrare ogni avviso. Blocchi spostati,
+          completati, annullati o eliminati vengono soppressi.
         </p>
 
         <fieldset disabled={preferencesLoading || busyAction !== null} className="mt-5 space-y-5">
@@ -398,16 +489,16 @@ export default function DesktopSettings({
               className="mt-1 h-4 w-4"
             />
             <span>
-              <span className="block font-semibold text-slate-900">Scheduled Desktop reminders</span>
+              <span className="block font-semibold text-slate-900">Avvisi Desktop pianificati</span>
               <span className="block text-sm text-slate-600">
-                Requires native permission above and Life Tracker running in the tray.
+                Richiedono il permesso Windows e Life Tracker attivo nella tray.
               </span>
             </span>
           </label>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-sm font-semibold text-slate-800">
-              Timezone
+              Fuso orario
               <input
                 aria-label="Reminder timezone"
                 value={preferences.timezone}
@@ -419,7 +510,7 @@ export default function DesktopSettings({
               />
             </label>
             <label className="text-sm font-semibold text-slate-800">
-              Minutes before (comma-separated)
+              Minuti prima (separati da virgola)
               <input
                 aria-label="Reminder offsets"
                 inputMode="numeric"
@@ -429,7 +520,7 @@ export default function DesktopSettings({
               />
             </label>
             <label className="text-sm font-semibold text-slate-800">
-              Maximum per block
+              Massimo per blocco
               <input
                 aria-label="Maximum reminders per block"
                 type="number"
@@ -455,7 +546,7 @@ export default function DesktopSettings({
                   atStartEnabled: event.target.checked,
                 }))}
               />
-              Notify at block start
+              Avvisa all’inizio del blocco
             </label>
             <label className="flex items-center gap-2 text-sm text-slate-800">
               <input
@@ -466,12 +557,12 @@ export default function DesktopSettings({
                   missedStart: { ...current.missedStart, enabled: event.target.checked },
                 }))}
               />
-              Missed-start warning
+              Avvisa per avvio mancato
             </label>
           </div>
 
           <label className="block max-w-xs text-sm font-semibold text-slate-800">
-            Missed-start delay (minutes)
+            Ritardo avvio mancato (minuti)
             <input
               aria-label="Missed-start delay"
               type="number"
@@ -499,10 +590,10 @@ export default function DesktopSettings({
                   quietHours: { ...current.quietHours, enabled: event.target.checked },
                 }))}
               />
-              Quiet hours
+              Ore silenziose
             </label>
             <label className="text-sm font-semibold text-slate-800">
-              Quiet from
+              Silenzioso dalle
               <input
                 aria-label="Quiet hours start"
                 type="time"
@@ -515,7 +606,7 @@ export default function DesktopSettings({
               />
             </label>
             <label className="text-sm font-semibold text-slate-800">
-              Quiet until
+              Silenzioso fino alle
               <input
                 aria-label="Quiet hours end"
                 type="time"
@@ -648,6 +739,46 @@ export default function DesktopSettings({
                     />
                   </label>
                 </div>
+                <div className="mt-4 grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void sendWeeklyReviewTest()}
+                    disabled={busyAction !== null || !preferences.emailEnabled || !preferences.weeklyReport.enabled}
+                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {busyAction === 'weekly-review-test' ? 'Generazione e invio…' : 'Invia review settimanale di test'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void refreshWeeklyReviewStatus()}
+                    disabled={busyAction !== null}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {busyAction === 'weekly-review-status' ? 'Verifica…' : 'Verifica pipeline e prossima esecuzione'}
+                  </button>
+                </div>
+                <dl className="mt-4 grid gap-2 text-xs text-slate-700">
+                  <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                    <dt>Prossima esecuzione</dt>
+                    <dd className="font-bold text-slate-900">
+                      {weeklyReviewStatus?.schedule.nextRunAt
+                        ? new Intl.DateTimeFormat('it-IT', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                          timeZone: weeklyReviewStatus.schedule.timezone,
+                        }).format(new Date(weeklyReviewStatus.schedule.nextRunAt))
+                        : 'Verifica stato'}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                    <dt>Ultima consegna</dt>
+                    <dd className="font-bold text-slate-900">
+                      {weeklyReviewStatus?.latest
+                        ? weeklyReviewPipelineLabel(weeklyReviewStatus.latest.deliveryState)
+                        : 'Nessuna conferma caricata'}
+                    </dd>
+                  </div>
+                </dl>
               </div>
             </div>
           </div>
@@ -657,13 +788,13 @@ export default function DesktopSettings({
             onClick={saveReminderPolicy}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {busyAction === 'reminder-policy' ? 'Saving…' : 'Save notification preferences'}
+            {busyAction === 'reminder-policy' ? 'Salvataggio…' : 'Salva avvisi e review'}
           </button>
         </fieldset>
 
         <p className="mt-4 text-xs text-slate-500">
-          WhatsApp and email delivery remain off until you enable them. Provider deployment and
-          credentials are separate backend-only gates.
+          WhatsApp ed email restano disattivati finché non li abiliti. Credenziali e provider
+          restano protetti esclusivamente nel backend.
         </p>
       </div>
 
@@ -677,22 +808,41 @@ export default function DesktopSettings({
             className="mt-1 h-4 w-4"
           />
           <span>
-            <span className="block text-lg font-bold text-slate-900">Start with Windows</span>
+            <span className="block text-xs font-black uppercase tracking-[0.16em] text-indigo-600">Desktop</span>
+            <span className="mt-1 block text-lg font-bold text-slate-900">Avvia con Windows</span>
             <span className="mt-1 block text-sm text-slate-600">
-              Uses the official installed-app autostart entry. Closing the window keeps Life
-              Tracker available in the system tray; Quit exits it completely.
+              Usa l’avvio automatico dell’app installata. Chiudere la finestra mantiene Life
+              Tracker nella tray; Esci termina completamente l’app.
             </span>
           </span>
         </label>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="text-lg font-bold text-slate-900">Cloud connection</h3>
-        <p className="mt-1 break-all font-mono text-xs text-slate-600">{AI_BACKEND_BUILD_ID}</p>
-        <p className="mt-2 text-xs text-slate-500">
-          This is public build routing metadata, not a credential. Provider secrets remain backend-only.
-        </p>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-indigo-600">AI e privacy</p>
+        <h3 className="mt-1 text-lg font-bold text-slate-900">Secure AI attiva</h3>
+        <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
+          <p className="rounded-xl bg-slate-50 p-3"><strong className="block text-slate-900">OpenAI protetta</strong>Le credenziali non entrano nel Desktop.</p>
+          <p className="rounded-xl bg-slate-50 p-3"><strong className="block text-slate-900">MCP sola lettura</strong>Nessuna autorità di scrittura.</p>
+          <p className="rounded-xl bg-slate-50 p-3"><strong className="block text-slate-900">Review limitata</strong>Invia metriche strutturate, non segreti.</p>
+        </div>
       </div>
+
+      <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <summary className="cursor-pointer text-sm font-black uppercase tracking-[0.16em] text-slate-700">Avanzate e diagnostica</summary>
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+          <StatusItem label="Runtime" value={RUNTIME_TARGET} />
+          <StatusItem label="Ambiente" value={DEPLOYMENT_ENVIRONMENT} />
+          <StatusItem
+            label="Bridge nativo"
+            value={loading ? 'verifica' : status.available ? 'disponibile' : 'non disponibile'}
+          />
+        </dl>
+        <p className="mt-4 break-all font-mono text-xs text-slate-600">{AI_BACKEND_BUILD_ID}</p>
+        <p className="mt-2 text-xs text-slate-500">
+          Metadato pubblico di instradamento della build; non è una credenziale.
+        </p>
+      </details>
 
       {message && <p role="status" className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{message}</p>}
       {error && <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
@@ -707,4 +857,31 @@ function StatusItem({ label, value }: { readonly label: string; readonly value: 
       <dd className="mt-1 font-mono text-sm text-slate-900">{value}</dd>
     </div>
   );
+}
+
+function weeklyReviewPipelineLabel(
+  state: WeeklyReviewStatusResponse['pipelineState'],
+): string {
+  return {
+    NOT_DUE: 'Non ancora dovuta',
+    GENERATING: 'Generazione in corso',
+    ARCHIVED: 'Archiviata',
+    INTERPRETING: 'Interpretazione in corso',
+    COMPOSED: 'Email composta',
+    SENDING: 'Invio in corso',
+    PROVIDER_ACCEPTED: 'Accettata dal provider',
+    RETRY_PENDING: 'Nuovo tentativo programmato',
+    FAILED: 'Consegna da verificare',
+  }[state];
+}
+
+function notificationPermissionLabel(
+  value: DesktopNativeStatus['notificationPermission'],
+): string {
+  return {
+    granted: 'ABILITATE',
+    denied: 'DISABILITATE',
+    prompt: 'DA CONFIGURARE',
+    unavailable: 'NON DISPONIBILI',
+  }[value];
 }

@@ -16,6 +16,7 @@ import {
   REPORT_EMAIL_SCHEMA_VERSION,
   REPORT_EMAIL_TEMPLATE_VERSION,
   reportEmailContentHash,
+  reportEmailIdempotencyKey,
   validateComposedScientificReportEmail,
   type ComposedScientificReportEmail,
   type ReportEmailAttachment,
@@ -399,8 +400,13 @@ function strategicInterpretation(interpretation: WeeklyStrategicInterpretation):
     createElement('p', { style: TEXT_STYLE },
       createElement('strong', null, `${interpretation.summaryKind} SUMMARY: `),
       interpretation.summary),
+    interpretationStatement('Biggest win', interpretation.biggestWin),
+    interpretationStatement('Biggest miss', interpretation.biggestMiss),
+    interpretationStatement('Priority mismatch', interpretation.priorityMismatch),
     interpretationStatement('Strongest pattern', interpretation.strongestPattern),
     interpretationStatement('Largest uncertainty', interpretation.largestUncertainty),
+    ...interpretation.topCorrections.map((correction, index) =>
+      interpretationStatement(`Correction ${index + 1}`, correction)),
     interpretationStatement('Reversible experiment', interpretation.nextWeekExperiment),
     createElement('p', { style: MUTED_STYLE },
       `Optional model ${interpretation.model} · prompt ${interpretation.promptVersion} · artifact ${interpretation.artifactHash.slice(0, 16)}.`),
@@ -452,71 +458,104 @@ function weeklySections(
   attachments: readonly ReportEmailAttachment[],
   interpretation: WeeklyStrategicInterpretation | null,
 ): readonly ReactNode[] {
+  const completedCommitments = report.metrics.daily.reduce(
+    (total, point) => total + point.completedBlocks,
+    0,
+  );
+  const eligibleCommitments = report.metrics.daily.reduce(
+    (total, point) => total + point.eligibleBlocks,
+    0,
+  );
+  const missedCommitments = Math.max(0, eligibleCommitments - completedCommitments);
+  const activeDays = report.metrics.daily.filter((point) => (
+    point.completedBlocks > 0
+    || point.completedTasks > 0
+    || (point.actualMinutes ?? 0) > 0
+  )).length;
   return [
-    section('1-summary', '1. Executive Summary', paragraphs(report.executiveSummary)),
-    section('2-index', '2. Weekly Execution Index', metricParagraph(
-      'Weekly Execution Index', report.metrics.weeklyExecutionIndex,
-    )),
-    section('3-planned-actual', '3. Planned vs Actual', createElement('div', null,
+    section('1-scorecard', '1. EXECUTION SCORECARD', createElement('div', null,
       metricGrid([
         ['planned', 'Planned time', report.metrics.plannedMinutes],
         ['actual', 'Actual Session time', report.metrics.actualMinutes],
         ['adherence', 'Adherence', report.metrics.adherencePercent],
-        ['variance', 'Planned-vs-actual variance', report.metrics.varianceMinutes],
+        ['tasks', 'Completed commitments', report.metrics.taskCompletionPercent],
+        ['alignment', 'Goal allocation', report.metrics.goalAlignmentIndex],
+        ['index', 'Execution score', report.metrics.weeklyExecutionIndex],
       ]),
+      createElement('p', { style: TEXT_STYLE },
+        `${completedCommitments} completed commitments · ${missedCommitments} missed commitments · ${activeDays} active days.`),
+    )),
+    section('2-planned', '2. WHAT YOU PLANNED', paragraphs(report.executiveSummary.slice(0, 2))),
+    section('3-actual', '3. WHAT YOU ACTUALLY DID', createElement('div', null,
+      metricParagraph('Actual Session time', report.metrics.actualMinutes),
+      metricParagraph('Completed TimeBlocks', report.metrics.timeBlockCompletionPercent),
+      metricParagraph('Completed Tasks', report.metrics.taskCompletionPercent),
+    )),
+    section('4-missed', '4. WHAT YOU DID NOT DO', createElement('p', { style: TEXT_STYLE },
+      `${missedCommitments} eligible TimeBlock commitments have no completion evidence. Missing Session evidence remains unknown, never zero.`),
+    ),
+    section('5-alignment', '5. PRIORITY ALIGNMENT', createElement('div', null,
+      metricParagraph('Goal Alignment Index', report.metrics.goalAlignmentIndex),
+      createElement('p', { style: TEXT_STYLE },
+        'Stated priority is compared with deterministic Goal-linked time allocation; unattributed work remains explicit in data quality.'),
+    )),
+    section('6-planned-actual', '6. PLANNED VS ACTUAL CHART', createElement('div', null,
       chartFigures(report, attachments, new Set(['planned_vs_actual_by_day'])),
     )),
-    section('4-goals', '4. Goal Allocation', chartFigures(
+    section('7-goals', '7. GOAL ALLOCATION CHART', chartFigures(
       report, attachments, new Set(['goal_allocation']),
     )),
-    section('5-time', '5. Completion by Time of Day', createElement('div', null,
-      metricParagraph('TimeBlock completion', report.metrics.timeBlockCompletionPercent),
+    section('8-time', '8. TIME-OF-DAY EXECUTION CHART', createElement('div', null,
       chartFigures(report, attachments, new Set(['completion_by_time_of_day'])),
     )),
-    section('6-capacity', '6. Capacity', metricParagraph(
-      'Capacity utilization', report.metrics.capacityUtilizationPercent,
-    )),
-    section('7-deep', '7. Deep Work', metricParagraph(
-      'Deep-work time', report.metrics.deepWorkMinutes,
-    )),
-    section('8-habit', '8. Habit Adherence', metricParagraph(
-      'Habit adherence', report.metrics.habitAdherencePercent,
-    )),
-    section('9-estimation', '9. Estimation Error', createElement('div', null,
+    section('9-estimation', '9. ESTIMATION ERROR CHART', createElement('div', null,
       metricParagraph('Mean absolute error', report.metrics.estimationErrorMeanAbsoluteMinutes),
       metricParagraph('Relative estimation error', report.metrics.estimationErrorPercent),
       metricParagraph('Measured overrun', report.metrics.overrunMinutes),
+      chartFigures(report, attachments, new Set(['estimation_error'])),
     )),
-    section('10-carryover', '10. Carryover', metricParagraph(
-      'Carryover Tasks', report.metrics.carryoverTasks,
-    )),
-    section('11-volatility', '11. Schedule Volatility', metricParagraph(
-      'Schedule volatility', report.metrics.scheduleVolatility,
-    )),
-    section('12-trends', '12. Rolling 4-week Context', chartFigures(
+    section('10-trends', '10. FOUR-WEEK TREND CHART', chartFigures(
       report, attachments, new Set(['four_week_trend', 'adherence_trend']),
     )),
-    section('13-pattern', '13. Strongest Observed Pattern', createElement(
-      'p', { style: TEXT_STYLE }, report.strongestObservedPattern,
+    section('11-win', '11. BIGGEST WIN', createElement(
+      'p', { style: TEXT_STYLE }, interpretation?.biggestWin.text ?? report.strongestObservedPattern,
     )),
-    section('14-uncertainty', '14. Largest Uncertainty', createElement(
-      'p', { style: TEXT_STYLE }, report.largestUncertainty,
+    section('12-miss', '12. BIGGEST MISS', createElement(
+      'p', { style: TEXT_STYLE },
+      interpretation?.biggestMiss.text ?? (missedCommitments > 0
+        ? 'The largest deterministic miss is the gap between eligible and completed TimeBlock commitments.'
+        : 'No completed-versus-eligible commitment gap is visible in the available evidence.'),
     )),
-    section('15-experiments', '15. Next-week Experiments and Recommendations', paragraphs(
-      report.nextWeekExperiments,
+    section('13-priority-mismatch', '13. PRIORITY MISMATCH', createElement('div', null,
+      metricParagraph('Goal Alignment Index', report.metrics.goalAlignmentIndex),
+      createElement('p', { style: TEXT_STYLE },
+        interpretation?.priorityMismatch.text
+          ?? 'Any mismatch statement is bounded by Goal-linked allocation and does not infer intent from missing evidence.'),
     )),
-    ...(interpretation ? [section(
-      'strategic-interpretation',
-      'Optional Strategic Interpretation Addendum',
-      strategicInterpretation(interpretation),
-    )] : []),
-    section('statements', 'Scientific Statements', scientificStatements(report)),
-    section('16-methodology', '16. Methodology and Data Quality', createElement('div', null,
+    section('14-pattern', '14. STRONGEST PATTERN', createElement(
+      'p', { style: TEXT_STYLE }, interpretation?.strongestPattern.text ?? report.strongestObservedPattern,
+    )),
+    section('15-uncertainty', '15. LARGEST UNCERTAINTY', createElement(
+      'p', { style: TEXT_STYLE }, interpretation?.largestUncertainty.text ?? report.largestUncertainty,
+    )),
+    section('16-corrections', '16. NEXT WEEK — TOP 3 CORRECTIONS', paragraphs(
+      interpretation?.topCorrections.map((correction) => correction.text)
+        ?? report.nextWeekExperiments.slice(0, 3),
+    )),
+    section('17-experiment', '17. NEXT-WEEK EXPERIMENT', createElement(
+      'p', { style: TEXT_STYLE },
+      interpretation?.nextWeekExperiment.text
+        ?? report.nextWeekExperiments[0]
+        ?? 'Keep one planning variable stable and capture every completed Session before comparing again.'),
+    ),
+    section('18-quality', '18. DATA QUALITY', createElement('div', null,
       createElement('p', { style: TEXT_STYLE },
         `Metrics ${report.methodology.metricSchemaVersion}; formulas ${report.methodology.formulaVersion}.`),
       createElement('p', { style: TEXT_STYLE },
         'Actual time uses completed Sessions first, then explicit actual intervals without double counting. Missing Sessions are unknown, never zero. Associations are not causal claims.'),
       dataQuality(report),
+      scientificStatements(report),
+      ...(interpretation ? [strategicInterpretation(interpretation)] : []),
     )),
   ];
 }
@@ -576,9 +615,12 @@ function emailTree(
           createElement('p', {
             style: { margin: '0 0 6px', color: '#93c5fd', fontSize: '13px', fontWeight: 700, letterSpacing: '0.08em' },
           }, 'LIFE TRACKER'),
+          createElement('p', {
+            style: { margin: '0 0 12px', color: '#c4b5fd', fontSize: '11px', fontWeight: 700, letterSpacing: '0.14em' },
+          }, 'PRECISION PERFORMANCE OS'),
           createElement('h1', {
             style: { margin: 0, color: '#ffffff', fontSize: '26px', lineHeight: '34px' },
-          }, report.type === 'daily' ? 'Daily Execution Report' : 'Weekly Scientific Report'),
+          }, report.type === 'daily' ? 'Daily Execution Report' : 'Weekly Executive Review'),
           createElement('p', {
             style: { margin: '8px 0 0', color: '#cbd5e1', fontSize: '13px', lineHeight: '19px' },
           }, `${report.period.localStartDate} → ${report.period.localEndDate} (end exclusive) · ${report.period.timezone}`),
@@ -623,7 +665,8 @@ function statementsText(report: ScientificExecutionReport): string[] {
 function commonTextHeader(report: ScientificExecutionReport): string[] {
   return [
     'LIFE TRACKER',
-    report.type === 'daily' ? 'DAILY EXECUTION REPORT' : 'WEEKLY SCIENTIFIC REPORT',
+    'PRECISION PERFORMANCE OS',
+    report.type === 'daily' ? 'DAILY EXECUTION REPORT' : 'WEEKLY EXECUTIVE REVIEW',
     `Period: ${report.period.localStartDate} to ${report.period.localEndDate} (end exclusive)`,
     `Timezone: ${report.period.timezone}`,
     `Generated: ${report.generatedAt}`,
@@ -676,80 +719,100 @@ function weeklyText(
   report: WeeklyExecutionReport,
   interpretation: WeeklyStrategicInterpretation | null,
 ): string[] {
+  const completedCommitments = report.metrics.daily.reduce(
+    (total, point) => total + point.completedBlocks,
+    0,
+  );
+  const eligibleCommitments = report.metrics.daily.reduce(
+    (total, point) => total + point.eligibleBlocks,
+    0,
+  );
+  const missedCommitments = Math.max(0, eligibleCommitments - completedCommitments);
+  const activeDays = report.metrics.daily.filter((point) => (
+    point.completedBlocks > 0
+    || point.completedTasks > 0
+    || (point.actualMinutes ?? 0) > 0
+  )).length;
   return [
-    '1. EXECUTIVE SUMMARY',
-    ...report.executiveSummary.map((line) => `- ${line}`),
-    '',
-    '2. WEEKLY EXECUTION INDEX',
-    metricLine('Weekly Execution Index', report.metrics.weeklyExecutionIndex),
-    '',
-    '3. PLANNED VS ACTUAL',
+    '1. EXECUTION SCORECARD',
     metricLine('Planned time', report.metrics.plannedMinutes),
     metricLine('Actual Session time', report.metrics.actualMinutes),
     metricLine('Adherence', report.metrics.adherencePercent),
-    metricLine('Variance', report.metrics.varianceMinutes),
+    metricLine('Completed commitments', report.metrics.taskCompletionPercent),
+    metricLine('Goal allocation', report.metrics.goalAlignmentIndex),
+    `${completedCommitments} completed commitments; ${missedCommitments} missed commitments; ${activeDays} active days.`,
     '',
-    '4. GOAL ALLOCATION',
+    '2. WHAT YOU PLANNED',
+    ...report.executiveSummary.slice(0, 2).map((line) => `- ${line}`),
+    '',
+    '3. WHAT YOU ACTUALLY DID',
+    metricLine('Actual Session time', report.metrics.actualMinutes),
+    metricLine('TimeBlock completion', report.metrics.timeBlockCompletionPercent),
+    metricLine('Task completion', report.metrics.taskCompletionPercent),
+    '',
+    '4. WHAT YOU DID NOT DO',
+    `${missedCommitments} eligible TimeBlock commitments have no completion evidence. Missing Session evidence remains unknown, never zero.`,
+    '',
+    '5. PRIORITY ALIGNMENT',
+    metricLine('Goal Alignment Index', report.metrics.goalAlignmentIndex),
+    '',
+    '6. PLANNED VS ACTUAL CHART',
+    'See the deterministic planned-versus-actual chart attached inline in HTML.',
+    '',
+    '7. GOAL ALLOCATION CHART',
     'See the deterministic Goal allocation chart attached inline in HTML.',
     '',
-    '5. COMPLETION BY TIME OF DAY',
-    metricLine('TimeBlock completion', report.metrics.timeBlockCompletionPercent),
+    '8. TIME-OF-DAY EXECUTION CHART',
+    'See the deterministic time-of-day chart attached inline in HTML.',
     '',
-    '6. CAPACITY',
-    metricLine('Capacity utilization', report.metrics.capacityUtilizationPercent),
-    '',
-    '7. DEEP WORK',
-    metricLine('Deep-work time', report.metrics.deepWorkMinutes),
-    '',
-    '8. HABIT ADHERENCE',
-    metricLine('Habit adherence', report.metrics.habitAdherencePercent),
-    '',
-    '9. ESTIMATION ERROR',
+    '9. ESTIMATION ERROR CHART',
     metricLine('Mean absolute error', report.metrics.estimationErrorMeanAbsoluteMinutes),
     metricLine('Relative estimation error', report.metrics.estimationErrorPercent),
     metricLine('Measured overrun', report.metrics.overrunMinutes),
     '',
-    '10. CARRYOVER',
-    metricLine('Carryover Tasks', report.metrics.carryoverTasks),
+    '10. FOUR-WEEK TREND CHART',
+    'See the deterministic adherence and four-week trend charts attached inline in HTML.',
     '',
-    '11. SCHEDULE VOLATILITY',
-    metricLine('Schedule volatility', report.metrics.scheduleVolatility),
+    '11. BIGGEST WIN',
+    interpretation?.biggestWin.text ?? report.strongestObservedPattern,
     '',
-    '12. ROLLING 4-WEEK CONTEXT',
-    ...chartsText(report),
+    '12. BIGGEST MISS',
+    interpretation?.biggestMiss.text ?? (missedCommitments > 0
+      ? 'The largest deterministic miss is the gap between eligible and completed TimeBlock commitments.'
+      : 'No completed-versus-eligible commitment gap is visible in the available evidence.'),
     '',
-    '13. STRONGEST OBSERVED PATTERN',
-    report.strongestObservedPattern,
+    '13. PRIORITY MISMATCH',
+    metricLine('Goal Alignment Index', report.metrics.goalAlignmentIndex),
+    interpretation?.priorityMismatch.text
+      ?? 'Any mismatch statement is bounded by Goal-linked allocation and missing evidence.',
     '',
-    '14. LARGEST UNCERTAINTY',
-    report.largestUncertainty,
+    '14. STRONGEST PATTERN',
+    interpretation?.strongestPattern.text ?? report.strongestObservedPattern,
     '',
-    '15. NEXT-WEEK EXPERIMENTS AND RECOMMENDATIONS',
-    ...report.nextWeekExperiments.map((line) => `- ${line}`),
+    '15. LARGEST UNCERTAINTY',
+    interpretation?.largestUncertainty.text ?? report.largestUncertainty,
     '',
-    ...(interpretation ? [
-      'OPTIONAL STRATEGIC INTERPRETATION ADDENDUM',
-      `${interpretation.summaryKind} SUMMARY: ${interpretation.summary}`,
-      `${interpretation.strongestPattern.kind}: ${interpretation.strongestPattern.text}`,
-      `Metric references: ${interpretation.strongestPattern.metricIds.join(', ')}; confidence: ${interpretation.strongestPattern.confidence}.`,
-      `Uncertainty: ${interpretation.strongestPattern.uncertainty}`,
-      `${interpretation.largestUncertainty.kind}: ${interpretation.largestUncertainty.text}`,
-      `Metric references: ${interpretation.largestUncertainty.metricIds.join(', ')}; confidence: ${interpretation.largestUncertainty.confidence}.`,
-      `Uncertainty: ${interpretation.largestUncertainty.uncertainty}`,
-      `${interpretation.nextWeekExperiment.kind}: ${interpretation.nextWeekExperiment.text}`,
-      `Metric references: ${interpretation.nextWeekExperiment.metricIds.join(', ')}; confidence: ${interpretation.nextWeekExperiment.confidence}.`,
-      `Uncertainty: ${interpretation.nextWeekExperiment.uncertainty}`,
-      `Model: ${interpretation.model}; prompt: ${interpretation.promptVersion}; artifact: ${interpretation.artifactHash}.`,
-      'This addendum has no numerical authority and cannot modify metrics, charts, or execution state.',
-      '',
-    ] : []),
-    'SCIENTIFIC STATEMENTS',
-    ...statementsText(report),
+    '16. NEXT WEEK — TOP 3 CORRECTIONS',
+    ...(interpretation?.topCorrections.map((correction) => correction.text)
+      ?? report.nextWeekExperiments.slice(0, 3)).map((line) => `- ${line}`),
     '',
-    '16. METHODOLOGY AND DATA QUALITY',
+    '17. NEXT-WEEK EXPERIMENT',
+    interpretation?.nextWeekExperiment.text
+      ?? report.nextWeekExperiments[0]
+      ?? 'Keep one planning variable stable and capture every completed Session before comparing again.',
+    '',
+    '18. DATA QUALITY',
     `Metrics: ${report.methodology.metricSchemaVersion}; formulas: ${report.methodology.formulaVersion}.`,
     'Actual time uses completed Sessions first, then explicit actual intervals without double counting.',
     'Missing Sessions are unknown, never zero. Associations are not causal claims.',
+    ...statementsText(report),
+    ...(interpretation ? [
+      `${interpretation.summaryKind} SUMMARY: ${interpretation.summary}`,
+      `Metric references: ${interpretation.strongestPattern.metricIds.join(', ')}; confidence: ${interpretation.strongestPattern.confidence}.`,
+      `Uncertainty: ${interpretation.strongestPattern.uncertainty}`,
+      `Model: ${interpretation.model}; prompt: ${interpretation.promptVersion}; artifact: ${interpretation.artifactHash}.`,
+      'This interpretation has no numerical authority and cannot modify metrics, charts, or execution state.',
+    ] : []),
   ];
 }
 
@@ -773,7 +836,13 @@ function textFallback(
 function subjectFor(report: ScientificExecutionReport): string {
   return report.type === 'daily'
     ? `Life Tracker Daily Execution Report — ${report.period.localStartDate}`
-    : `Life Tracker Weekly Scientific Report — week of ${report.period.localStartDate}`;
+    : `Life Tracker — Weekly Executive Review · ${report.period.localStartDate} → ${shiftDate(report.period.localEndDate, -1)}`;
+}
+
+function shiftDate(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeReactEmailHtml(value: string): string {
@@ -809,7 +878,11 @@ export async function composeScientificReportEmail(
       html,
       text,
       attachments,
-      idempotencyKey: `life-tracker-report/${report.id}`,
+      idempotencyKey: reportEmailIdempotencyKey(
+        report.id,
+        input.archive.artifactHash,
+        REPORT_EMAIL_TEMPLATE_VERSION,
+      ),
     });
     const email: ComposedScientificReportEmail = Object.freeze({
       ...content,

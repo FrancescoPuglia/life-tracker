@@ -170,17 +170,17 @@ export default function PlanVsActualChart({
 
   return (
     <section
-      aria-label="Plan vs Reality chart"
+      aria-label="Grafico piano ed esecuzione"
       className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
       data-testid="plan-vs-actual-chart"
     >
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <div>
-          <h3 className="text-sm font-bold text-slate-900">Plan vs Reality</h3>
+          <h3 className="text-sm font-bold text-slate-900">Piano ed esecuzione reale</h3>
           <p className="text-xs text-slate-500">
             {mode === 'buckets'
-              ? `Planned next to executed time per ${period.type === 'year' ? 'month' : 'day'}`
-              : 'Running totals — is the gap growing or closing?'}
+              ? `Tempo pianificato ed eseguito per ${period.type === 'year' ? 'mese' : 'giorno'}`
+              : 'Totali progressivi: lo scarto cresce o si riduce?'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -188,22 +188,22 @@ export default function PlanVsActualChart({
           <div className="hidden sm:flex items-center gap-3 text-[11px] text-slate-600">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: CHART_COLORS.planned }} aria-hidden="true" />
-              Planned
+              Pianificato
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: CHART_COLORS.actual }} aria-hidden="true" />
-              Actual
+              Eseguito
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: CHART_COLORS.unplanned }} aria-hidden="true" />
-              Unplanned
+              Non pianificato
             </span>
           </div>
-          <div role="group" aria-label="Chart view" className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+          <div role="group" aria-label="Vista grafico" className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
             {(
               [
-                ['buckets', period.type === 'year' ? 'Monthly' : 'Daily'],
-                ['cumulative', 'Cumulative'],
+                ['buckets', period.type === 'year' ? 'Mensile' : 'Giornaliero'],
+                ['cumulative', 'Cumulativo'],
               ] as Array<[ViewMode, string]>
             ).map(([value, label]) => (
               <button
@@ -267,7 +267,7 @@ export default function PlanVsActualChart({
               {mode === 'buckets' && (
                   <Bar
                     dataKey="plannedMinutes"
-                    name="Planned"
+                    name="Pianificato"
                     maxBarSize={barSize}
                     radius={[4, 4, 0, 0]}
                     isAnimationActive={false}
@@ -284,7 +284,7 @@ export default function PlanVsActualChart({
               {mode === 'buckets' && (
                   <Bar
                     dataKey="plannedExecutedMinutes"
-                    name="Actual (planned)"
+                    name="Eseguito pianificato"
                     stackId="actual"
                     maxBarSize={barSize}
                     isAnimationActive={false}
@@ -301,7 +301,7 @@ export default function PlanVsActualChart({
               {mode === 'buckets' && (
                   <Bar
                     dataKey="unplannedMinutes"
-                    name="Actual (unplanned)"
+                    name="Eseguito non pianificato"
                     stackId="actual"
                     maxBarSize={barSize}
                     radius={[2, 2, 0, 0]}
@@ -322,7 +322,7 @@ export default function PlanVsActualChart({
                   <Line
                     type="monotone"
                     dataKey="cumulativePlannedMinutes"
-                    name="Planned (cumulative)"
+                    name="Pianificato cumulativo"
                     stroke={CHART_COLORS.planned}
                     strokeWidth={2}
                     dot={false}
@@ -334,7 +334,7 @@ export default function PlanVsActualChart({
                   <Line
                     type="monotone"
                     dataKey="cumulativeActualMinutes"
-                    name="Actual (cumulative)"
+                    name="Eseguito cumulativo"
                     stroke={CHART_COLORS.actualLine}
                     strokeWidth={2}
                     dot={false}
@@ -353,14 +353,14 @@ export default function PlanVsActualChart({
           horizontal scroll on narrow viewports. */}
       <div className="sr-only">
       <table>
-        <caption>Planned and actual minutes per {period.type === 'year' ? 'month' : 'day'}</caption>
+        <caption>Minuti pianificati ed eseguiti per {period.type === 'year' ? 'mese' : 'giorno'}</caption>
         <thead>
           <tr>
-            <th scope="col">Bucket</th>
-            <th scope="col">Planned</th>
-            <th scope="col">Actual</th>
-            <th scope="col">Unplanned</th>
-            <th scope="col">Variance</th>
+            <th scope="col">Periodo</th>
+            <th scope="col">Pianificato</th>
+            <th scope="col">Eseguito</th>
+            <th scope="col">Non pianificato</th>
+            <th scope="col">Scarto</th>
           </tr>
         </thead>
         <tbody>

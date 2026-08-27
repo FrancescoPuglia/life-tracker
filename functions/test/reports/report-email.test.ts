@@ -150,14 +150,18 @@ describe('deterministic scientific report email composition', () => {
     expect(first.templateVersion).toBe(REPORT_EMAIL_TEMPLATE_VERSION);
     expect(first).toEqual(retry);
     expect(first.attachments).toHaveLength(source.report.charts.length);
-    expect(first.idempotencyKey).toBe(`life-tracker-report/${source.id}`);
+    expect(first.idempotencyKey).toMatch(/^life-tracker-report-v3\/[0-9a-f]{64}$/);
     expect(first.contentHash).toMatch(/^[0-9a-f]{64}$/);
     expect(() => validateComposedScientificReportEmail(first)).not.toThrow();
     expect(first.html).toMatch(/^<!doctype html>/);
     expect(first.html).not.toMatch(/https?:\/\//i);
     expect(first.html).toContain('name="viewport"');
     expect(first.html).toContain('max-width:696px');
-    for (let section = 1; section <= 16; section += 1) {
+    expect(first.subject).toBe(
+      'Life Tracker — Weekly Executive Review · 2026-08-17 → 2026-08-23',
+    );
+    expect(first.html).toContain('PRECISION PERFORMANCE OS');
+    for (let section = 1; section <= 18; section += 1) {
       expect(first.html).toContain(`${section}.`);
       expect(first.text).toContain(`${section}.`);
     }

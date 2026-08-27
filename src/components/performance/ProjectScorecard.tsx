@@ -31,14 +31,14 @@ type SortKey =
   | 'lastActivityAt';
 
 const COLUMNS: Array<{ key: SortKey; label: string; numeric: boolean; title?: string }> = [
-  { key: 'projectName', label: 'Project', numeric: false },
-  { key: 'plannedMinutes', label: 'Planned', numeric: true },
-  { key: 'actualMinutes', label: 'Actual', numeric: true },
-  { key: 'varianceMinutes', label: 'Variance', numeric: true, title: 'Actual − planned' },
-  { key: 'completedTasksInPeriod', label: 'Done', numeric: true, title: 'Tasks completed in the period' },
-  { key: 'openTasks', label: 'Open', numeric: true, title: 'Currently open tasks' },
-  { key: 'carryOverTasks', label: 'Carry', numeric: true, title: 'Planned tasks that slipped' },
-  { key: 'lastActivityAt', label: 'Last activity', numeric: true },
+  { key: 'projectName', label: 'Progetto', numeric: false },
+  { key: 'plannedMinutes', label: 'Pianificato', numeric: true },
+  { key: 'actualMinutes', label: 'Eseguito', numeric: true },
+  { key: 'varianceMinutes', label: 'Scarto', numeric: true, title: 'Eseguito − pianificato' },
+  { key: 'completedTasksInPeriod', label: 'Completate', numeric: true, title: 'Attività completate nel periodo' },
+  { key: 'openTasks', label: 'Aperte', numeric: true, title: 'Attività attualmente aperte' },
+  { key: 'carryOverTasks', label: 'Rinviate', numeric: true, title: 'Attività pianificate slittate' },
+  { key: 'lastActivityAt', label: 'Ultima attività', numeric: true },
 ];
 
 function sortValue(p: ProjectPerformance, key: SortKey): number | string {
@@ -78,26 +78,26 @@ export default function ProjectScorecard({
   if (projects.length === 0) {
     return (
       <section
-        aria-label="Project performance"
+        aria-label="Rendimento progetti"
         className="rounded-2xl border border-slate-200 bg-white p-5"
         data-testid="project-scorecard"
       >
-        <h3 className="text-sm font-bold text-slate-900 mb-1">Project Scorecard</h3>
-        <p className="text-sm text-slate-400 py-4 text-center">No projects with data in this period.</p>
+        <h3 className="text-sm font-bold text-slate-900 mb-1">Scheda progetti</h3>
+        <p className="text-sm text-slate-400 py-4 text-center">Nessun progetto con dati nel periodo.</p>
       </section>
     );
   }
 
   return (
     <section
-      aria-label="Project performance"
+      aria-label="Rendimento progetti"
       className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
       data-testid="project-scorecard"
     >
       <div className="mb-3">
-        <h3 className="text-sm font-bold text-slate-900">Project Scorecard</h3>
+        <h3 className="text-sm font-bold text-slate-900">Scheda progetti</h3>
         <p className="text-xs text-slate-500">
-          Which projects advanced, which absorbed time without progress — sort any column
+          Quali progetti sono avanzati e quali hanno assorbito tempo senza progresso.
         </p>
       </div>
 
@@ -137,7 +137,7 @@ export default function ProjectScorecard({
                 </th>
               ))}
               <th scope="col" className="py-2 px-2 text-right font-semibold text-slate-500">
-                Status
+                Stato
               </th>
             </tr>
           </thead>
@@ -157,7 +157,7 @@ export default function ProjectScorecard({
                         type="button"
                         onClick={() => onSelectProject(isActive ? null : project.projectId)}
                         aria-pressed={isActive}
-                        title={isActive ? 'Clear project focus' : 'Focus dashboard on this project'}
+                        title={isActive ? 'Rimuovi filtro progetto' : 'Filtra il cruscotto su questo progetto'}
                         className={`p-1 rounded-md border ${
                           isActive
                             ? 'border-blue-300 bg-blue-100 text-blue-700'
@@ -239,13 +239,13 @@ export default function ProjectScorecard({
                 </div>
                 <div className="mt-1.5 grid grid-cols-3 gap-1 text-[11px] text-slate-500 tabular-nums">
                   <span>
-                    Actual <strong className="text-slate-800">{formatMinutes(project.actualMinutes)}</strong>
+                    Eseguito <strong className="text-slate-800">{formatMinutes(project.actualMinutes)}</strong>
                   </span>
                   <span>
-                    Plan <strong className="text-slate-800">{formatMinutes(project.plannedMinutes)}</strong>
+                    Piano <strong className="text-slate-800">{formatMinutes(project.plannedMinutes)}</strong>
                   </span>
                   <span>
-                    Done <strong className="text-slate-800">{project.completedTasksInPeriod}</strong> · Open{' '}
+                    Completate <strong className="text-slate-800">{project.completedTasksInPeriod}</strong> · Aperte{' '}
                     <strong className="text-slate-800">{project.openTasks}</strong>
                   </span>
                 </div>

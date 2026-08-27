@@ -264,7 +264,7 @@ describe('deterministic accessible report chart rendering', () => {
     const before = canonicalJson(report);
     const rendered = await renderReportCharts(report.charts);
 
-    expect(rendered).toHaveLength(5);
+    expect(rendered).toHaveLength(6);
     expect(new Set(rendered.map(({ svg }) => svg.sourceDataHash))).toEqual(
       new Set(report.charts.map(({ dataHash }) => dataHash)),
     );

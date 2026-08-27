@@ -87,23 +87,23 @@ type ActiveTab = 'today' | 'planner' | 'smart_scheduler' | 'adaptation' | 'micro
 
 const PAGE_TITLES: Record<ActiveTab, string> = {
   today: 'Oggi',
-  planner: 'Time Planner',
-  smart_scheduler: 'Auto Scheduler',
+  planner: 'Pianificazione',
+  smart_scheduler: 'Pianificazione automatica',
   adaptation: 'Adatta piano',
   micro_coach: 'AI Coach',
   habits: 'Abitudini',
   okr: 'Obiettivi e progetti',
-  performance: 'Performance',
-  analytics: 'Analytics',
-  reports: 'Report',
-  goal_analytics: 'Goal Intelligence',
+  performance: 'Rendimento',
+  analytics: 'Analisi',
+  reports: 'Review executive',
+  goal_analytics: 'Intelligenza obiettivi',
   badges: 'Traguardi',
-  'vision-board': 'Vision Board',
+  'vision-board': 'Bacheca visiva',
   notes: 'Second Brain',
   events: 'Calendario strategico',
   weekly: 'Esecuzione settimanale',
   weekly_intel: 'Piano settimanale',
-  goal_architect: 'Goal Architect',
+  goal_architect: 'Architetto obiettivi',
   voice: 'Voce',
   settings: 'Impostazioni',
 };
@@ -744,7 +744,7 @@ export default function MainApp({ buildId }: MainAppProps) {
                   <div className="p-6">
                     <div className="max-w-4xl mx-auto">
                       <div className="mb-6">
-                        <h1 className="text-2xl font-bold text-gray-900 mb-2">🧠 AI Assistant</h1>
+                        <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 mb-2"><Brain size={23} aria-hidden="true" /> Assistente AI</h1>
                         <p className="text-gray-600">Il tuo assistente intelligente che vede tutto e ti aiuta a ottimizzare la produttività</p>
                       </div>
                       

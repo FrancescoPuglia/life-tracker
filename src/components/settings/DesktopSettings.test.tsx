@@ -34,27 +34,36 @@ describe('Desktop settings', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+  });
+
+  it('applies and persists the global theme without server connectivity', async () => {
+    renderSettings();
+    fireEvent.click(await screen.findByRole('radio', { name: /Scuro/i }));
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(localStorage.getItem('life-tracker.appearance.v1')).toContain('"mode":"dark"');
   });
 
   it('does not request native notification permission on mount', async () => {
     renderSettings();
-    await screen.findByText('prompt');
+    await screen.findByText('DA CONFIGURARE');
     expect(bridge.requestNotificationPermission).not.toHaveBeenCalled();
   });
 
   it('requests permission only after the user action and enables a safe test', async () => {
     renderSettings();
-    fireEvent.click(await screen.findByRole('button', { name: 'Enable native notifications' }));
-    await screen.findByText('Native notifications are enabled.');
+    fireEvent.click(await screen.findByRole('button', { name: 'Abilita notifiche' }));
+    await screen.findByText('Notifiche native abilitate.');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Send test notification' }));
-    await screen.findByText(/clicking it only opens and focuses/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Invia notifica di test' }));
+    await screen.findByText(/clic apre soltanto Life Tracker/i);
     expect(bridge.sendTestNotification).toHaveBeenCalledTimes(1);
   });
 
   it('persists and reflects the authoritative autostart state', async () => {
     renderSettings();
-    const checkbox = await screen.findByRole('checkbox', { name: /Start with Windows/i });
+    const checkbox = await screen.findByRole('checkbox', { name: /Avvia con Windows/i });
     fireEvent.click(checkbox);
     await waitFor(() => expect(bridge.setAutostart).toHaveBeenCalledWith(true));
     expect(checkbox).toBeChecked();
@@ -65,21 +74,21 @@ describe('Desktop settings', () => {
       new Error('secret provider detail'),
     );
     renderSettings();
-    fireEvent.click(await screen.findByRole('button', { name: 'Enable native notifications' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Abilita notifiche' }));
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('failed safely');
+    expect(alert).toHaveTextContent('chiusa in sicurezza');
     expect(alert).not.toHaveTextContent('secret provider detail');
   });
 
   it('validates and persists an owner-scoped Desktop reminder policy', async () => {
     renderSettings();
-    const enabled = await screen.findByRole('checkbox', { name: /Scheduled Desktop reminders/i });
+    const enabled = await screen.findByRole('checkbox', { name: /Avvisi Desktop pianificati/i });
     await waitFor(() => expect(enabled).not.toBeDisabled());
     fireEvent.click(enabled);
     fireEvent.change(screen.getByLabelText('Reminder offsets'), { target: { value: '60, 15' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salva avvisi e review' }));
 
-    await screen.findByText(/Notification and report preferences saved/);
+    await screen.findByText(/Preferenze di avvisi e review salvate/);
     expect(preferencesStore.save).toHaveBeenCalledWith('owner-1', expect.objectContaining({
       desktopEnabled: true,
       reminderOffsetsMinutes: [60, 15],
@@ -93,9 +102,9 @@ describe('Desktop settings', () => {
     const offsets = await screen.findByLabelText('Reminder offsets');
     await waitFor(() => expect(offsets).not.toBeDisabled());
     fireEvent.change(offsets, { target: { value: '15, arbitrary' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salva avvisi e review' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('invalid or unavailable');
+    expect(await screen.findByRole('alert')).toHaveTextContent('non sono valide o disponibili');
     expect(preferencesStore.save).not.toHaveBeenCalled();
   });
 
@@ -112,9 +121,9 @@ describe('Desktop settings', () => {
     fireEvent.change(screen.getByLabelText('Daily Report time'), { target: { value: '21:45' } });
     fireEvent.change(screen.getByLabelText('Weekly Report day'), { target: { value: '6' } });
     fireEvent.change(screen.getByLabelText('Weekly Report time'), { target: { value: '19:15' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salva avvisi e review' }));
 
-    await screen.findByText(/Notification and report preferences saved/);
+    await screen.findByText(/Preferenze di avvisi e review salvate/);
     expect(preferencesStore.save).toHaveBeenCalledWith('owner-1', expect.objectContaining({
       emailEnabled: true,
       reportRecipient: 'francesco@example.com',
@@ -128,9 +137,9 @@ describe('Desktop settings', () => {
     const emailEnabled = await screen.findByRole('checkbox', { name: 'Abilita invio email' });
     await waitFor(() => expect(emailEnabled).not.toBeDisabled());
     fireEvent.click(emailEnabled);
-    fireEvent.click(screen.getByRole('button', { name: 'Save notification preferences' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salva avvisi e review' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('invalid or unavailable');
+    expect(await screen.findByRole('alert')).toHaveTextContent('non sono valide o disponibili');
     expect(preferencesStore.save).not.toHaveBeenCalled();
   });
 

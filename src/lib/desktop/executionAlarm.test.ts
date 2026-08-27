@@ -73,7 +73,11 @@ describe('Execution Alarm policy and persistence', () => {
     expect(shouldDispatchExecutionAlarm({
       ...defaultExecutionAlarmPreferences(),
       mode: 'critical_only',
-    }, context)).toBe(false);
+    }, context)).toBe(true);
+    expect(executionAlarmPresentation(dispatch(), {
+      ...defaultExecutionAlarmPreferences(),
+      mode: 'critical_only',
+    }, context)).toBe('normal');
   });
 
   it('suppresses off/muted signals and keeps persistent UI limited to at-start semantics', () => {
@@ -90,11 +94,11 @@ describe('Execution Alarm policy and persistence', () => {
     expect(executionAlarmPresentation(dispatch(), {
       ...defaultExecutionAlarmPreferences(),
       mode: 'strong',
-    })).toBe('strong');
+    }, context)).toBe('strong');
     expect(executionAlarmPresentation({ ...dispatch(), kind: 'offset', offsetMinutes: 15 }, {
       ...defaultExecutionAlarmPreferences(),
       mode: 'strong',
-    })).toBeNull();
+    }, context)).toBeNull();
   });
 
   it('persists one deterministic occurrence across restart, snoozes, and removes it on acknowledgement', () => {
@@ -121,7 +125,8 @@ describe('Execution Alarm policy and persistence', () => {
     expect(readAscii(view, 8, 4)).toBe('WAVE');
     expect(readAscii(view, 36, 4)).toBe('data');
     expect(view.getUint32(24, true)).toBe(22_050);
-    expect(wav.byteLength).toBeLessThan(70_000);
+    expect(wav.byteLength).toBeGreaterThan(90_000);
+    expect(wav.byteLength).toBeLessThan(110_000);
   });
 });
 

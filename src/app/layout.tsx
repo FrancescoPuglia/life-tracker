@@ -4,6 +4,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { BUILD_ID } from '@/lib/buildInfo'
 import { AI_BACKEND_BUILD_ID } from '@/lib/ai/backendConfig'
 import { DEPLOYMENT_ENVIRONMENT, RUNTIME_TARGET } from '@/lib/runtimeEnvironment'
+import ThemeRuntime from '@/components/theme/ThemeRuntime'
 
 const systemFont = '"Segoe UI Variable", "Segoe UI", Inter, system-ui, sans-serif'
 
@@ -29,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="it">
+    <html lang="it" suppressHydrationWarning>
       <head>
         <link rel="icon" href="./favicon.ico" />
         <link rel="apple-touch-icon" href="./icon-192x192.png" />
@@ -43,6 +44,7 @@ export default function RootLayout({
         data-life-tracker-runtime={RUNTIME_TARGET}
         style={{ fontFamily: systemFont }}
       >
+        <ThemeRuntime />
         <ErrorBoundary>
           <div id="root" className="min-h-screen bg-gray-50">
             {children}

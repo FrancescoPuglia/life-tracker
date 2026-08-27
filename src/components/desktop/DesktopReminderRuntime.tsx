@@ -50,7 +50,7 @@ export default function DesktopReminderRuntime({ uid }: { readonly uid: string }
           dataRef.current.goals,
         );
         if (!shouldDispatchExecutionAlarm(preferences, context)) return false;
-        const presentation = executionAlarmPresentation(dispatch, preferences);
+        const presentation = executionAlarmPresentation(dispatch, preferences, context);
         if (presentation) dispatchExecutionAlarmSignal({ dispatch, context, presentation });
         return true;
       },

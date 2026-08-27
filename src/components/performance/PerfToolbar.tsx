@@ -23,9 +23,9 @@ interface PerfToolbarProps {
 }
 
 const PERIOD_TYPES: Array<[PerformancePeriodType, string]> = [
-  ['week', 'Week'],
-  ['month', 'Month'],
-  ['year', 'Year'],
+  ['week', 'Settimana'],
+  ['month', 'Mese'],
+  ['year', 'Anno'],
 ];
 
 export default function PerfToolbar({
@@ -54,7 +54,7 @@ export default function PerfToolbar({
     <div className="space-y-3" data-testid="perf-toolbar">
       {/* Row 1: period type + navigation */}
       <div className="flex flex-wrap items-center gap-3">
-        <div role="group" aria-label="Period type" className="flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
+        <div role="group" aria-label="Tipo di periodo" className="flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
           {PERIOD_TYPES.map(([value, label]) => (
             <button
               key={value}
@@ -77,7 +77,7 @@ export default function PerfToolbar({
           <button
             type="button"
             onClick={() => onNavigate(-1)}
-            aria-label="Previous period"
+            aria-label="Periodo precedente"
             data-testid="period-prev"
             className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50"
           >
@@ -89,14 +89,14 @@ export default function PerfToolbar({
             </span>
             {period.isCurrent && (
               <span className="ml-2 inline-flex items-center rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-semibold text-blue-700 align-middle">
-                In progress
+                In corso
               </span>
             )}
           </div>
           <button
             type="button"
             onClick={() => onNavigate(1)}
-            aria-label="Next period"
+            aria-label="Periodo successivo"
             data-testid="period-next"
             className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50"
           >
@@ -109,7 +109,7 @@ export default function PerfToolbar({
               data-testid="period-today"
               className="ml-1 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-xs font-semibold text-blue-700 hover:bg-blue-100"
             >
-              Current
+              Corrente
             </button>
           )}
         </div>
@@ -118,7 +118,7 @@ export default function PerfToolbar({
       {/* Row 2: filters — they scope everything below */}
       <div className="flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor="perf-goal-filter">
-          Filter by goal
+          Filtra per obiettivo
         </label>
         <select
           id="perf-goal-filter"
@@ -134,17 +134,17 @@ export default function PerfToolbar({
             })
           }
         >
-          <option value="">All goals</option>
+          <option value="">Tutti gli obiettivi</option>
           {goals.map((g) => (
             <option key={g.id} value={g.id}>
               {g.title}
             </option>
           ))}
-          {hasUnassigned && <option value={UNASSIGNED_ID}>Unassigned time</option>}
+          {hasUnassigned && <option value={UNASSIGNED_ID}>Tempo non assegnato</option>}
         </select>
 
         <label className="sr-only" htmlFor="perf-project-filter">
-          Filter by project
+          Filtra per progetto
         </label>
         <select
           id="perf-project-filter"
@@ -154,7 +154,7 @@ export default function PerfToolbar({
           onChange={(e) => onFiltersChange({ ...filters, projectId: e.target.value || null })}
           disabled={filters.goalId === UNASSIGNED_ID}
         >
-          <option value="">All projects</option>
+          <option value="">Tutti i progetti</option>
           {visibleProjects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -163,7 +163,7 @@ export default function PerfToolbar({
         </select>
 
         <label className="sr-only" htmlFor="perf-source-filter">
-          Filter by time source
+          Filtra per origine del tempo
         </label>
         <select
           id="perf-source-filter"
@@ -174,9 +174,9 @@ export default function PerfToolbar({
             onFiltersChange({ ...filters, source: e.target.value as PerformanceFilters['source'] })
           }
         >
-          <option value="all">Planned + unplanned</option>
-          <option value="planned">Planned only</option>
-          <option value="unplanned">Unplanned only</option>
+          <option value="all">Pianificato + non pianificato</option>
+          <option value="planned">Solo pianificato</option>
+          <option value="unplanned">Solo non pianificato</option>
         </select>
 
         {anyFilter && (
@@ -187,7 +187,7 @@ export default function PerfToolbar({
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="w-3 h-3" aria-hidden="true" />
-            Reset filters
+            Reimposta filtri
           </button>
         )}
       </div>

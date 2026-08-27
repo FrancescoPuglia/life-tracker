@@ -20,6 +20,7 @@ import { FirestoreScientificReportEmailDeliveryRepository } from './firestore-em
 import { FirestoreScientificReportRunRepository } from './firestore-report-run-repository';
 import { FirestoreScientificReportScheduleManifestRepository } from './firestore-schedule-manifest-repository';
 import { FirestoreWeeklyInterpretationRepository } from './firestore-weekly-interpretation-repository';
+import { FirestoreWeeklyReviewApiService } from './firestore-weekly-review-api-service';
 import { OpenAiWeeklyInterpretationGenerator } from './openai-weekly-interpretation';
 import {
   ScientificReportRunService,
@@ -38,6 +39,7 @@ import {
   type WeeklyInterpretationGenerator,
   type WeeklyInterpretationRepository,
 } from './weekly-interpretation';
+import { createWeeklyReviewCallableFunction } from './weekly-review-api';
 
 export interface ScientificReportRuntimeStringValue {
   value(): string;
@@ -257,6 +259,13 @@ const scheduleService = new ScientificReportScheduleManifestService(
   runService,
 );
 const gate = createScientificReportRuntimeGate(runtimeParameters);
+const weeklyReviewApiService = new FirestoreWeeklyReviewApiService(
+  firestore,
+  manifestRepository,
+  runRepository,
+  weeklyInterpretationRepository,
+  runService,
+);
 
 export const reconcileScientificReportSchedules = createScientificReportPreferenceFunction({
   gate,
@@ -267,6 +276,13 @@ export const reconcileScientificReportSchedules = createScientificReportPreferen
 export const deliverScheduledScientificReports = createScheduledScientificReportFunction({
   gate,
   service: scheduleService,
+  logger: functionsLogger,
+  secrets: [RESEND_API_KEY, REPORT_OPENAI_API_KEY],
+});
+
+export const weeklyExecutiveReviewApi = createWeeklyReviewCallableFunction({
+  gate,
+  service: weeklyReviewApiService,
   logger: functionsLogger,
   secrets: [RESEND_API_KEY, REPORT_OPENAI_API_KEY],
 });

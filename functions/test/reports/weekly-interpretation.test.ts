@@ -224,10 +224,10 @@ describe('post-archive weekly strategic interpretation', () => {
     expect(withInterpretation.metricHash).toBe(deterministicOnly.metricHash);
     expect(withInterpretation.contentHash).not.toBe(deterministicOnly.contentHash);
     expect(deterministicOnly.html).toContain('deterministic fallback active');
-    expect(withInterpretation.html).toContain('Optional Strategic Interpretation Addendum');
+    expect(withInterpretation.html).toContain('Biggest win — INFERENCE');
     expect(withInterpretation.html).not.toContain('deterministic fallback active');
     expect(withInterpretation.html).toContain('INFERENCE SUMMARY:');
-    expect(withInterpretation.text).toContain('OPTIONAL STRATEGIC INTERPRETATION ADDENDUM');
+    expect(withInterpretation.text).toContain('11. BIGGEST WIN');
     expect(withInterpretation.html).toContain('has no numerical authority');
     expect(withInterpretation.text).toContain(`artifact: ${interpretation.artifactHash}`);
     expect(withInterpretation.html).not.toMatch(/https?:\/\//i);
@@ -384,6 +384,24 @@ function providerResult(archive: ReturnType<typeof weeklyArchive>): WeeklyInterp
     reasoningTokens: 20, totalTokens: 1_120, latencyMs: 900,
     draft: {
       summary: 'The available evidence supports one cautious scheduling experiment while preserving uncertainty.',
+      biggestWin: {
+        kind: 'INFERENCE',
+        text: 'The clearest positive signal is where planned work also has trustworthy completion evidence.',
+        metricIds, confidence: 'moderate',
+        uncertainty: 'The available sample may not represent every meaningful contribution.',
+      },
+      biggestMiss: {
+        kind: 'INFERENCE',
+        text: 'The clearest execution gap appears where planned effort lacks matching completion evidence.',
+        metricIds, confidence: 'moderate',
+        uncertainty: 'Missing Session evidence may change the apparent size of the gap.',
+      },
+      priorityMismatch: {
+        kind: 'INFERENCE',
+        text: 'Goal linked allocation may not fully reflect the stated planning emphasis.',
+        metricIds, confidence: 'low',
+        uncertainty: 'Unattributed execution limits the priority comparison.',
+      },
       strongestPattern: {
         kind: 'INFERENCE',
         text: 'Execution appears more stable where planned work has clearer completion evidence.',
@@ -396,6 +414,26 @@ function providerResult(archive: ReturnType<typeof weeklyArchive>): WeeklyInterp
         metricIds, confidence: 'low',
         uncertainty: 'Missing or partial Session evidence may change the apparent pattern.',
       },
+      topCorrections: [
+        {
+          kind: 'RECOMMENDATION',
+          text: 'Protect the highest priority block and record its execution evidence consistently.',
+          metricIds, confidence: 'moderate',
+          uncertainty: 'The correction may be inconclusive when Session capture is incomplete.',
+        },
+        {
+          kind: 'RECOMMENDATION',
+          text: 'Reduce avoidable carryover while preserving fixed and locked commitments.',
+          metricIds, confidence: 'moderate',
+          uncertainty: 'The available week may not represent typical scheduling pressure.',
+        },
+        {
+          kind: 'RECOMMENDATION',
+          text: 'Review estimation assumptions before committing the next comparable work block.',
+          metricIds, confidence: 'low',
+          uncertainty: 'Sparse completed work can limit estimation feedback.',
+        },
+      ],
       nextWeekExperiment: {
         kind: 'RECOMMENDATION',
         text: 'Keep one scheduling variable stable and capture every completed Session before comparing again.',

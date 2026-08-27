@@ -29,6 +29,27 @@ export interface ReportHistoryMetric {
   readonly missingCount: number;
 }
 
+export interface ReportHistoryChart {
+  readonly kind:
+    | 'planned_vs_actual_by_day'
+    | 'goal_allocation'
+    | 'completion_by_time_of_day'
+    | 'estimation_error'
+    | 'adherence_trend'
+    | 'four_week_trend';
+  readonly title: string;
+  readonly series: readonly Readonly<{
+    key: string;
+    label: string;
+    unit: ReportHistoryMetricUnit;
+  }>[];
+  readonly points: readonly Readonly<{
+    key: string;
+    label: string;
+    values: readonly (number | null)[];
+  }>[];
+}
+
 export interface ReportHistoryItem {
   readonly id: string;
   readonly type: ReportHistoryType;
@@ -46,9 +67,17 @@ export interface ReportHistoryItem {
     plannedMinutes: ReportHistoryMetric;
     actualMinutes: ReportHistoryMetric;
     adherencePercent: ReportHistoryMetric;
+    taskCompletionPercent: ReportHistoryMetric;
     timeBlockCompletionPercent: ReportHistoryMetric;
+    goalAlignmentIndex: ReportHistoryMetric;
     weeklyExecutionIndex: ReportHistoryMetric;
   }>;
+  readonly charts: readonly ReportHistoryChart[];
+  readonly weeklyInsights: Readonly<{
+    strongestPattern: string;
+    largestUncertainty: string;
+    nextWeekExperiments: readonly string[];
+  }> | null;
   readonly dataQuality: Readonly<{
     complete: boolean;
     flags: readonly string[];
@@ -192,10 +221,20 @@ export function decodeReportHistoryDocument(
     plannedMinutes: decodeMetric(metrics.plannedMinutes, 'planned_minutes', 'minutes'),
     actualMinutes: decodeMetric(metrics.actualMinutes, 'actual_minutes', 'minutes'),
     adherencePercent: decodeMetric(metrics.adherencePercent, 'adherence_percent', 'percent'),
+    taskCompletionPercent: decodeMetric(
+      metrics.taskCompletionPercent,
+      'task_completion_percent',
+      'percent',
+    ),
     timeBlockCompletionPercent: decodeMetric(
       metrics.timeBlockCompletionPercent,
       'timeblock_completion_percent',
       'percent',
+    ),
+    goalAlignmentIndex: decodeMetric(
+      metrics.goalAlignmentIndex,
+      'goal_alignment_index',
+      'index',
     ),
     weeklyExecutionIndex: decodeMetric(
       metrics.weeklyExecutionIndex,
@@ -204,13 +243,18 @@ export function decodeReportHistoryDocument(
     ),
   });
 
-  if (!Array.isArray(report.charts) || report.charts.length < 1 || report.charts.length > 10) {
-    invalidArchive();
-  }
+  const charts = decodeCharts(report.charts, metricHash);
   if (!Array.isArray(report.statements) || report.statements.length > 100) invalidArchive();
   const executiveSummary = boundedStrings(report.executiveSummary, 8, 600);
   if (executiveSummary.length < 1) invalidArchive();
   const delivery = decodeDelivery(archive.delivery);
+  const weeklyInsights = type === 'weekly'
+    ? Object.freeze({
+      strongestPattern: boundedString(report.strongestObservedPattern, 1_200),
+      largestUncertainty: boundedString(report.largestUncertainty, 1_200),
+      nextWeekExperiments: boundedStrings(report.nextWeekExperiments, 8, 1_200),
+    })
+    : null;
 
   return Object.freeze({
     id: document.id,
@@ -222,6 +266,8 @@ export function decodeReportHistoryDocument(
     formulaVersion: REPORT_FORMULA_VERSION,
     executiveSummary,
     metrics: keyMetrics,
+    charts,
+    weeklyInsights,
     dataQuality,
     delivery,
   });
@@ -347,6 +393,60 @@ function decodeDelivery(value: unknown): ReportHistoryItem['delivery'] {
   return Object.freeze({ status, lastAttemptAt, sentAt: null });
 }
 
+function decodeCharts(value: unknown, metricHash: string): readonly ReportHistoryChart[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 10) invalidArchive();
+  const kinds = new Set<ReportHistoryChart['kind']>([
+    'planned_vs_actual_by_day', 'goal_allocation', 'completion_by_time_of_day',
+    'estimation_error', 'adherence_trend', 'four_week_trend',
+  ]);
+  return Object.freeze(value.map((raw) => {
+    const chart = record(raw);
+    if (!kinds.has(chart.kind as ReportHistoryChart['kind']) || chart.metricHash !== metricHash) {
+      invalidArchive();
+    }
+    const seriesRaw = chart.series;
+    const pointsRaw = chart.points;
+    if (!Array.isArray(seriesRaw) || seriesRaw.length < 1 || seriesRaw.length > 6) invalidArchive();
+    if (!Array.isArray(pointsRaw) || pointsRaw.length < 1 || pointsRaw.length > 40) invalidArchive();
+    const series = Object.freeze(seriesRaw.map((rawSeries) => {
+      const item = record(rawSeries);
+      const unit = item.unit;
+      if (!['minutes', 'percent', 'count', 'index'].includes(String(unit))) invalidArchive();
+      return Object.freeze({
+        key: boundedString(item.key, 100),
+        label: boundedString(item.label, 160),
+        unit: unit as ReportHistoryMetricUnit,
+      });
+    }));
+    const seriesKeys = new Set(series.map((item) => item.key));
+    const points = Object.freeze(pointsRaw.map((rawPoint) => {
+      const point = record(rawPoint);
+      if (!Array.isArray(point.values) || point.values.length !== series.length) invalidArchive();
+      const byKey = new Map<string, number | null>();
+      for (const rawValue of point.values) {
+        const item = record(rawValue);
+        const key = boundedString(item.seriesKey, 100);
+        if (!seriesKeys.has(key) || byKey.has(key)) invalidArchive();
+        if (item.value !== null && (typeof item.value !== 'number' || !Number.isFinite(item.value))) {
+          invalidArchive();
+        }
+        byKey.set(key, item.value as number | null);
+      }
+      return Object.freeze({
+        key: boundedString(point.key, 100),
+        label: boundedString(point.label, 160),
+        values: Object.freeze(series.map((item) => byKey.get(item.key) ?? null)),
+      });
+    }));
+    return Object.freeze({
+      kind: chart.kind as ReportHistoryChart['kind'],
+      title: boundedString(chart.title, 240),
+      series,
+      points,
+    });
+  }));
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalidArchive();
   return value as Record<string, unknown>;
@@ -423,6 +523,13 @@ function boundedStrings(value: unknown, maximum: number, maximumLength: number):
     return item;
   });
   return Object.freeze(strings);
+}
+
+function boundedString(value: unknown, maximumLength: number): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > maximumLength) {
+    invalidArchive();
+  }
+  return value;
 }
 
 function boundedInteger(value: unknown): number {

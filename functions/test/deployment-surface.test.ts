@@ -15,6 +15,7 @@ describe('default Firebase Functions deployment surface', () => {
       'lifeTrackerMcp',
       'reconcileNotificationPreferenceReminders',
       'reconcileScientificReportSchedules',
+      'weeklyExecutiveReviewApi',
       'reconcileTimeBlockReminders',
       'reconcileUserProfileReminders',
     ]));

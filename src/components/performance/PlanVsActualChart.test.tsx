@@ -305,7 +305,7 @@ describe('PlanVsActualChart — Daily ⇄ Cumulative', () => {
     const { overview, period } = buildMonthOverview();
     const { container, getByRole } = renderChart(overview.timeSeries, period);
 
-    fireEvent.click(getByRole('button', { name: 'Cumulative' }));
+    fireEvent.click(getByRole('button', { name: 'Cumulativo' }));
     const lines = Array.from(container.querySelectorAll('.recharts-line-curve'));
     expect(lines.length).toBe(2); // cumulative planned + cumulative actual
     for (const line of lines) {
@@ -315,7 +315,7 @@ describe('PlanVsActualChart — Daily ⇄ Cumulative', () => {
     }
     expect(container.querySelectorAll('.recharts-bar-rectangle path').length).toBe(0);
 
-    fireEvent.click(getByRole('button', { name: 'Daily' }));
+    fireEvent.click(getByRole('button', { name: 'Giornaliero' }));
     expect(visibleBars(container).filter((b) => b.height > 0).length).toBeGreaterThan(0);
   });
 });
@@ -366,7 +366,7 @@ describe('PlanVsActualChart — week and year buckets', () => {
     };
     const overview = computePerformanceOverview(input, period, undefined, NOW);
     const { container, getByRole } = renderChart(overview.timeSeries, period);
-    getByRole('button', { name: 'Monthly' });
+    getByRole('button', { name: 'Mensile' });
     expect(visibleBars(container).filter((b) => b.height > 0).length).toBeGreaterThanOrEqual(2);
   });
 });

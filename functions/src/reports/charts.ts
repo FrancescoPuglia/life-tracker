@@ -162,5 +162,30 @@ export function buildReportChartData(metrics: ScientificMetricBundle): readonly 
     })),
   });
 
-  return [daily, goals, completion, fourWeek, adherence];
+  const estimation = finalizeChart({
+    kind: 'estimation_error',
+    title: 'Estimation error and measured overrun',
+    xAxisLabel: 'Weekly estimation evidence',
+    yAxisLabel: 'Minutes',
+    metricHash: metrics.metricHash,
+    series: [
+      { key: 'mean_absolute_error_minutes', label: 'Mean absolute error', unit: 'minutes' },
+      { key: 'overrun_minutes', label: 'Measured overrun', unit: 'minutes' },
+    ],
+    points: [{
+      key: 'weekly_estimation',
+      label: 'Week',
+      availability: metrics.estimationErrorMeanAbsoluteMinutes.availability,
+      sampleSize: metrics.estimationErrorMeanAbsoluteMinutes.sampleSize,
+      values: [
+        {
+          seriesKey: 'mean_absolute_error_minutes',
+          value: metrics.estimationErrorMeanAbsoluteMinutes.value,
+        },
+        { seriesKey: 'overrun_minutes', value: metrics.overrunMinutes.value },
+      ],
+    }],
+  });
+
+  return [daily, goals, completion, estimation, adherence, fourWeek];
 }

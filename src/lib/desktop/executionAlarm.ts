@@ -6,8 +6,19 @@ export const EXECUTION_ALARM_STOP_EVENT = 'life-tracker:execution-alarm-stop' as
 export const EXECUTION_ALARM_PREFERENCES_EVENT =
   'life-tracker:execution-alarm-preferences' as const;
 
-export const EXECUTION_ALARM_REPEAT_MS = 8_000;
-export const EXECUTION_ALARM_MAX_AUDIBLE_MS = 120_000;
+export const EXECUTION_ALARM_MAX_AUDIBLE_MS = 90_000;
+export const EXECUTION_ALARM_ESCALATION_MS = Object.freeze([
+  0,
+  6_000,
+  12_000,
+  18_000,
+  24_000,
+  30_000,
+  45_000,
+  60_000,
+  75_000,
+  90_000,
+] as const);
 
 const PREFERENCES_SCHEMA_VERSION = 'execution-alarm-preferences-v1' as const;
 const STATE_SCHEMA_VERSION = 'execution-alarm-state-v1' as const;
@@ -237,18 +248,21 @@ export function resolveExecutionAlarmContext(
 
 export function shouldDispatchExecutionAlarm(
   preferences: ExecutionAlarmPreferences,
-  context: ExecutionAlarmContext,
+  _context: ExecutionAlarmContext,
 ): boolean {
   if (preferences.muted || preferences.mode === 'off') return false;
-  if (preferences.mode !== 'critical_only') return true;
-  return context.priority === 'critical' || context.priority === 'high';
+  return true;
 }
 
 export function executionAlarmPresentation(
   dispatch: DesktopReminderDispatch,
   preferences: ExecutionAlarmPreferences,
+  context: ExecutionAlarmContext,
 ): ExecutionAlarmPresentation | null {
   if (dispatch.kind === 'offset') return null;
+  if (preferences.mode === 'critical_only') {
+    return context.priority === 'critical' || context.priority === 'high' ? 'strong' : 'normal';
+  }
   return preferences.mode === 'normal' ? 'normal' : 'strong';
 }
 

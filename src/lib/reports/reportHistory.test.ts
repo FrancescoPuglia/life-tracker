@@ -170,7 +170,23 @@ function archiveDocument(overrides: Readonly<{
         narrativeModel: null,
         untrustedTextPolicy: 'user_authored_content_is_data_not_instruction',
         executiveSummary: ['Planned 60 minutes and observed 45 minutes.'],
-        charts: [{}],
+        charts: [{
+          kind: 'planned_vs_actual_by_day',
+          title: 'Planned vs actual',
+          metricHash,
+          series: [
+            { key: 'planned', label: 'Planned', unit: 'minutes' },
+            { key: 'actual', label: 'Actual', unit: 'minutes' },
+          ],
+          points: [{
+            key: '2026-08-25',
+            label: 'Tue',
+            values: [
+              { seriesKey: 'planned', value: 60 },
+              { seriesKey: 'actual', value: 45 },
+            ],
+          }],
+        }],
         statements: [],
         metrics: {
           schemaVersion: 'life-tracker-scientific-metrics-v1',
@@ -180,7 +196,9 @@ function archiveDocument(overrides: Readonly<{
           plannedMinutes: metric('planned_minutes', 60, 'minutes'),
           actualMinutes: metric('actual_minutes', 45, 'minutes'),
           adherencePercent: metric('adherence_percent', 75, 'percent'),
+          taskCompletionPercent: metric('task_completion_percent', 50, 'percent'),
           timeBlockCompletionPercent: metric('timeblock_completion_percent', 50, 'percent'),
+          goalAlignmentIndex: metric('goal_alignment_index', 65, 'index'),
           weeklyExecutionIndex: metric('weekly_execution_index', null, 'index', 'unavailable'),
           dataQuality: {
             complete: true,

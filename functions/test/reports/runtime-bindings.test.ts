@@ -16,6 +16,7 @@ import {
   createScientificReportRuntimeGate,
   deliverScheduledScientificReports,
   reconcileScientificReportSchedules,
+  weeklyExecutiveReviewApi,
   type ScientificReportAiRuntimeParameters,
   type ScientificReportRuntimeParameters,
 } from '../../src/reports/runtime-bindings';
@@ -41,9 +42,10 @@ const PLANNING_PREFERENCES: UserPlanningPreferences = {
 };
 
 describe('scientific report runtime bindings', () => {
-  it('exports only one secret-bound scheduled endpoint and a secret-free preference trigger', () => {
+  it('exports the scheduled and authenticated callable endpoints with exact report secrets', () => {
     const scheduled = endpoint(deliverScheduledScientificReports);
     const preference = endpoint(reconcileScientificReportSchedules);
+    const callable = endpoint(weeklyExecutiveReviewApi);
 
     expect(scheduled).toMatchObject({
       region: ['europe-west1'],
@@ -61,8 +63,18 @@ describe('scientific report runtime bindings', () => {
       maxInstances: 1,
       concurrency: 1,
     });
+    expect(callable).toMatchObject({
+      region: ['europe-west1'],
+      ingressSettings: 'ALLOW_ALL',
+      minInstances: 0,
+      maxInstances: 1,
+      concurrency: 1,
+      secretEnvironmentVariables: [{ key: 'RESEND_API_KEY' }, { key: 'OPENAI_API_KEY' }],
+      callableTrigger: {},
+    });
     expect(JSON.stringify(preference)).not.toMatch(/secretEnvironment|OPENAI|TWILIO|RESEND/i);
     expect(JSON.stringify(scheduled)).not.toMatch(/TWILIO/i);
+    expect(JSON.stringify(callable)).not.toMatch(/TWILIO/i);
   });
 
   it('reads only the kill switch in the exact default-off state', () => {
@@ -207,6 +219,27 @@ describe('scientific report runtime bindings', () => {
       output: [{ type: 'message' }],
       output_text: JSON.stringify({
         summary: 'The available evidence supports one cautious scheduling experiment while preserving uncertainty.',
+        biggestWin: {
+          kind: 'INFERENCE',
+          text: 'The clearest positive signal is where planned work also has trustworthy completion evidence.',
+          metricIds,
+          confidence: 'moderate',
+          uncertainty: 'The available sample may not represent every meaningful contribution.',
+        },
+        biggestMiss: {
+          kind: 'INFERENCE',
+          text: 'The clearest execution gap appears where planned effort lacks matching completion evidence.',
+          metricIds,
+          confidence: 'moderate',
+          uncertainty: 'Missing Session evidence may change the apparent size of the gap.',
+        },
+        priorityMismatch: {
+          kind: 'INFERENCE',
+          text: 'Goal linked allocation may not fully reflect the stated planning emphasis.',
+          metricIds,
+          confidence: 'low',
+          uncertainty: 'Unattributed execution limits the priority comparison.',
+        },
         strongestPattern: {
           kind: 'INFERENCE',
           text: 'Execution appears more stable where planned work has clearer completion evidence.',
@@ -221,6 +254,29 @@ describe('scientific report runtime bindings', () => {
           confidence: 'low',
           uncertainty: 'Missing or partial Session evidence may change the apparent pattern.',
         },
+        topCorrections: [
+          {
+            kind: 'RECOMMENDATION',
+            text: 'Protect the highest priority block and record its execution evidence consistently.',
+            metricIds,
+            confidence: 'moderate',
+            uncertainty: 'The correction may be inconclusive when Session capture is incomplete.',
+          },
+          {
+            kind: 'RECOMMENDATION',
+            text: 'Reduce avoidable carryover while preserving fixed and locked commitments.',
+            metricIds,
+            confidence: 'moderate',
+            uncertainty: 'The available week may not represent typical scheduling pressure.',
+          },
+          {
+            kind: 'RECOMMENDATION',
+            text: 'Review estimation assumptions before committing the next comparable work block.',
+            metricIds,
+            confidence: 'low',
+            uncertainty: 'Sparse completed work can limit estimation feedback.',
+          },
+        ],
         nextWeekExperiment: {
           kind: 'RECOMMENDATION',
           text: 'Keep one scheduling variable stable and capture every completed Session before comparing again.',

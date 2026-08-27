@@ -18,10 +18,10 @@ describe('Report history UI', () => {
     const { container } = render(<ReportHistory userId="owner-1" store={store} />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Caricamento dei report');
-    expect(await screen.findByText('Email sent')).toBeInTheDocument();
-    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Missing Sessions are not interpreted as zero/i)).toBeInTheDocument();
-    expect(screen.getByText(item.executiveSummary[0])).toBeInTheDocument();
+    expect(await screen.findAllByText('Email accettata')).not.toHaveLength(0);
+    expect(screen.getAllByText('Sconosciuto').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Sessioni mancanti non sono interpretate come zero/i)).toBeInTheDocument();
+    expect(screen.getAllByText(item.executiveSummary[0]).length).toBeGreaterThan(0);
     expect(container.querySelector('img')).toBeNull();
     expect(container).not.toHaveTextContent('provider-message-id');
     expect(store.list).toHaveBeenCalledWith('owner-1', 12);
@@ -29,8 +29,8 @@ describe('Report history UI', () => {
 
   it('renders a clear empty state without implying missing tracking data', async () => {
     render(<ReportHistory userId="owner-1" store={resolvedStore(page([]))} />);
-    expect(await screen.findByText('Nessun report disponibile')).toBeInTheDocument();
-    expect(screen.getByText(/generazione deterministica/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Il primo Executive Review verrà generato domenica/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sessioni autorevoli/i)).toBeInTheDocument();
   });
 
   it('surfaces quarantined records and bounded overflow without loading server-only state', async () => {
@@ -40,9 +40,9 @@ describe('Report history UI', () => {
         store={resolvedStore(page([reportItem()], { malformedCount: 2, overflow: true }))}
       />,
     );
-    expect(await screen.findByText(/2 archived reports were hidden/i)).toBeInTheDocument();
-    expect(screen.getByText(/Showing the newest 12 reports/i)).toBeInTheDocument();
-    expect(screen.getByText(/No report or tracking data was changed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/2 report archiviati sono stati esclusi/i)).toBeInTheDocument();
+    expect(screen.getByText(/12 review più recenti/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nessun report o dato di tracking è stato modificato/i)).toBeInTheDocument();
   });
 
   it('normalizes read failures and retries without exposing private error details', async () => {
@@ -57,7 +57,7 @@ describe('Report history UI', () => {
     expect(alert).toHaveTextContent('temporaneamente non disponibile');
     expect(alert).not.toHaveTextContent('private index/provider detail');
     fireEvent.click(screen.getByRole('button', { name: 'Riprova' }));
-    expect(await screen.findByText('Nessun report disponibile')).toBeInTheDocument();
+    expect(await screen.findByText(/Il primo Executive Review verrà generato domenica/i)).toBeInTheDocument();
     expect(store.list).toHaveBeenCalledTimes(2);
   });
 
@@ -72,7 +72,7 @@ describe('Report history UI', () => {
     const { rerender } = render(<ReportHistory userId="owner-1" store={store} />);
     rerender(<ReportHistory userId="owner-2" store={store} />);
 
-    expect(await screen.findByText('Owner two report.')).toBeInTheDocument();
+    expect((await screen.findAllByText('Owner two report.')).length).toBeGreaterThan(0);
     resolveFirst?.(page([reportItem({ summary: 'Stale owner one report.' })]));
     await waitFor(() => expect(screen.queryByText('Stale owner one report.')).toBeNull());
   });
@@ -129,6 +129,8 @@ function reportItem(options: Readonly<{
         ? { ...availableMetric, value: null, unit: 'percent', availability: 'unavailable' }
         : { ...availableMetric, value: 75, unit: 'percent' },
       timeBlockCompletionPercent: { ...availableMetric, value: 50, unit: 'percent' },
+      taskCompletionPercent: { ...availableMetric, value: 50, unit: 'percent' },
+      goalAlignmentIndex: { ...availableMetric, value: 65, unit: 'index' },
       weeklyExecutionIndex: {
         ...availableMetric,
         value: null,
@@ -136,6 +138,16 @@ function reportItem(options: Readonly<{
         availability: 'unavailable',
       },
     },
+    charts: [{
+      kind: 'planned_vs_actual_by_day',
+      title: 'Planned vs actual',
+      series: [
+        { key: 'planned', label: 'Planned', unit: 'minutes' },
+        { key: 'actual', label: 'Actual', unit: 'minutes' },
+      ],
+      points: [{ key: 'day', label: 'Mon', values: [60, options.actualUnavailable ? null : 45] }],
+    }],
+    weeklyInsights: null,
     dataQuality: {
       complete: !options.actualUnavailable,
       flags: options.actualUnavailable ? ['sessions_dataset_unavailable'] : [],

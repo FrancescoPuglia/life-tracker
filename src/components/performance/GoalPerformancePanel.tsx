@@ -31,31 +31,31 @@ export default function GoalPerformancePanel({
 
   return (
     <section
-      aria-label="Goal performance"
+      aria-label="Rendimento obiettivi"
       className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
       data-testid="goal-performance-panel"
     >
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h3 className="text-sm font-bold text-slate-900">Goal Performance</h3>
+          <h3 className="text-sm font-bold text-slate-900">Rendimento obiettivi</h3>
           <p className="text-xs text-slate-500">
-            Where the time was promised vs where it went — click a goal to focus everything on it
+            Dove avevi promesso il tempo e dove è stato realmente investito.
           </p>
         </div>
         <div className="hidden sm:flex items-center gap-3 text-[11px] text-slate-600">
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: CHART_COLORS.planned }} aria-hidden="true" />
-            Planned
+            Pianificato
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: CHART_COLORS.actual }} aria-hidden="true" />
-            Actual
+            Eseguito
           </span>
         </div>
       </div>
 
       {goals.length === 0 ? (
-        <p className="text-sm text-slate-400 py-6 text-center">No goals with data in this period.</p>
+        <p className="text-sm text-slate-400 py-6 text-center">Nessun obiettivo con dati nel periodo.</p>
       ) : (
         <ul className="space-y-1">
           {goals.map((goal) => {
@@ -74,9 +74,9 @@ export default function GoalPerformancePanel({
                   data-testid={`goal-row-${key}`}
                   onClick={() => onSelectGoal(isActive ? null : key)}
                   aria-pressed={isActive}
-                  aria-label={`${goal.goalName}: planned ${formatMinutes(goal.plannedMinutes)}, actual ${formatMinutes(
+                  aria-label={`${goal.goalName}: pianificato ${formatMinutes(goal.plannedMinutes)}, eseguito ${formatMinutes(
                     goal.actualMinutes
-                  )}, ${status.label}. ${isActive ? 'Clear focus' : 'Focus dashboard on this goal'}`}
+                  )}, ${status.label}. ${isActive ? 'Rimuovi filtro' : 'Filtra il cruscotto su questo obiettivo'}`}
                   className={`w-full text-left rounded-xl px-3 py-2.5 border transition-colors ${
                     isActive
                       ? 'border-blue-300 bg-blue-50/60'
@@ -92,7 +92,7 @@ export default function GoalPerformancePanel({
                         {goal.goalName}
                       </span>
                       {goal.goalStatus === 'archived' && (
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wide">archived</span>
+                        <span className="text-[10px] text-slate-400 uppercase tracking-wide">archiviato</span>
                       )}
                       <span
                         className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${status.className}`}
@@ -103,17 +103,17 @@ export default function GoalPerformancePanel({
                       </span>
                     </div>
                     <div className="ml-auto flex items-baseline gap-3 text-xs whitespace-nowrap tabular-nums">
-                      <span className="text-slate-500" title="Actual / Planned in this period">
+                      <span className="text-slate-500" title="Eseguito / pianificato nel periodo">
                         {formatMinutes(goal.actualMinutes)}
                         <span className="text-slate-400"> / {formatMinutes(goal.plannedMinutes)}</span>
                       </span>
                       <span
                         className="font-semibold text-slate-700 w-16 text-right"
-                        title="Variance = actual − planned (full period)"
+                        title="Scarto = eseguito − pianificato nel periodo completo"
                       >
                         {formatSignedMinutes(goal.varianceMinutes)}
                       </span>
-                      <span className="text-slate-400 w-10 text-right" title="Share of the period's actual time">
+                      <span className="text-slate-400 w-10 text-right" title="Quota del tempo eseguito nel periodo">
                         {goal.shareOfActual !== null ? formatPercent(goal.shareOfActual) : '—'}
                       </span>
                     </div>
@@ -141,11 +141,11 @@ export default function GoalPerformancePanel({
                   </div>
                   <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
                     <span>
-                      {goal.completedPlannedTasks}/{goal.plannedTasks || 0} planned tasks ·{' '}
-                      {goal.activeProjects} active project{goal.activeProjects === 1 ? '' : 's'}
+                      {goal.completedPlannedTasks}/{goal.plannedTasks || 0} attività pianificate ·{' '}
+                      {goal.activeProjects} progett{goal.activeProjects === 1 ? 'o attivo' : 'i attivi'}
                     </span>
                     <span className="tabular-nums">
-                      {formatSignedMinutes(goal.trendMinutes)} vs prev
+                      {formatSignedMinutes(goal.trendMinutes)} rispetto al precedente
                     </span>
                   </div>
                 </button>

@@ -153,7 +153,7 @@ export default function DopamineRewardSystem({
 }: DopamineRewardSystemProps) {
   const [activeRewards, setActiveRewards] = useState<DopamineReward[]>([]);
   const [particles, setParticles] = useState<ParticleEffect[]>([]);
-  const [totalPoints, setTotalPoints] = useState(0);
+  const [, setTotalPoints] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
 
@@ -386,16 +386,6 @@ export default function DopamineRewardSystem({
 
       {/* Rewards Display */}
       <div className={`fixed top-4 right-4 z-50 space-y-3 ${className}`}>
-        {/* Points Counter */}
-        <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 
-                      rounded-full shadow-lg backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            <Star className="w-4 h-4" />
-            <span className="font-bold">{totalPoints.toLocaleString()}</span>
-            <span className="text-xs opacity-90">points</span>
-          </div>
-        </div>
-
         {/* Active Rewards */}
         {activeRewards.map((reward) => (
           <div

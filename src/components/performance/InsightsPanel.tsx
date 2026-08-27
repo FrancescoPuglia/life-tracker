@@ -26,10 +26,10 @@ function InsightIcon({ kind }: { kind: PerformanceInsight['kind'] }) {
 }
 
 const KIND_LABEL: Record<PerformanceInsight['kind'], string> = {
-  positive: 'Positive',
-  warning: 'Warning',
+  positive: 'Positivo',
+  warning: 'Avviso',
   information: 'Info',
-  'data-quality': 'Data quality',
+  'data-quality': 'Qualità dati',
 };
 
 export default function InsightsPanel({ insights, onApplyLink }: InsightsPanelProps) {
@@ -38,20 +38,20 @@ export default function InsightsPanel({ insights, onApplyLink }: InsightsPanelPr
   const hiddenCount = insights.length - visible.length;
   return (
     <section
-      aria-label="Key insights"
+      aria-label="Insight principali"
       className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
       data-testid="insights-panel"
     >
       <div className="mb-3">
-        <h3 className="text-sm font-bold text-slate-900">What changed</h3>
+        <h3 className="text-sm font-bold text-slate-900">Cosa è cambiato</h3>
         <p className="text-xs text-slate-500">
-          Deterministic findings computed from this period&apos;s data — no AI, every rule documented
+          Evidenze deterministiche del periodo: nessun calcolo AI, ogni regola è documentata.
         </p>
       </div>
 
       {insights.length === 0 ? (
         <p className="text-sm text-slate-400 py-4 text-center">
-          Nothing notable — the period matches its plan within thresholds.
+          Nessuno scostamento rilevante: il periodo rispetta le soglie del piano.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -115,7 +115,7 @@ export default function InsightsPanel({ insights, onApplyLink }: InsightsPanelPr
           className="mt-2.5 w-full text-center text-xs font-semibold text-blue-700 hover:text-blue-800 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
           data-testid="insights-toggle"
         >
-          {showAll ? 'Show fewer' : `Show ${hiddenCount} more`}
+          {showAll ? 'Mostra meno' : `Mostra altri ${hiddenCount}`}
         </button>
       )}
     </section>

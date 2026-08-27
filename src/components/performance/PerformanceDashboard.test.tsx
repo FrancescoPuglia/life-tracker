@@ -274,7 +274,7 @@ describe('PerformanceDashboard', () => {
       expect(screen.getByTestId('performance-empty-state')).toBeInTheDocument()
     );
     expect(screen.getByText(/Nessun piano o tracking/i)).toBeInTheDocument();
-    expect(screen.getByText(/Apri Time Planner/i)).toBeInTheDocument();
+    expect(screen.getByText(/Apri Pianificazione/i)).toBeInTheDocument();
   });
 
   it('degrades gracefully when sessions fail to load, with a retry', async () => {

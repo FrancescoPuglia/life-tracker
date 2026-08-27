@@ -24,6 +24,36 @@
   --color-danger: #dc2626;
   --color-execution: #0891b2;
 
+  /* V3.1 public semantic contract. */
+  --lt-canvas: var(--color-canvas);
+  --lt-surface: var(--color-surface);
+  --lt-surface-raised: var(--color-surface-elevated);
+  --lt-surface-muted: var(--color-surface-subtle);
+  --lt-border: var(--color-border);
+  --lt-text: var(--color-text-primary);
+  --lt-text-secondary: var(--color-text-secondary);
+  --lt-text-muted: var(--color-text-muted);
+  --lt-brand: var(--color-brand);
+  --lt-execution: var(--color-execution);
+  --lt-success: var(--color-success);
+  --lt-warning: var(--color-warning);
+  --lt-danger: var(--color-danger);
+  --lt-chart-planned: #64748b;
+  --lt-chart-planned-future: #cbd5e1;
+  --lt-chart-actual: #2563eb;
+  --lt-chart-actual-strong: #1d4ed8;
+  --lt-chart-unplanned: #d97706;
+  --lt-chart-grid: #e2e8f0;
+  --lt-chart-axis: #64748b;
+  --lt-chart-heat-1: #dbeafe;
+  --lt-chart-heat-2: #bfdbfe;
+  --lt-chart-heat-3: #93c5fd;
+  --lt-chart-heat-4: #60a5fa;
+  --lt-chart-heat-5: #3b82f6;
+  --lt-chart-heat-6: #2563eb;
+  --lt-chart-heat-7: #1d4ed8;
+  --lt-chart-empty: #f1f5f9;
+
   /* Shape, spacing, elevation and motion */
   --radius-control: 10px;
   --radius-card: 14px;
@@ -122,6 +152,76 @@
   --transition-base: var(--motion-normal) var(--ease-standard);
   --transition-normal: var(--motion-normal) var(--ease-standard);
   --transition-slow: var(--motion-slow) var(--ease-standard);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #0b1120;
+  --color-surface: #111827;
+  --color-surface-elevated: #172033;
+  --color-surface-subtle: #151e2e;
+  --color-border: #263349;
+  --color-border-strong: #3a4961;
+  --color-text-primary: #eef2f8;
+  --color-text-secondary: #b7c2d3;
+  --color-text-muted: #8997ac;
+  --color-brand: #818cf8;
+  --color-brand-hover: #a5b4fc;
+  --color-info: #60a5fa;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-danger: #fb7185;
+  --color-execution: #22d3ee;
+  --lt-chart-planned: #94a3b8;
+  --lt-chart-planned-future: #475569;
+  --lt-chart-actual: #60a5fa;
+  --lt-chart-actual-strong: #93c5fd;
+  --lt-chart-unplanned: #fbbf24;
+  --lt-chart-grid: #263349;
+  --lt-chart-axis: #a8b3c5;
+  --lt-chart-heat-1: #172554;
+  --lt-chart-heat-2: #1e3a8a;
+  --lt-chart-heat-3: #1d4ed8;
+  --lt-chart-heat-4: #2563eb;
+  --lt-chart-heat-5: #3b82f6;
+  --lt-chart-heat-6: #60a5fa;
+  --lt-chart-heat-7: #93c5fd;
+  --lt-chart-empty: #1d293b;
+  --primary-50: #1e1b4b;
+  --primary-100: #29255f;
+  --primary-300: #6366f1;
+  --primary-400: #818cf8;
+  --primary-500: #818cf8;
+  --primary-600: #a5b4fc;
+  --primary-700: #c7d2fe;
+  --primary-800: #e0e7ff;
+  --neutral-0: #111827;
+  --neutral-50: #151e2e;
+  --neutral-100: #1d293b;
+  --neutral-200: #263349;
+  --neutral-300: #3a4961;
+  --neutral-400: #64748b;
+  --neutral-500: #8997ac;
+  --neutral-600: #b7c2d3;
+  --neutral-700: #d4dbe7;
+  --neutral-800: #e5eaf2;
+  --neutral-900: #eef2f8;
+  --success-50: #102a24;
+  --success-100: #12392e;
+  --success-200: #166047;
+  --success-600: #4ade80;
+  --success-800: #bbf7d0;
+  --warning-50: #2e2513;
+  --warning-100: #3a2e13;
+  --warning-200: #6b4e13;
+  --warning-600: #fbbf24;
+  --warning-800: #fde68a;
+  --error-50: #321923;
+  --error-200: #6b2638;
+  --error-600: #fb7185;
+  --error-800: #fecdd3;
+  --elevation-subtle: 0 1px 2px rgb(0 0 0 / 0.22), 0 8px 24px rgb(0 0 0 / 0.08);
+  --elevation-floating: 0 20px 55px rgb(0 0 0 / 0.42), 0 4px 16px rgb(0 0 0 / 0.2);
 }
 
 /* Quiet compatibility for legacy presentation hooks. */

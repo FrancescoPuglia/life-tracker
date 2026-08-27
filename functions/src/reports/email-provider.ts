@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../domain/integrity';
 
 export const REPORT_EMAIL_SCHEMA_VERSION = 'scientific-report-email-v1' as const;
-export const REPORT_EMAIL_TEMPLATE_VERSION = 'life-tracker-report-email-2026-08-25' as const;
+export const REPORT_EMAIL_TEMPLATE_VERSION = 'life-tracker-weekly-executive-review-v3.1' as const;
 export const REPORT_EMAIL_MAX_HTML_BYTES = 600_000;
 export const REPORT_EMAIL_MAX_TEXT_BYTES = 300_000;
 export const REPORT_EMAIL_MAX_ATTACHMENTS = 10;
@@ -46,7 +46,7 @@ export interface ComposedScientificReportEmail {
   readonly text: string;
   readonly attachments: readonly ReportEmailAttachment[];
   readonly contentHash: string;
-  /** Stable across retries and template changes; durable state remains authoritative. */
+  /** Stable across retries and bound to owner/period, artifact, and template authority. */
   readonly idempotencyKey: string;
 }
 
@@ -198,6 +198,27 @@ export function reportEmailContentHash(
   return sha256(canonicalJson(emailContentAuthority(email)));
 }
 
+export function reportEmailIdempotencyKey(
+  reportId: string,
+  reportArtifactHash: string,
+  templateVersion: typeof REPORT_EMAIL_TEMPLATE_VERSION = REPORT_EMAIL_TEMPLATE_VERSION,
+): string {
+  if (
+    !REPORT_ID_PATTERN.test(reportId)
+    || !HASH_PATTERN.test(reportArtifactHash)
+    || templateVersion !== REPORT_EMAIL_TEMPLATE_VERSION
+  ) {
+    fail('Report email idempotency authority is invalid.');
+  }
+  const authorityHash = sha256(canonicalJson({
+    schemaVersion: REPORT_EMAIL_SCHEMA_VERSION,
+    reportId,
+    reportArtifactHash,
+    templateVersion,
+  }));
+  return `life-tracker-report-v3/${authorityHash}`;
+}
+
 export function validateComposedScientificReportEmail(
   email: ComposedScientificReportEmail,
 ): void {
@@ -225,7 +246,11 @@ export function validateComposedScientificReportEmail(
     || email.attachments.length < 1
     || email.attachments.length > REPORT_EMAIL_MAX_ATTACHMENTS
     || !HASH_PATTERN.test(email.contentHash)
-    || email.idempotencyKey !== `life-tracker-report/${email.reportId}`
+    || email.idempotencyKey !== reportEmailIdempotencyKey(
+      email.reportId,
+      email.reportArtifactHash,
+      email.templateVersion,
+    )
   ) {
     fail('Composed report email identity or bounds are invalid.');
   }

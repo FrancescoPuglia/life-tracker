@@ -17,9 +17,9 @@ import { HEAT_RAMP, HEAT_EMPTY, heatColor, heatRatioColor } from './theme';
 type HeatMetric = 'actual' | 'planRatio' | 'tasks';
 
 const METRICS: Array<[HeatMetric, string, string]> = [
-  ['actual', 'Actual time', 'Executed minutes per day'],
-  ['planRatio', '% of plan', 'Share of the day’s plan that was executed'],
-  ['tasks', 'Tasks done', 'Tasks completed per day'],
+  ['actual', 'Tempo eseguito', 'Minuti eseguiti al giorno'],
+  ['planRatio', '% del piano', 'Quota del piano giornaliero eseguita'],
+  ['tasks', 'Attività completate', 'Attività completate al giorno'],
 ];
 
 interface ConsistencyHeatmapProps {
@@ -30,18 +30,18 @@ interface ConsistencyHeatmapProps {
 }
 
 function cellDescription(day: PerformanceHeatmapDay): string {
-  const date = day.date.toLocaleDateString('en-US', {
+  const date = day.date.toLocaleDateString('it-IT', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
   });
-  if (day.isFuture) return `${date}: upcoming`;
+  if (day.isFuture) return `${date}: futuro`;
   const parts = [
-    `planned ${formatMinutes(day.plannedMinutes)}`,
-    `actual ${formatMinutes(day.actualMinutes)}`,
-    `${day.tasksCompleted} task${day.tasksCompleted === 1 ? '' : 's'} completed`,
+    `pianificato ${formatMinutes(day.plannedMinutes)}`,
+    `eseguito ${formatMinutes(day.actualMinutes)}`,
+    `${day.tasksCompleted} attività completate`,
   ];
-  if (day.planRatio !== null) parts.push(`${formatPercent(day.planRatio)} of plan`);
+  if (day.planRatio !== null) parts.push(`${formatPercent(day.planRatio)} del piano`);
   return `${date}: ${parts.join(', ')}`;
 }
 
@@ -144,13 +144,13 @@ export default function ConsistencyHeatmap({
 
   return (
     <section
-      aria-label="Consistency heatmap"
+      aria-label="Mappa di consistenza"
       className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 relative"
       data-testid="consistency-heatmap"
     >
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div>
-          <h3 className="text-sm font-bold text-slate-900">Consistency</h3>
+          <h3 className="text-sm font-bold text-slate-900">Consistenza</h3>
           <p className="text-xs text-slate-500">{METRICS.find(([m]) => m === metric)?.[2]}</p>
         </div>
         <div role="group" aria-label="Heatmap metric" className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
@@ -253,12 +253,12 @@ export default function ConsistencyHeatmap({
       {/* Ramp legend */}
       <div className="mt-3 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-          <span>Less</span>
+          <span>Meno</span>
           <span className="w-3 h-3 rounded-[3px]" style={{ backgroundColor: HEAT_EMPTY }} aria-hidden="true" />
           {[0, 2, 4, 6].map((i) => (
             <span key={i} className="w-3 h-3 rounded-[3px]" style={{ backgroundColor: HEAT_RAMP[i] }} aria-hidden="true" />
           ))}
-          <span>More</span>
+          <span>Più</span>
           {metric === 'planRatio' && <span className="ml-2">(darkest = plan fully executed)</span>}
         </div>
         {hovered && !hovered.key.startsWith('pad-') && (

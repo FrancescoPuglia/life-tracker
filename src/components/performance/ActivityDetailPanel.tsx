@@ -40,9 +40,9 @@ function QualityChip({ label, value, title }: { label: string; value: string; ti
 }
 
 const CARRY_OUTCOME_META: Record<CarryOverTask['outcome'], { label: string; className: string }> = {
-  open: { label: 'Still open', className: 'bg-amber-50 text-amber-700 border-amber-200' },
-  'completed-late': { label: 'Done late', className: 'bg-blue-50 text-blue-700 border-blue-200' },
-  cancelled: { label: 'Cancelled', className: 'bg-slate-100 text-slate-500 border-slate-200' },
+  open: { label: 'Ancora aperta', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  'completed-late': { label: 'Completata tardi', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  cancelled: { label: 'Annullata', className: 'bg-slate-100 text-slate-500 border-slate-200' },
 };
 
 export default function ActivityDetailPanel({
@@ -76,97 +76,97 @@ export default function ActivityDetailPanel({
 
   return (
     <section
-      aria-label="Detailed activity"
+      aria-label="Attività dettagliata"
       className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
       data-testid="activity-detail-panel"
     >
       <div className="mb-3">
-        <h3 className="text-sm font-bold text-slate-900">Detailed Activity</h3>
+        <h3 className="text-sm font-bold text-slate-900">Attività dettagliata</h3>
         <p className="text-xs text-slate-500">
-          Every counted record — verify any aggregate above against its source data
+          Ogni record conteggiato permette di verificare gli aggregati con la fonte.
         </p>
       </div>
 
       {/* 1 · Data quality strip */}
       <div className="flex flex-wrap gap-1.5 mb-4" data-testid="data-quality-strip">
         <QualityChip
-          label="execution evidence coverage"
+          label="copertura evidenze di esecuzione"
           value={formatPercent(dataQuality.coverageRate)}
           title={`${dataQuality.actualSourceCount} valid source${dataQuality.actualSourceCount === 1 ? '' : 's'} · ${dataQuality.blocksMissingActualCount} executed block${dataQuality.blocksMissingActualCount === 1 ? '' : 's'} missing actual evidence · ${formatMinutes(dataQuality.measuredMinutes)} known actual time`}
         />
         {dataQuality.blocksMissingActualCount > 0 && (
           <QualityChip
-            label="executed blocks missing actual"
+            label="blocchi eseguiti senza tempo reale"
             value={String(dataQuality.blocksMissingActualCount)}
             title="No completed Session or valid explicit actual interval exists. Planned duration is never substituted; known actual totals are partial."
           />
         )}
         {dataQuality.unclassifiedMinutes > 0 && (
           <QualityChip
-            label="unassigned to any goal"
+            label="senza obiettivo"
             value={formatMinutes(dataQuality.unclassifiedMinutes)}
             title="Executed time with no resolvable goal — visible as the Unassigned row, never dropped."
           />
         )}
         {dataQuality.orphanSessionCount > 0 && (
           <QualityChip
-            label={`ad-hoc session${dataQuality.orphanSessionCount === 1 ? '' : 's'}`}
+            label="Sessioni ad hoc"
             value={String(dataQuality.orphanSessionCount)}
             title={`${formatMinutes(dataQuality.orphanSessionMinutes)} tracked by sessions not linked to any time block (counted as unplanned).`}
           />
         )}
         {dataQuality.openSessionCount > 0 && (
           <QualityChip
-            label="running sessions excluded"
+            label="Sessioni attive escluse"
             value={String(dataQuality.openSessionCount)}
             title="Sessions still active or paused are not counted until they finish."
           />
         )}
         {dataQuality.overrunBlockCount > 0 && (
           <QualityChip
-            label="overrun blocks counted"
+            label="blocchi fuori durata conteggiati"
             value={String(dataQuality.overrunBlockCount)}
             title="Blocks that ran shorter/longer than planned; they executed, so their measured time counts."
           />
         )}
         {dataQuality.cancelledPlannedMinutes > 0 && (
           <QualityChip
-            label="cancelled plan excluded"
+            label="piano annullato escluso"
             value={formatMinutes(dataQuality.cancelledPlannedMinutes)}
             title="Planned time of cancelled blocks — excluded from every total."
           />
         )}
         {dataQuality.excludedBreakMinutes > 0 && (
           <QualityChip
-            label="breaks/buffers excluded"
+            label="pause e buffer esclusi"
             value={formatMinutes(dataQuality.excludedBreakMinutes)}
             title="Blocks of type break/buffer are rest and slack, not invested work."
           />
         )}
         {dataQuality.estimatedUnscheduledMinutes > 0 && (
           <QualityChip
-            label="estimated, never scheduled"
+            label="stimate, mai pianificate"
             value={formatMinutes(dataQuality.estimatedUnscheduledMinutes)}
             title="Open tasks due in the period with an estimate but no time block — invisible workload."
           />
         )}
         {dataQuality.completedTasksWithoutTime > 0 && (
           <QualityChip
-            label="tasks done with no tracked time"
+            label="attività completate senza tempo"
             value={String(dataQuality.completedTasksWithoutTime)}
             title="Completed in the period but no block/session recorded the effort."
           />
         )}
         {dataQuality.blocksWithMissingParents > 0 && (
           <QualityChip
-            label="records with missing parents"
+            label="record con gerarchia mancante"
             value={String(dataQuality.blocksWithMissingParents)}
             title="Blocks/sessions pointing to a task, project or goal that no longer exists."
           />
         )}
         {dataQuality.anomalousDurationCount > 0 && (
           <QualityChip
-            label="anomalous durations capped"
+            label="durate anomale limitate"
             value={String(dataQuality.anomalousDurationCount)}
             title="Records with invalid or >24h intervals, capped for safety."
           />
@@ -183,9 +183,9 @@ export default function ActivityDetailPanel({
             className="w-full flex items-center justify-between text-left"
           >
             <span className="text-[13px] font-semibold text-amber-800">
-              Carry-over — {carryOver.length} planned task{carryOver.length === 1 ? '' : 's'} slipped
+              Riporto — {carryOver.length} attività pianificate slittate
             </span>
-            <span className="text-xs text-amber-700">{showCarry ? 'Hide' : 'Show'}</span>
+            <span className="text-xs text-amber-700">{showCarry ? 'Nascondi' : 'Mostra'}</span>
           </button>
           {showCarry && (
             <ul className="mt-2 divide-y divide-amber-100">
@@ -197,7 +197,7 @@ export default function ActivityDetailPanel({
                       <div className="text-xs font-semibold text-slate-800 truncate">{item.taskTitle}</div>
                       <div className="text-[10px] text-slate-500 truncate">
                         {item.goalName} · {item.projectName}
-                        {item.dueDate && ` · due ${formatDayShort(item.dueDate)}`}
+                        {item.dueDate && ` · scadenza ${formatDayShort(item.dueDate)}`}
                       </div>
                     </div>
                     <span
@@ -224,8 +224,8 @@ export default function ActivityDetailPanel({
               setSearch(e.target.value);
               setLimit(PAGE_SIZE);
             }}
-            placeholder="Search activity…"
-            aria-label="Search activity"
+            placeholder="Cerca attività…"
+            aria-label="Cerca attività"
             className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs w-52 focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
         </div>
@@ -241,24 +241,24 @@ export default function ActivityDetailPanel({
           </button>
         )}
         <span className="text-[11px] text-slate-400 ml-auto tabular-nums">
-          {filtered.length} record{filtered.length === 1 ? '' : 's'}
+          {filtered.length} record
         </span>
       </div>
 
       {filtered.length === 0 ? (
-        <p className="text-sm text-slate-400 py-6 text-center">No activity matches the current filters.</p>
+        <p className="text-sm text-slate-400 py-6 text-center">Nessuna attività corrisponde ai filtri correnti.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs" data-testid="activity-table">
             <thead>
               <tr className="border-b border-slate-200 text-left">
-                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500">Date</th>
-                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500">Activity</th>
-                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500 hidden md:table-cell">Goal · Project</th>
-                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500 text-right">Planned</th>
-                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500 text-right">Actual</th>
-                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500">Origin</th>
-                <th scope="col" className="py-2 font-semibold text-slate-500 hidden sm:table-cell">Time source</th>
+                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500">Data</th>
+                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500">Attività</th>
+                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500 hidden md:table-cell">Obiettivo · Progetto</th>
+                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500 text-right">Pianificato</th>
+                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500 text-right">Eseguito</th>
+                <th scope="col" className="py-2 pr-2 font-semibold text-slate-500">Origine</th>
+                <th scope="col" className="py-2 font-semibold text-slate-500 hidden sm:table-cell">Fonte tempo</th>
               </tr>
             </thead>
             <tbody>
@@ -270,7 +270,7 @@ export default function ActivityDetailPanel({
                   <td className="py-1.5 pr-2 max-w-[220px]">
                     <div className="font-medium text-slate-800 truncate">{row.title}</div>
                     {row.taskTitle && (
-                      <div className="text-[10px] text-slate-400 truncate">task: {row.taskTitle}</div>
+                      <div className="text-[10px] text-slate-400 truncate">attività: {row.taskTitle}</div>
                     )}
                     <div className="text-[10px] text-slate-400 truncate md:hidden">
                       {row.goalName} · {row.projectName}
@@ -296,7 +296,7 @@ export default function ActivityDetailPanel({
                             : 'bg-amber-50 text-amber-700 border-amber-200'
                       }`}
                     >
-                      {row.source === 'session' ? 'Session' : row.plannedInAdvance ? 'Planned' : 'Retro-logged'}
+                      {row.source === 'session' ? 'Sessione' : row.plannedInAdvance ? 'Pianificato' : 'Registrato dopo'}
                     </span>
                     <span className="ml-1 text-[10px] text-slate-400">{row.status}</span>
                   </td>
@@ -329,7 +329,7 @@ export default function ActivityDetailPanel({
                 onClick={() => setLimit((l) => l + PAGE_SIZE)}
                 className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
               >
-                Show {Math.min(PAGE_SIZE, filtered.length - limit)} more
+                Mostra altri {Math.min(PAGE_SIZE, filtered.length - limit)}
               </button>
             </div>
           )}

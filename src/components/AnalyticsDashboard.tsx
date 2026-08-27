@@ -94,15 +94,15 @@ export default function AnalyticsDashboard({
     if (data.planVsActual.length === 0) {
       return (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Plan vs Actual</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Piano ed esecuzione</h3>
           <div className="bg-gray-50 rounded-lg p-8 text-center">
             <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h4 className="text-lg font-medium text-gray-600 mb-2">No Time Tracking Data</h4>
+            <h4 className="text-lg font-medium text-gray-600 mb-2">Nessun dato temporale</h4>
             <p className="text-sm text-gray-500 mb-4">
-              Create time blocks in the Time Planner and track sessions to see your planning accuracy.
+              Crea TimeBlock e registra Sessioni per misurare l’accuratezza della pianificazione.
             </p>
             <div className="text-xs text-gray-400">
-              This chart shows how well you stick to your planned schedule vs actual time spent.
+              Il grafico confronta il piano con il tempo realmente eseguito.
             </div>
           </div>
         </div>
@@ -112,22 +112,22 @@ export default function AnalyticsDashboard({
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Plan vs Actual</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Piano ed esecuzione</h3>
           <div className="flex items-center space-x-4 text-sm">
             <div className="flex items-center space-x-2">
               <div className="w-3 h-3 bg-blue-500 rounded"></div>
-              <span>Planned</span>
+              <span>Pianificato</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-3 h-3 bg-green-500 rounded"></div>
-              <span>Actual</span>
+              <span>Eseguito</span>
             </div>
           </div>
         </div>
 
         {partialActual && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">
-            {missingActualCount} executed block{missingActualCount === 1 ? '' : 's'} lack a completed Session or explicit actual interval. Actual values are measured lower bounds; planned time was not substituted.
+            {missingActualCount} blocchi eseguiti non hanno una Sessione completata o un intervallo reale esplicito. I valori eseguiti sono limiti inferiori misurati; il pianificato non viene sostituito.
           </div>
         )}
         
@@ -138,24 +138,24 @@ export default function AnalyticsDashboard({
             <YAxis />
             <Tooltip 
               formatter={(value: number, name: string) => [formatHours(value), name]}
-              labelFormatter={(label) => `Date: ${label}`}
+              labelFormatter={(label) => `Data: ${label}`}
             />
-            <Bar dataKey="planned" fill="#3B82F6" name="Planned Hours" />
-            <Bar dataKey="actual" fill="#10B981" name="Actual Hours" />
+            <Bar dataKey="planned" fill="var(--lt-chart-planned)" name="Ore pianificate" />
+            <Bar dataKey="actual" fill="var(--lt-chart-actual)" name="Ore eseguite" />
           </BarChart>
         </ResponsiveContainer>
 
         <div className="grid grid-cols-3 gap-4 mt-4">
           <div className="bg-blue-50 rounded-lg p-3">
-            <div className="text-sm font-medium text-blue-600">Avg Adherence</div>
+            <div className="text-sm font-medium text-blue-600">Aderenza media</div>
             <div className="text-xl font-bold text-blue-900">{partialActual && averageAdherence !== null ? '≥ ' : ''}{formatPercentage(averageAdherence)}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-sm font-medium text-gray-600">Total Planned</div>
+            <div className="text-sm font-medium text-gray-600">Totale pianificato</div>
             <div className="text-xl font-bold text-gray-900">{formatHours(totalPlannedHours)}</div>
           </div>
           <div className="bg-green-50 rounded-lg p-3">
-            <div className="text-sm font-medium text-green-600">{partialActual ? 'Known Actual' : 'Total Actual'}</div>
+            <div className="text-sm font-medium text-green-600">{partialActual ? 'Eseguito noto' : 'Totale eseguito'}</div>
             <div className="text-xl font-bold text-green-900">{formatHours(totalActualHours)}</div>
           </div>
         </div>
@@ -167,15 +167,15 @@ export default function AnalyticsDashboard({
     if (data.timeAllocation.length === 0) {
       return (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Time Allocation</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Allocazione del tempo</h3>
           <div className="bg-gray-50 rounded-lg p-8 text-center">
             <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h4 className="text-lg font-medium text-gray-600 mb-2">No Domain Tracking</h4>
+            <h4 className="text-lg font-medium text-gray-600 mb-2">Nessun dominio tracciato</h4>
             <p className="text-sm text-gray-500 mb-4">
-              Start tracking sessions across different life domains to see how you allocate your time.
+              Registra Sessioni nei diversi domini per vedere come distribuisci il tempo.
             </p>
             <div className="text-xs text-gray-400">
-              This chart shows time distribution across domains like Work, Health, Learning, etc.
+              Il grafico mostra la distribuzione tra lavoro, salute, apprendimento e altri domini.
             </div>
           </div>
         </div>
@@ -396,63 +396,62 @@ export default function AnalyticsDashboard({
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">🏆 Activity Performance Rankings</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Classifica attività</h3>
           <div className="text-sm text-gray-500">
-            Planned vs Actual time analysis
+            Analisi tra tempo pianificato ed eseguito
           </div>
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {mostDone.length > 0 && (
             <RankingCard 
-              title="🎯 Most Completed Activities"
+              title="Attività più eseguite"
               activities={mostDone}
               icon={<Trophy className="w-5 h-5 text-green-600" />}
-              description="Activities with highest actual time invested"
+              description="Attività con il maggior tempo realmente investito"
             />
           )}
           
           {leastDone.length > 0 && (
             <RankingCard 
-              title="⚠️ Least Completed Activities"
+              title="Attività meno eseguite"
               activities={leastDone}
               icon={<Clock className="w-5 h-5 text-red-600" />}
-              description="Activities with low actual vs planned time"
+              description="Attività con poco tempo eseguito rispetto al piano"
             />
           )}
           
           {overplanned.length > 0 && (
             <RankingCard 
-              title="📈 Overplanned Activities"
+              title="Attività sovrapianificate"
               activities={overplanned}
               icon={<TrendingUp className="w-5 h-5 text-orange-600" />}
-              description="Planned time exceeded measured execution"
+              description="Il pianificato supera l’esecuzione misurata"
             />
           )}
           
           {underplanned.length > 0 && (
             <RankingCard 
-              title="📉 Underplanned Activities"
+              title="Attività sottopianificate"
               activities={underplanned}
               icon={<Target className="w-5 h-5 text-blue-600" />}
-              description="Measured execution exceeded planned time"
+              description="L’esecuzione misurata supera il tempo pianificato"
             />
           )}
         </div>
 
         {insufficientData.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            {insufficientData.length} activit{insufficientData.length === 1 ? 'y has' : 'ies have'} incomplete execution evidence.
-            Known actual time is a lower bound; missing Sessions were not treated as zero or replaced by planned time.
+            {insufficientData.length} attività hanno evidenze di esecuzione incomplete. Il tempo eseguito noto è un limite inferiore; le Sessioni mancanti non diventano zero né tempo pianificato.
           </div>
         )}
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 className="font-semibold text-blue-800 mb-2">💡 Insights</h4>
+          <h4 className="font-semibold text-blue-800 mb-2">Come leggere la classifica</h4>
           <ul className="space-y-1 text-sm text-blue-700">
-            <li>• <strong>Green activities:</strong> Well executed, high actual time</li>
-            <li>• <strong>Red activities:</strong> Need attention, low completion rate</li>
-            <li>• <strong>Orange/Blue:</strong> Adjust planning - over/under estimating time</li>
+            <li><strong>Verde:</strong> buona esecuzione e tempo reale elevato.</li>
+            <li><strong>Rosso:</strong> richiede attenzione, completamento basso.</li>
+            <li><strong>Ambra/Blu:</strong> correggi la stima del tempo.</li>
           </ul>
         </div>
       </div>
@@ -527,8 +526,8 @@ export default function AnalyticsDashboard({
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 p-5">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Executive intelligence</p>
-          <h2 className="mt-1 text-xl font-semibold text-slate-950">Analytics</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Intelligenza esecutiva</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-950">Analisi</h2>
           <p className="mt-1 text-sm text-slate-600">Pianificato dai TimeBlock. Effettivo misurato dalle Sessioni.</p>
         </div>
         

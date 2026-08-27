@@ -14,6 +14,7 @@ async function main() {
   const expectedEndpoints = [
     'deliverScheduledScientificReports',
     'reconcileScientificReportSchedules',
+    'weeklyExecutiveReviewApi',
   ];
   const endpointNames = Object.keys(stack.endpoints ?? {}).sort();
   assert.deepEqual(endpointNames, expectedEndpoints, 'report endpoint surface changed');
@@ -40,6 +41,18 @@ async function main() {
   );
   assert.equal(scheduled.taskQueueTrigger, undefined, 'scheduled report endpoint exposes a task queue');
   assert.equal(scheduled.eventTrigger, undefined, 'scheduled report endpoint exposes an event trigger');
+
+  const callable = stack.endpoints.weeklyExecutiveReviewApi;
+  assert.ok(callable, 'authenticated weekly review callable is missing');
+  assert.deepEqual(callable.callableTrigger ?? {}, {}, 'weekly review endpoint is not callable');
+  assert.deepEqual(
+    callable.secretEnvironmentVariables ?? [],
+    [{ key: 'RESEND_API_KEY' }, { key: 'OPENAI_API_KEY' }],
+    'weekly review callable secret bindings changed',
+  );
+  assert.equal(callable.taskQueueTrigger, undefined, 'weekly review callable exposes a task queue');
+  assert.equal(callable.eventTrigger, undefined, 'weekly review callable exposes an event trigger');
+  assert.equal(callable.scheduleTrigger, undefined, 'weekly review callable exposes a scheduler');
 
   const params = (stack.params ?? []).map((entry) => entry.name).sort();
   const expectedParams = [
@@ -86,6 +99,7 @@ async function main() {
     secrets: {
       deliverScheduledScientificReports: ['RESEND_API_KEY', 'OPENAI_API_KEY'],
       reconcileScientificReportSchedules: [],
+      weeklyExecutiveReviewApi: ['RESEND_API_KEY', 'OPENAI_API_KEY'],
     },
     taskQueues: 0,
     schedulers: 1,

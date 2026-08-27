@@ -35,7 +35,7 @@ describe('Execution Alarm host', () => {
     expect(screen.getByText('Deep work')).toBeInTheDocument();
     expect(soundMocks.startBounded).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Snooze 5' }));
+    fireEvent.click(screen.getByRole('button', { name: 'POSTICIPA 5 MIN' }));
     expect(screen.queryByTestId('execution-alarm-overlay')).not.toBeInTheDocument();
     expect(soundMocks.stop).toHaveBeenCalled();
   });
@@ -45,7 +45,7 @@ describe('Execution Alarm host', () => {
     renderHost({ onStartSession });
     act(() => dispatchExecutionAlarmSignal(signal('strong')));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Avvia sessione' }));
+    fireEvent.click(screen.getByRole('button', { name: 'AVVIA SESSIONE' }));
     await waitFor(() => expect(onStartSession).toHaveBeenCalledWith('task-1', 'block-1'));
     await waitFor(() => expect(screen.queryByTestId('execution-alarm-overlay')).not.toBeInTheDocument());
   });
@@ -55,18 +55,27 @@ describe('Execution Alarm host', () => {
     renderHost({ onStartSession });
     act(() => dispatchExecutionAlarmSignal(signal('strong')));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Avvia sessione' }));
+    fireEvent.click(screen.getByRole('button', { name: 'AVVIA SESSIONE' }));
     await waitFor(() => expect(onStartSession).toHaveBeenCalled());
     expect(screen.getByTestId('execution-alarm-overlay')).toBeInTheDocument();
   });
 
-  it('plays one bounded cue without persistent UI in normal mode', () => {
+  it('plays one bounded cue with a subtle finite banner in normal mode', () => {
     renderHost();
     act(() => dispatchExecutionAlarmSignal(signal('normal')));
 
     expect(screen.queryByTestId('execution-alarm-overlay')).not.toBeInTheDocument();
+    expect(screen.getByTestId('execution-alarm-normal-banner')).toBeInTheDocument();
     expect(soundMocks.playOnce).toHaveBeenCalledTimes(1);
     expect(soundMocks.startBounded).not.toHaveBeenCalled();
+  });
+
+  it('always stops immediately from the explicit kill switch', () => {
+    renderHost();
+    act(() => dispatchExecutionAlarmSignal(signal('strong')));
+    fireEvent.click(screen.getByRole('button', { name: 'STOP ALARM' }));
+    expect(screen.queryByTestId('execution-alarm-overlay')).not.toBeInTheDocument();
+    expect(soundMocks.stop).toHaveBeenCalled();
   });
 });
 

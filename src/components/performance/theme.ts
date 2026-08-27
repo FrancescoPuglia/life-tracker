@@ -16,27 +16,35 @@
 
 export const CHART_COLORS = {
   /** Planned time — context reference (de-emphasis gray, slate-500). */
-  planned: '#64748b',
+  planned: 'var(--lt-chart-planned)',
   /** Lighter planned for not-yet-elapsed days (plan still open). */
-  plannedFuture: '#cbd5e1',
+  plannedFuture: 'var(--lt-chart-planned-future)',
   /** Executed time that was planned in advance (brand accent, blue-500). */
-  actual: '#3b82f6',
+  actual: 'var(--lt-chart-actual)',
   /** Cumulative actual line (blue-600 for a firmer 2px stroke). */
-  actualLine: '#2563eb',
+  actualLine: 'var(--lt-chart-actual-strong)',
   /** Executed time that was NOT planned in advance (amber-500). */
-  unplanned: '#f59e0b',
+  unplanned: 'var(--lt-chart-unplanned)',
   /** Hairline grid (slate-200) — solid, recessive. */
-  grid: '#e2e8f0',
+  grid: 'var(--lt-chart-grid)',
   /** Axis ink (slate-400). */
-  axis: '#94a3b8',
+  axis: 'var(--lt-chart-axis)',
   /** Today reference line (blue-300). */
   today: '#93c5fd',
 } as const;
 
 /** Sequential blue ramp (Tailwind blue 100→700) for the consistency heatmap. */
-export const HEAT_RAMP = ['#dbeafe', '#bfdbfe', '#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8'];
+export const HEAT_RAMP = [
+  'var(--lt-chart-heat-1)',
+  'var(--lt-chart-heat-2)',
+  'var(--lt-chart-heat-3)',
+  'var(--lt-chart-heat-4)',
+  'var(--lt-chart-heat-5)',
+  'var(--lt-chart-heat-6)',
+  'var(--lt-chart-heat-7)',
+];
 /** Empty day cell (slate-100). */
-export const HEAT_EMPTY = '#f1f5f9';
+export const HEAT_EMPTY = 'var(--lt-chart-empty)';
 
 import type { EntityStatus, InsightKind } from '@/lib/performance/types';
 
@@ -49,14 +57,14 @@ export interface StatusMeta {
 }
 
 export const STATUS_META: Record<EntityStatus, StatusMeta> = {
-  ahead: { label: 'Ahead', className: 'bg-emerald-50 text-emerald-700 border-emerald-200', symbol: '▲' },
-  'on-track': { label: 'On track', className: 'bg-blue-50 text-blue-700 border-blue-200', symbol: '●' },
-  behind: { label: 'Behind', className: 'bg-red-50 text-red-700 border-red-200', symbol: '▼' },
+  ahead: { label: 'In anticipo', className: 'bg-emerald-50 text-emerald-700 border-emerald-200', symbol: '▲' },
+  'on-track': { label: 'In linea', className: 'bg-blue-50 text-blue-700 border-blue-200', symbol: '●' },
+  behind: { label: 'In ritardo', className: 'bg-red-50 text-red-700 border-red-200', symbol: '▼' },
   /** Plan exists but is entirely in the future — nothing exigible today. */
-  'not-due': { label: 'Not due yet', className: 'bg-slate-50 text-slate-500 border-slate-200', symbol: '◷' },
-  'no-plan': { label: 'No plan', className: 'bg-amber-50 text-amber-700 border-amber-200', symbol: '◇' },
-  inactive: { label: 'Inactive', className: 'bg-slate-100 text-slate-600 border-slate-200', symbol: '⏸' },
-  'no-data': { label: 'No data', className: 'bg-slate-50 text-slate-500 border-slate-200', symbol: '–' },
+  'not-due': { label: 'Non ancora dovuto', className: 'bg-slate-50 text-slate-500 border-slate-200', symbol: '◷' },
+  'no-plan': { label: 'Nessun piano', className: 'bg-amber-50 text-amber-700 border-amber-200', symbol: '◇' },
+  inactive: { label: 'Inattivo', className: 'bg-slate-100 text-slate-600 border-slate-200', symbol: '⏸' },
+  'no-data': { label: 'Nessun dato', className: 'bg-slate-50 text-slate-500 border-slate-200', symbol: '–' },
 };
 
 export const INSIGHT_META: Record<InsightKind, { className: string; iconClassName: string }> = {
@@ -80,19 +88,19 @@ export function describeStatus(
   const toDate = formatMinutes(row.plannedElapsedMinutes);
   switch (status) {
     case 'ahead':
-      return `Ahead of today's plan: ${done} done vs ${toDate} planned so far.`;
+      return `In anticipo sul piano di oggi: ${done} eseguiti rispetto a ${toDate} pianificati finora.`;
     case 'on-track':
-      return `On track vs today's plan: ${done} done vs ${toDate} planned so far.`;
+      return `In linea con il piano di oggi: ${done} eseguiti rispetto a ${toDate} pianificati finora.`;
     case 'behind':
-      return `Behind as of today: ${done} done vs ${toDate} planned so far (full-period plan ${formatMinutes(row.plannedMinutes)}).`;
+      return `In ritardo a oggi: ${done} eseguiti rispetto a ${toDate} pianificati finora (piano completo ${formatMinutes(row.plannedMinutes)}).`;
     case 'not-due':
-      return `Nothing due yet: the ${formatMinutes(row.plannedMinutes)} planned sit later in the period.`;
+      return `Nulla è ancora dovuto: ${formatMinutes(row.plannedMinutes)} pianificati sono più avanti nel periodo.`;
     case 'no-plan':
-      return `Executed ${done} without any planned time in this period.`;
+      return `${done} eseguiti senza tempo pianificato nel periodo.`;
     case 'inactive':
-      return 'Open tasks but no tracked activity for 14+ days.';
+      return 'Attività aperte ma nessuna esecuzione tracciata da oltre 14 giorni.';
     case 'no-data':
-      return 'No plan and no execution in this period.';
+      return 'Nessun piano e nessuna esecuzione nel periodo.';
   }
 }
 

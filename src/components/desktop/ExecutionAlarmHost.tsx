@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlarmClock, CalendarClock, Clock3, Play, ShieldCheck, X } from 'lucide-react';
+import { AlarmClock, BellRing, CalendarClock, Clock3, Octagon, Play, ShieldCheck, X } from 'lucide-react';
 import type { Goal, Project, Session, Task, TimeBlock } from '@/types';
 import {
   EXECUTION_ALARM_SIGNAL_EVENT,
@@ -47,8 +47,14 @@ export default function ExecutionAlarmHost({
     signal: ExecutionAlarmSignal;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [normalNotice, setNormalNotice] = useState<ExecutionAlarmSignal | null>(null);
+  const [alarmStage, setAlarmStage] = useState<0 | 30 | 60 | 90>(0);
   const sound = useRef<ExecutionAlarmSound | null>(null);
   if (!sound.current) sound.current = new ExecutionAlarmSound();
+  const snoozedUntilMs = active?.state.snoozedUntil
+    ? Date.parse(active.state.snoozedUntil)
+    : null;
+  const isSnoozed = snoozedUntilMs !== null && snoozedUntilMs > Date.now();
 
   const acknowledge = useCallback(() => {
     executionAlarmStateStore.acknowledge(uid);
@@ -69,11 +75,13 @@ export default function ExecutionAlarmHost({
       const signal = (event as CustomEvent<unknown>).detail;
       if (!isExecutionAlarmSignal(signal)) return;
       if (signal.presentation === 'normal') {
+        setNormalNotice(signal);
         if (preferences.soundEnabled && !preferences.muted) {
           void sound.current?.playOnce();
         }
         return;
       }
+      setNormalNotice(null);
       setActive({
         state: executionAlarmStateStore.activate(uid, signal),
         signal,
@@ -89,10 +97,36 @@ export default function ExecutionAlarmHost({
     };
   }, [acknowledge, preferences.muted, preferences.soundEnabled, uid]);
 
-  const snoozedUntilMs = active?.state.snoozedUntil
-    ? Date.parse(active.state.snoozedUntil)
-    : null;
-  const isSnoozed = snoozedUntilMs !== null && snoozedUntilMs > Date.now();
+  useEffect(() => {
+    if (!normalNotice) return undefined;
+    const timer = setTimeout(() => setNormalNotice(null), 8_000);
+    return () => clearTimeout(timer);
+  }, [normalNotice]);
+
+  useEffect(() => {
+    if (!active || isSnoozed) {
+      setAlarmStage(0);
+      return undefined;
+    }
+    setAlarmStage(0);
+    const timers = [
+      setTimeout(() => setAlarmStage(30), 30_000),
+      setTimeout(() => setAlarmStage(60), 60_000),
+      setTimeout(() => setAlarmStage(90), 90_000),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [active, isSnoozed]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const stopFromKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      acknowledge();
+    };
+    window.addEventListener('keydown', stopFromKeyboard);
+    return () => window.removeEventListener('keydown', stopFromKeyboard);
+  }, [acknowledge, active]);
 
   useEffect(() => {
     if (!active || !isSnoozed || snoozedUntilMs === null) return undefined;
@@ -132,7 +166,33 @@ export default function ExecutionAlarmHost({
     ) acknowledge();
   }, [acknowledge, active, currentSession?.timeBlockId, matchedBlock?.deleted, matchedBlock?.status]);
 
-  if (!active || isSnoozed) return null;
+  if (!active || isSnoozed) {
+    if (!normalNotice) return null;
+    return (
+      <aside
+        role="status"
+        aria-live="assertive"
+        data-testid="execution-alarm-normal-banner"
+        className="fixed left-1/2 top-4 z-[100] flex w-[min(94vw,680px)] -translate-x-1/2 items-center gap-4 rounded-2xl border border-cyan-200 bg-slate-950 px-5 py-4 text-white shadow-2xl"
+      >
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-cyan-400/15 text-cyan-300">
+          <BellRing size={22} aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-300">È ora di eseguire</p>
+          <p className="truncate text-base font-bold">{normalNotice.dispatch.title}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setNormalNotice(null)}
+          aria-label="Chiudi avviso"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-300 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-300"
+        >
+          <X size={19} aria-hidden="true" />
+        </button>
+      </aside>
+    );
+  }
 
   const { dispatch, context, presentation } = active.signal;
   const start = formatTime(dispatch.startTime, dispatch.locale, dispatch.timezone);
@@ -171,7 +231,7 @@ export default function ExecutionAlarmHost({
 
   return (
     <div
-      className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/55 px-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/75 px-4 backdrop-blur-sm"
       role="presentation"
       data-testid="execution-alarm-overlay"
     >
@@ -179,7 +239,10 @@ export default function ExecutionAlarmHost({
         role="dialog"
         aria-modal="true"
         aria-labelledby="execution-alarm-title"
-        className="w-full max-w-xl overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl"
+        aria-describedby="execution-alarm-motivation"
+        className={`w-full max-w-2xl overflow-hidden rounded-[28px] border bg-white shadow-2xl transition-transform motion-reduce:transition-none ${
+          alarmStage >= 60 ? 'border-amber-300 motion-safe:scale-[1.015]' : 'border-slate-200'
+        }`}
       >
         <div className="border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
           <div className="flex items-start justify-between gap-4">
@@ -189,7 +252,7 @@ export default function ExecutionAlarmHost({
               </span>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">
-                  {presentation === 'test' ? 'Test Execution Alarm' : 'Time to execute'}
+                  {presentation === 'test' ? 'TEST EXECUTION ALARM' : 'TIME TO EXECUTE'}
                 </p>
                 <h2 id="execution-alarm-title" className="mt-1 text-2xl font-semibold leading-tight">
                   {dispatch.title}
@@ -208,6 +271,23 @@ export default function ExecutionAlarmHost({
         </div>
 
         <div className="space-y-5 p-6">
+          <p
+            id="execution-alarm-motivation"
+            className={`rounded-2xl border px-4 py-3 text-center text-base font-semibold ${
+              alarmStage >= 60
+                ? 'border-amber-200 bg-amber-50 text-amber-950'
+                : 'border-indigo-100 bg-indigo-50 text-indigo-950'
+            }`}
+          >
+            {alarmStage >= 90
+              ? 'Ultimo segnale audio. L’allarme visivo resta attivo finché non scegli.'
+              : alarmStage >= 60
+                ? 'Proteggi il blocco: avvia ora oppure ripianifica consapevolmente.'
+                : alarmStage >= 30
+                  ? 'Non hai ancora iniziato. Il piano conta soltanto se lo esegui.'
+                  : 'Il piano conta soltanto se lo esegui.'}
+          </p>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
               <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -237,25 +317,32 @@ export default function ExecutionAlarmHost({
             className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 text-base font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
           >
             <Play size={19} fill="currentColor" aria-hidden="true" />
-            {busy ? 'Avvio sicuro…' : 'Avvia sessione'}
+            {busy ? 'AVVIO SICURO…' : 'AVVIA SESSIONE'}
           </button>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <button type="button" onClick={() => snooze(5)} className="lt-button-secondary min-h-[42px] px-3">
-              Snooze 5
+              POSTICIPA 5 MIN
             </button>
             <button type="button" onClick={() => snooze(10)} className="lt-button-secondary min-h-[42px] px-3">
-              Snooze 10
+              POSTICIPA 10 MIN
             </button>
             <button type="button" onClick={openPlanner} className="lt-button-secondary min-h-[42px] px-3">
-              <CalendarClock size={16} aria-hidden="true" /> Sposta
+              <CalendarClock size={16} aria-hidden="true" /> SPOSTA
             </button>
             <button type="button" onClick={acknowledge} className="lt-button-secondary min-h-[42px] px-3 text-slate-700">
-              Ignora
+              SALTA
             </button>
           </div>
+          <button
+            type="button"
+            onClick={acknowledge}
+            className="flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 text-sm font-black tracking-wide text-red-800 transition-colors hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+          >
+            <Octagon size={18} aria-hidden="true" /> STOP ALARM
+          </button>
           <p className="text-center text-xs leading-5 text-slate-500">
-            Il suono si ripete ogni 8 secondi per un massimo di 2 minuti. Il promemoria visivo resta disponibile.
+            Segnale audio a cadenza limitata fino a 90 secondi; poi l’avviso resta silenzioso. Premi Esc o STOP ALARM in qualsiasi momento.
           </p>
         </div>
       </section>

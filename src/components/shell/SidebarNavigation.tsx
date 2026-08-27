@@ -71,11 +71,11 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
     id: 'plan',
     label: 'Pianifica',
     items: [
-      { id: 'planner', label: 'Time Planner', icon: CalendarDays, subtitle: 'Blocchi di esecuzione' },
+      { id: 'planner', label: 'Pianificazione', icon: CalendarDays, subtitle: 'Blocchi di esecuzione' },
       { id: 'events', label: 'Calendario', icon: Compass, subtitle: 'Scadenze e milestone' },
       { id: 'okr', label: 'Obiettivi e progetti', icon: Target, subtitle: 'Direzione e risultati' },
       { id: 'weekly_intel', label: 'Piano settimanale', icon: Layers3, subtitle: 'Costruisci la settimana' },
-      { id: 'goal_architect', label: 'Goal Architect', icon: Sparkles, subtitle: 'Struttura un obiettivo' },
+      { id: 'goal_architect', label: 'Architetto obiettivi', icon: Sparkles, subtitle: 'Struttura un obiettivo' },
     ],
   },
   {
@@ -83,7 +83,7 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
     label: 'Esegui',
     items: [
       { id: 'habits', label: 'Abitudini', icon: Flame, subtitle: 'Ritmo quotidiano' },
-      { id: 'smart_scheduler', label: 'Auto Scheduler', icon: PlayCircle, subtitle: 'Organizza il carico' },
+      { id: 'smart_scheduler', label: 'Pianificazione automatica', icon: PlayCircle, subtitle: 'Organizza il carico' },
       { id: 'adaptation', label: 'Adatta piano', icon: RefreshCw, subtitle: 'Ripara la giornata' },
     ],
   },
@@ -92,9 +92,9 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
     label: 'Analizza',
     items: [
       { id: 'weekly', label: 'Esecuzione settimanale', icon: Activity, subtitle: 'Piano e realtà' },
-      { id: 'performance', label: 'Performance', icon: BarChart3, subtitle: 'Evidenza di esecuzione' },
-      { id: 'analytics', label: 'Analytics', icon: BarChart3, subtitle: 'Trend e distribuzione' },
-      { id: 'reports', label: 'Report', icon: FileText, subtitle: 'Archivio giornaliero' },
+      { id: 'performance', label: 'Rendimento', icon: BarChart3, subtitle: 'Evidenza di esecuzione' },
+      { id: 'analytics', label: 'Analisi', icon: BarChart3, subtitle: 'Tendenze e distribuzione' },
+      { id: 'reports', label: 'Review executive', icon: FileText, subtitle: 'Archivio settimanale' },
       { id: 'badges', label: 'Traguardi', icon: Trophy, subtitle: 'Progressi sbloccati' },
     ],
   },
@@ -103,9 +103,9 @@ export const SIDEBAR_GROUPS: ReadonlyArray<NavGroup> = [
     label: 'Intelligenza',
     items: [
       { id: 'micro_coach', label: 'AI Coach', icon: Brain, subtitle: 'Insight contestuali' },
-      { id: 'goal_analytics', label: 'Goal Intelligence', icon: Target, subtitle: 'Analisi per obiettivo' },
+      { id: 'goal_analytics', label: 'Intelligenza obiettivi', icon: Target, subtitle: 'Analisi per obiettivo' },
       { id: 'notes', label: 'Second Brain', icon: BookOpen, subtitle: 'Conoscenza e note' },
-      { id: 'vision-board', label: 'Vision Board', icon: Image, subtitle: 'Orizzonte strategico' },
+      { id: 'vision-board', label: 'Bacheca visiva', icon: Image, subtitle: 'Orizzonte strategico' },
       { id: 'voice', label: 'Voce', icon: Mic2, subtitle: 'Comandi e lingua' },
     ],
   },

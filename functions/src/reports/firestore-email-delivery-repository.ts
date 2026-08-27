@@ -263,7 +263,7 @@ function validatePreparationInput(input: PrepareReportEmailDeliveryInput): strin
   assertHash(input.sendAuthorityHash);
   if (
     input.provider !== 'resend'
-    || input.idempotencyKey !== `life-tracker-report/${input.reportId}`
+    || !/^life-tracker-report-v3\/[0-9a-f]{64}$/u.test(input.idempotencyKey)
   ) {
     throw new DomainError('INVALID_ARGUMENT', 'Report email delivery authority is invalid.');
   }
@@ -885,7 +885,11 @@ function storedHash(value: unknown): string {
 }
 
 function storedIdempotencyKey(value: unknown, reportId: string): string {
-  if (value !== `life-tracker-report/${reportId}`) {
+  if (
+    typeof value !== 'string'
+    || !/^life-tracker-report-v3\/[0-9a-f]{64}$/u.test(value)
+    || !REPORT_ID_PATTERN.test(reportId)
+  ) {
     throw new DomainError('INTERNAL', 'Stored report email idempotency key is invalid.');
   }
   return value;

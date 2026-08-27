@@ -1,6 +1,6 @@
 import {
+  EXECUTION_ALARM_ESCALATION_MS,
   EXECUTION_ALARM_MAX_AUDIBLE_MS,
-  EXECUTION_ALARM_REPEAT_MS,
 } from './executionAlarm';
 
 type AudioContextConstructor = typeof AudioContext;
@@ -9,8 +9,7 @@ export class ExecutionAlarmSound {
   private context: AudioContext | null = null;
   private buffer: AudioBuffer | null = null;
   private source: AudioBufferSourceNode | null = null;
-  private repeatTimer: ReturnType<typeof setInterval> | null = null;
-  private stopTimer: ReturnType<typeof setTimeout> | null = null;
+  private timers: ReturnType<typeof setTimeout>[] = [];
 
   async playOnce(): Promise<void> {
     const context = await this.ensureContext();
@@ -20,7 +19,7 @@ export class ExecutionAlarmSound {
     const source = context.createBufferSource();
     const gain = context.createGain();
     source.buffer = this.buffer;
-    gain.gain.value = 0.42;
+    gain.gain.value = 0.58;
     source.connect(gain);
     gain.connect(context.destination);
     source.onended = () => {
@@ -31,20 +30,20 @@ export class ExecutionAlarmSound {
   }
 
   async startBounded(
-    repeatMs = EXECUTION_ALARM_REPEAT_MS,
     maxAudibleMs = EXECUTION_ALARM_MAX_AUDIBLE_MS,
   ): Promise<void> {
     this.stop();
-    await this.playOnce();
-    this.repeatTimer = setInterval(() => { void this.playOnce(); }, repeatMs);
-    this.stopTimer = setTimeout(() => this.stop(), maxAudibleMs);
+    for (const offset of EXECUTION_ALARM_ESCALATION_MS) {
+      if (offset > maxAudibleMs) continue;
+      if (offset === 0) await this.playOnce();
+      else this.timers.push(setTimeout(() => { void this.playOnce(); }, offset));
+    }
+    this.timers.push(setTimeout(() => this.stop(), maxAudibleMs + 2_500));
   }
 
   stop(): void {
-    if (this.repeatTimer !== null) clearInterval(this.repeatTimer);
-    if (this.stopTimer !== null) clearTimeout(this.stopTimer);
-    this.repeatTimer = null;
-    this.stopTimer = null;
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers = [];
     this.stopSource();
   }
 
@@ -75,7 +74,7 @@ export class ExecutionAlarmSound {
 
 export function createOriginalExecutionAlarmWav(): ArrayBuffer {
   const sampleRate = 22_050;
-  const durationSeconds = 1.45;
+  const durationSeconds = 2.2;
   const samples = Math.floor(sampleRate * durationSeconds);
   const dataBytes = samples * 2;
   const output = new ArrayBuffer(44 + dataBytes);
@@ -95,9 +94,12 @@ export function createOriginalExecutionAlarmWav(): ArrayBuffer {
   view.setUint32(40, dataBytes, true);
 
   const notes = [
-    { start: 0.00, end: 0.30, frequency: 392 },
-    { start: 0.34, end: 0.68, frequency: 587.33 },
-    { start: 0.73, end: 1.30, frequency: 783.99 },
+    { start: 0.00, end: 0.48, frequency: 440, weight: 0.30 },
+    { start: 0.00, end: 0.48, frequency: 554.37, weight: 0.16 },
+    { start: 0.58, end: 1.10, frequency: 554.37, weight: 0.31 },
+    { start: 0.58, end: 1.10, frequency: 659.25, weight: 0.16 },
+    { start: 1.22, end: 2.08, frequency: 739.99, weight: 0.34 },
+    { start: 1.22, end: 2.08, frequency: 880, weight: 0.14 },
   ];
   for (let index = 0; index < samples; index += 1) {
     const time = index / sampleRate;
@@ -105,12 +107,13 @@ export function createOriginalExecutionAlarmWav(): ArrayBuffer {
     for (const note of notes) {
       if (time < note.start || time > note.end) continue;
       const position = (time - note.start) / (note.end - note.start);
-      const attack = Math.min(1, position / 0.06);
-      const release = Math.min(1, (1 - position) / 0.22);
+      const attack = Math.min(1, position / 0.045);
+      const release = Math.min(1, (1 - position) / 0.28);
       const envelope = Math.sin(Math.PI * Math.min(1, attack)) * Math.max(0, release);
       const fundamental = Math.sin(2 * Math.PI * note.frequency * time);
-      const overtone = Math.sin(2 * Math.PI * note.frequency * 2 * time) * 0.16;
-      sample += (fundamental + overtone) * envelope * 0.34;
+      const overtone = Math.sin(2 * Math.PI * note.frequency * 2 * time) * 0.12;
+      const presence = Math.sin(2 * Math.PI * note.frequency * 3 * time) * 0.035;
+      sample += (fundamental + overtone + presence) * envelope * note.weight;
     }
     view.setInt16(44 + index * 2, Math.round(Math.max(-1, Math.min(1, sample)) * 32_767), true);
   }
