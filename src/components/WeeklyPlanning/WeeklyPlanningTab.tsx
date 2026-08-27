@@ -82,8 +82,34 @@ export interface WeeklyPlanningViewProps {
   existingTimeBlocks: ReadonlyArray<ExistingTimeBlockSnapshot>;
   userIdOrLocal: string;
   onCommitBlock: (input: CommitTimeBlockInput) => Promise<unknown> | unknown;
+  /** Prevents a partial loading snapshot from invalidating a valid draft. */
+  entitiesReady?: boolean;
   /** Fixed "now" — only set in tests to avoid date drift. */
   nowProvider?: () => Date;
+}
+
+/**
+ * A local draft is only actionable while every entity it names is still part
+ * of the reconciled current snapshot. Unmapped/maintenance blocks remain
+ * valid; they do not carry strategic references and cannot resurrect one.
+ */
+export function weeklyDraftReferencesCurrentEntities(
+  draft: WeeklyPlanDraft,
+  goals: ReadonlyArray<GoalLike>,
+  projects: ReadonlyArray<ProjectLike>,
+  tasks: ReadonlyArray<TaskLike>,
+): boolean {
+  const goalIds = new Set(goals.map(({ id }) => id));
+  const projectIds = new Set(projects.map(({ id }) => id));
+  const taskIds = new Set(tasks.map(({ id }) => id));
+
+  return draft.blocks.every(({ mapping }) => {
+    if (!mapping) return true;
+    if (mapping.goalId && !goalIds.has(mapping.goalId)) return false;
+    if (mapping.projectId && !projectIds.has(mapping.projectId)) return false;
+    if (mapping.taskId && !taskIds.has(mapping.taskId)) return false;
+    return true;
+  });
 }
 
 export function WeeklyPlanningView({
@@ -93,12 +119,14 @@ export function WeeklyPlanningView({
   existingTimeBlocks,
   userIdOrLocal,
   onCommitBlock,
+  entitiesReady = true,
   nowProvider,
 }: WeeklyPlanningViewProps) {
   const [rawText, setRawText] = useState<string>('');
   const [draft, setDraft] = useState<WeeklyPlanDraft | null>(null);
   const [loadedFromStorage, setLoadedFromStorage] = useState<boolean>(false);
   const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(false);
+  const [staleDraftDiscarded, setStaleDraftDiscarded] = useState<boolean>(false);
   const [isCommitting, setIsCommitting] = useState<boolean>(false);
   const [commitResult, setCommitResult] = useState<CommitDraftResult | null>(null);
   // Synchronous in-flight latch: React state updates are async, so two
@@ -115,18 +143,31 @@ export function WeeklyPlanningView({
 
   // ----- Hydrate from localStorage on mount / user change ---------------
   useEffect(() => {
-    if (!userIdOrLocal) return;
+    if (!userIdOrLocal || !entitiesReady) return;
     const loaded = loadWeeklyPlanDraft({ userIdOrLocal, weekStartISO });
     if (loaded) {
+      if (!weeklyDraftReferencesCurrentEntities(loaded, goals, projects, tasks)) {
+        // Remove only this owner's exact current-week draft. Never clear the
+        // rest of localStorage or touch authoritative/historical entities.
+        deleteWeeklyPlanDraft({ userIdOrLocal, weekStartISO });
+        setDraft(null);
+        setRawText('');
+        setLoadedFromStorage(false);
+        setHasSavedDraft(false);
+        setCommitResult(null);
+        setStaleDraftDiscarded(true);
+        return;
+      }
       setDraft(loaded);
       setRawText(loaded.sourceIntent.text);
       setLoadedFromStorage(true);
       setHasSavedDraft(true);
       setCommitResult(null);
+      setStaleDraftDiscarded(false);
     } else {
       setHasSavedDraft(false);
     }
-  }, [userIdOrLocal, weekStartISO]);
+  }, [entitiesReady, goals, projects, tasks, userIdOrLocal, weekStartISO]);
 
   // ----- Actions --------------------------------------------------------
 
@@ -148,6 +189,7 @@ export function WeeklyPlanningView({
     });
     setDraft(result.draft);
     setLoadedFromStorage(false);
+    setStaleDraftDiscarded(false);
     setCommitResult(null);
     const saved = saveWeeklyPlanDraft({
       userIdOrLocal,
@@ -275,6 +317,17 @@ export function WeeklyPlanningView({
   return (
     <div className="space-y-6" data-testid="weekly-planning-view">
       <Header />
+
+      {staleDraftDiscarded && (
+        <div
+          role="status"
+          data-testid="stale-weekly-draft-discarded"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          La bozza salvata faceva riferimento a elementi non più attivi ed è
+          stata rimossa. Nessun TimeBlock o dato storico è stato modificato.
+        </div>
+      )}
 
       <WeeklyIntentInput
         value={rawText}
@@ -404,6 +457,7 @@ export default function WeeklyPlanningTab() {
       existingTimeBlocks={existingTimeBlocks}
       userIdOrLocal={userIdOrLocal}
       onCommitBlock={handleCommitBlock}
+      entitiesReady={data.status === 'ready'}
     />
   );
 }

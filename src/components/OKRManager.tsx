@@ -12,6 +12,7 @@ import {
 import type { Task, TaskStatus, Goal, KeyResult, Project, TimeBlock, Session, Priority, GoalStatus, Note, NoteTemplate, GoalRoadmap } from '@/types';
 import { stripGaiKeyMarker } from '@/lib/goalArchitect';
 import { collectBlockExecutionRecords, type BlockExecutionRecord } from '@/lib/executionAggregation';
+import { reconcileCurrentOperationalSelection } from '@/lib/currentOperationalState';
 import { RichNoteEditor } from './RichNoteEditor';
 import { GoalRoadmapView } from './GoalRoadmapView';
 import VisionBoardEnhanced from './VisionBoardEnhanced';
@@ -2016,6 +2017,21 @@ export default function OKRManager(props: OKRManagerProps) {
     () => (selectedProjectId ? visibleTasks.filter((t) => t.projectId === selectedProjectId) : []),
     [visibleTasks, selectedProjectId]
   );
+
+  // A listener refresh or a deletion in another client can invalidate a
+  // selection without passing through this component's delete handler. Keep
+  // selection state reconciled with the authoritative operational snapshot.
+  useEffect(() => {
+    if (!selectedGoalId && !selectedProjectId) return;
+    const next = reconcileCurrentOperationalSelection(
+      selectedGoalId,
+      selectedProjectId,
+      visibleGoals,
+      visibleProjects,
+    );
+    if (next.goalId !== selectedGoalId) setSelectedGoalId(next.goalId);
+    if (next.projectId !== selectedProjectId) setSelectedProjectId(next.projectId);
+  }, [selectedGoalId, selectedProjectId, visibleGoals, visibleProjects]);
 
   // --------------------------------------------------------------------------
   // ACTIONS

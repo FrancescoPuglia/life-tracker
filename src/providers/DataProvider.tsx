@@ -8,6 +8,7 @@ import { db, sanitizeForStorage } from '@/lib/database';
 import { toDateSafe } from '@/utils/dateUtils';
 import { rollupForCompletedTimeBlock, performHierarchicalRollup } from '@/lib/hierarchicalRollup';
 import { buildGoalDeletionPlan } from '@/lib/goalDeletion';
+import { selectCurrentOperationalState } from '@/lib/currentOperationalState';
 
 // ============================================================================
 // DATA STATE MACHINE
@@ -1280,23 +1281,58 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     return newRoadmap;
   }, [goalRoadmaps, goals, projects, userId, createGoalRoadmap]);
 
+  // Raw owner-scoped snapshots stay in memory for authoritative CRUD and
+  // historical execution evidence. Every consumer receives one reconciled
+  // current view, so an undeleted legacy child cannot bypass the Goal →
+  // Project → Task chain after hydration, refresh, or a successful deletion.
+  const operationalState = useMemo(() => selectCurrentOperationalState({
+    ownerUid: userId,
+    goals,
+    keyResults,
+    projects,
+    tasks,
+    timeBlocks,
+  }), [goals, keyResults, projects, tasks, timeBlocks, userId]);
+  useEffect(() => {
+    if (operationalState.issues.length === 0 || process.env.NODE_ENV === 'test') return;
+    const counts = operationalState.issues.reduce<Record<string, number>>((result, issue) => {
+      const key = `${issue.entity}:${issue.reason}`;
+      result[key] = (result[key] ?? 0) + 1;
+      return result;
+    }, {});
+    // Do not log owner-authored titles or document payloads. The aggregate is
+    // enough for bounded diagnostics while keeping orphan rejection explicit.
+    console.warn('[DataProvider] Excluded incoherent current references', {
+      count: operationalState.issues.length,
+      counts,
+    });
+  }, [operationalState]);
+  const operationalGoalIds = useMemo(
+    () => new Set(operationalState.goals.map(({ id }) => id)),
+    [operationalState.goals],
+  );
+  const operationalGoalRoadmaps = useMemo(
+    () => goalRoadmaps.filter((roadmap) => operationalGoalIds.has(roadmap.goalId)),
+    [goalRoadmaps, operationalGoalIds],
+  );
+
   // ========== Context Value ==========
   const value: DataContextValue = useMemo(() => ({
     status,
     loadError,
     retryLoad,
     userId,
-    timeBlocks,
-    goals,
-    keyResults,
-    projects,
-    tasks,
+    timeBlocks: [...operationalState.timeBlocks],
+    goals: [...operationalState.goals],
+    keyResults: [...operationalState.keyResults],
+    projects: [...operationalState.projects],
+    tasks: [...operationalState.tasks],
     habits,
     habitLogs,
     kpis,
     notes,
     noteTemplates,
-    goalRoadmaps,
+    goalRoadmaps: operationalGoalRoadmaps,
     createTimeBlock,
     updateTimeBlock,
     deleteTimeBlock,
@@ -1331,8 +1367,8 @@ export function DataProvider({ userId, children }: DataProviderProps) {
     refreshTimeBlocks,
     refreshKPIs,
   }), [
-    status, loadError, retryLoad, userId, timeBlocks, goals, keyResults, projects, tasks, habits, habitLogs, kpis,
-    notes, noteTemplates, goalRoadmaps,
+    status, loadError, retryLoad, userId, operationalState, habits, habitLogs, kpis,
+    notes, noteTemplates, operationalGoalRoadmaps,
     createTimeBlock, updateTimeBlock, deleteTimeBlock,
     createGoal, updateGoal, deleteGoal,
     createKeyResult, updateKeyResult, deleteKeyResult,

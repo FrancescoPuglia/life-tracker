@@ -73,6 +73,7 @@ describe('Desktop reminder runtime glue', () => {
     mocks.available = true;
     mocks.subscribe.mockResolvedValue(mocks.unsubscribe);
     mocks.subscribeAlarm.mockResolvedValue(mocks.unsubscribeAlarm);
+    mocks.shouldDispatch.mockReturnValue(true);
   });
 
   it('starts only in Tauri and refreshes on online and policy events', async () => {
@@ -102,5 +103,23 @@ describe('Desktop reminder runtime glue', () => {
     expect(mocks.getApi).not.toHaveBeenCalled();
     expect(mocks.subscribe).not.toHaveBeenCalled();
     expect(mocks.subscribeAlarm).not.toHaveBeenCalled();
+  });
+
+  it('does not present a claimed reminder whose current hierarchy no longer resolves', async () => {
+    mocks.shouldDispatch.mockReturnValue(false);
+    render(<DesktopReminderRuntime uid="owner-1" />);
+    const coordinatorInput = mocks.construct.mock.calls[0]?.[0] as {
+      onClaimedDispatch: (dispatch: unknown) => Promise<boolean>;
+    };
+
+    const accepted = await coordinatorInput.onClaimedDispatch({
+      reminderId: 'legacy-reminder',
+      ownerUid: 'owner-1',
+      title: 'i 100 studi che bisogna conoscere',
+    });
+
+    expect(accepted).toBe(false);
+    expect(mocks.presentation).not.toHaveBeenCalled();
+    expect(mocks.signal).not.toHaveBeenCalled();
   });
 });

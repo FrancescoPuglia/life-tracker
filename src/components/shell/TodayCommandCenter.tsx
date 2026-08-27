@@ -16,6 +16,7 @@ import {
   computeTodayExecutionMetrics,
   type TodaySessionCoverage,
 } from '@/lib/todayExecution';
+import { isTaskOperationallyCurrent } from '@/lib/currentOperationalState';
 
 type PreferenceStatus = 'loading' | 'ready' | 'error';
 
@@ -81,7 +82,10 @@ export default function TodayCommandCenter({
     }),
     [effectiveNow, ownerUid, sessionCoverage, sessions, timeBlocks, timezone],
   );
-  const topTasks = useMemo(() => pickTopTasks(tasks), [tasks]);
+  const topTasks = useMemo(
+    () => pickTopTasks(tasks, ownerUid, goals, projects),
+    [goals, ownerUid, projects, tasks],
+  );
   const goalsView = useMemo(() => summarizeGoals(goals), [goals]);
 
   return (
@@ -751,7 +755,12 @@ function EmptyHint({
   );
 }
 
-function pickTopTasks(tasks: ReadonlyArray<Task>): Task[] {
+function pickTopTasks(
+  tasks: ReadonlyArray<Task>,
+  ownerUid: string,
+  goals: ReadonlyArray<Goal>,
+  projects: ReadonlyArray<Project>,
+): Task[] {
   const weights: Record<NonNullable<Task['priority']>, number> = {
     critical: 4,
     high: 3,
@@ -759,7 +768,11 @@ function pickTopTasks(tasks: ReadonlyArray<Task>): Task[] {
     low: 1,
   };
   return tasks
-    .filter((task) => !task.deleted && task.status !== 'completed' && task.status !== 'cancelled')
+    .filter((task) => (
+      task.status !== 'completed'
+      && task.status !== 'cancelled'
+      && isTaskOperationallyCurrent(task, ownerUid, goals, projects)
+    ))
     .slice()
     .sort((left, right) => weights[right.priority] - weights[left.priority])
     .slice(0, 3);

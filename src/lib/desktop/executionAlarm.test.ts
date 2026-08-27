@@ -61,7 +61,7 @@ describe('Execution Alarm policy and persistence', () => {
     }, context)).toBe(true);
   });
 
-  it('fails closed for ambiguous cached matches in critical-only mode', () => {
+  it('fails closed for ambiguous or orphaned cached matches before presentation', () => {
     const context = resolveExecutionAlarmContext(
       dispatch(),
       [timeBlock(), { ...timeBlock(), id: 'block-2' }],
@@ -73,11 +73,29 @@ describe('Execution Alarm policy and persistence', () => {
     expect(shouldDispatchExecutionAlarm({
       ...defaultExecutionAlarmPreferences(),
       mode: 'critical_only',
-    }, context)).toBe(true);
+    }, context)).toBe(false);
     expect(executionAlarmPresentation(dispatch(), {
       ...defaultExecutionAlarmPreferences(),
       mode: 'critical_only',
     }, context)).toBe('normal');
+  });
+
+  it('fails closed when a uniquely matched block names a deleted hierarchy', () => {
+    const context = resolveExecutionAlarmContext(
+      dispatch(),
+      [{
+        ...timeBlock(),
+        taskId: 'deleted-task',
+        projectId: 'deleted-project',
+        goalId: 'deleted-goal',
+      }],
+      [],
+      [],
+      [],
+    );
+
+    expect(context.timeBlockId).toBeNull();
+    expect(shouldDispatchExecutionAlarm(defaultExecutionAlarmPreferences(), context)).toBe(false);
   });
 
   it('suppresses off/muted signals and keeps persistent UI limited to at-start semantics', () => {

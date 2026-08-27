@@ -9,6 +9,7 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import {
   WeeklyPlanningView,
   WEEKLY_PLANNING_EXAMPLE_TEXT,
+  weeklyDraftReferencesCurrentEntities,
 } from './WeeklyPlanningTab';
 import {
   buildWeeklyDraftStorageKey,
@@ -63,6 +64,7 @@ interface RenderOpts {
   projects?: ProjectLike[];
   tasks?: TaskLike[];
   userId?: string;
+  entitiesReady?: boolean;
 }
 
 function renderView(opts: RenderOpts = {}) {
@@ -75,6 +77,7 @@ function renderView(opts: RenderOpts = {}) {
       existingTimeBlocks={opts.existingTimeBlocks ?? []}
       userIdOrLocal={opts.userId ?? USER_ID}
       onCommitBlock={onCommitBlock}
+      entitiesReady={opts.entitiesReady ?? true}
       nowProvider={FIXED_NOW}
     />,
   );
@@ -197,6 +200,53 @@ describe('WeeklyPlanningView — persistence', () => {
       (screen.getByTestId('weekly-intent-textarea') as HTMLTextAreaElement)
         .value,
     ).toBe('Lunedì Catalana 2 ore.');
+  });
+
+  it('removes only the exact stale draft when its deleted Goal hierarchy is no longer current', () => {
+    const { draft } = generateWeeklyDraft({
+      raw: {
+        id: 'legacy-seeded',
+        text: 'Lunedì Catalana 2 ore.',
+        weekStartISO: WEEK_START_ISO,
+        createdAtISO: '2026-05-25T08:00:00.000Z',
+      },
+      goals: GOALS,
+      projects: PROJECTS,
+      tasks: TASKS,
+    });
+    expect(weeklyDraftReferencesCurrentEntities(draft, GOALS, PROJECTS, TASKS)).toBe(true);
+    expect(weeklyDraftReferencesCurrentEntities(draft, [], [], [])).toBe(false);
+    saveWeeklyPlanDraft({ userIdOrLocal: USER_ID, weekStartISO: WEEK_START_ISO, draft });
+    window.localStorage.setItem('unrelated-user-preference', 'preserve-me');
+
+    renderView();
+
+    expect(screen.getByTestId('stale-weekly-draft-discarded')).toHaveTextContent(
+      'Nessun TimeBlock o dato storico è stato modificato',
+    );
+    expect(screen.queryByTestId('draft-week-calendar')).toBeNull();
+    expect(loadWeeklyPlanDraft({ userIdOrLocal: USER_ID, weekStartISO: WEEK_START_ISO })).toBeNull();
+    expect(window.localStorage.getItem('unrelated-user-preference')).toBe('preserve-me');
+  });
+
+  it('never invalidates a draft against the partial entity snapshot used during bootstrap', () => {
+    const { draft } = generateWeeklyDraft({
+      raw: {
+        id: 'bootstrap-seeded',
+        text: 'Lunedì Catalana 2 ore.',
+        weekStartISO: WEEK_START_ISO,
+        createdAtISO: '2026-05-25T08:00:00.000Z',
+      },
+      goals: GOALS,
+      projects: PROJECTS,
+      tasks: TASKS,
+    });
+    saveWeeklyPlanDraft({ userIdOrLocal: USER_ID, weekStartISO: WEEK_START_ISO, draft });
+
+    renderView({ entitiesReady: false });
+
+    expect(loadWeeklyPlanDraft({ userIdOrLocal: USER_ID, weekStartISO: WEEK_START_ISO })).not.toBeNull();
+    expect(screen.queryByTestId('stale-weekly-draft-discarded')).toBeNull();
   });
 
   it('"Delete saved draft" removes the localStorage entry but keeps the on-screen draft', () => {

@@ -219,6 +219,7 @@ export function resolveExecutionAlarmContext(
     !block.deleted
     && block.status !== 'completed'
     && block.status !== 'cancelled'
+    && block.status !== 'overrun'
     && Math.abs(block.startTime.getTime() - startMs) <= 1_000
     && normalizeTitle(block.title) === normalizedTitle
   ));
@@ -227,8 +228,10 @@ export function resolveExecutionAlarmContext(
   const block = matches[0];
   const taskIds = [block.taskId, ...(block.taskIds ?? [])].filter(Boolean) as string[];
   const task = taskIds.length > 0 ? tasks.find((candidate) => taskIds.includes(candidate.id)) : undefined;
+  if (taskIds.some((id) => !tasks.some((candidate) => candidate.id === id))) return emptyContext();
   const projectId = block.projectId ?? task?.projectId;
   const project = projectId ? projects.find((candidate) => candidate.id === projectId) : undefined;
+  if (projectId && !project) return emptyContext();
   const goalIds = [
     block.goalId,
     ...(block.goalIds ?? []),
@@ -236,6 +239,8 @@ export function resolveExecutionAlarmContext(
     ...(task?.goalIds ?? []),
     project?.goalId,
   ].filter(Boolean) as string[];
+  if (goalIds.some((id) => !goals.some((candidate) => candidate.id === id))) return emptyContext();
+  if (taskIds.length + (projectId ? 1 : 0) + goalIds.length === 0) return emptyContext();
   const goal = goals.find((candidate) => goalIds.includes(candidate.id));
   return Object.freeze({
     timeBlockId: block.id,
@@ -248,10 +253,14 @@ export function resolveExecutionAlarmContext(
 
 export function shouldDispatchExecutionAlarm(
   preferences: ExecutionAlarmPreferences,
-  _context: ExecutionAlarmContext,
+  context: ExecutionAlarmContext,
 ): boolean {
   if (preferences.muted || preferences.mode === 'off') return false;
-  return true;
+  // A server occurrence may outlive the current Goal hierarchy. Claiming it
+  // remains idempotent, but presenting its denormalized title would resurrect
+  // deleted work. Only a uniquely matched live local TimeBlock may cross the
+  // native/in-app presentation edge.
+  return context.timeBlockId !== null;
 }
 
 export function executionAlarmPresentation(

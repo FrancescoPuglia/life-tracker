@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { TimeBlock } from '@/types';
+import type { Goal, Project, Task, TimeBlock } from '@/types';
 import { defaultNotificationPreferences } from '@/lib/notifications/preferences';
 import TodayCommandCenter, { type TodayCommandCenterProps } from './TodayCommandCenter';
 
@@ -91,14 +91,59 @@ describe('Today Command Center', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('restano invariati'));
     expect(view.container).not.toHaveTextContent('private provider detail');
   });
+
+  it('never reconstructs the observed critical priority from a deleted Goal hierarchy', () => {
+    renderToday({
+      goals: [],
+      projects: [],
+      tasks: [makeTask({
+        title: 'i 100 studi che bisogna conoscere',
+        priority: 'critical',
+        projectId: 'deleted-project',
+        goalId: 'deleted-goal',
+      })],
+    });
+
+    expect(screen.queryByText('i 100 studi che bisogna conoscere')).not.toBeInTheDocument();
+    expect(screen.getByText('Non ci sono attività prioritarie aperte.')).toBeInTheDocument();
+  });
+
+  it('shows a valid disposable priority, then keeps it absent after hierarchy deletion and rerender', () => {
+    const goal = makeGoal();
+    const project = makeProject();
+    const legacy = makeTask({
+      title: 'i 100 studi che bisogna conoscere',
+      priority: 'critical',
+    });
+    const props = {
+      goals: [goal],
+      projects: [project],
+      tasks: [legacy],
+    };
+    const view = renderToday(props);
+    expect(screen.getByText(legacy.title)).toBeInTheDocument();
+
+    view.rerender(<TodayCommandCenter {...buildTodayProps({
+      goals: [],
+      projects: [],
+      tasks: [legacy],
+    })} />);
+
+    expect(screen.queryByText(legacy.title)).not.toBeInTheDocument();
+    expect(screen.getByText('Non ci sono attività prioritarie aperte.')).toBeInTheDocument();
+  });
 });
 
 function renderToday(overrides: Partial<TodayCommandCenterProps> = {}) {
+  return render(<TodayCommandCenter {...buildTodayProps(overrides)} />);
+}
+
+function buildTodayProps(overrides: Partial<TodayCommandCenterProps> = {}): TodayCommandCenterProps {
   const preferences = {
     ...defaultNotificationPreferences(),
     desktopEnabled: true,
   };
-  const props: TodayCommandCenterProps = {
+  return {
     now: new Date('2026-08-25T10:00:00.000Z'),
     ownerUid: 'owner-1',
     timezone: 'Europe/Rome',
@@ -130,7 +175,6 @@ function renderToday(overrides: Partial<TodayCommandCenterProps> = {}) {
     onQuickCapture: vi.fn(async () => undefined),
     ...overrides,
   };
-  return render(<TodayCommandCenter {...props} />);
 }
 
 function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
@@ -143,6 +187,57 @@ function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
     endTime: new Date('2026-08-25T09:00:00.000Z'),
     status: 'planned',
     type: 'focus',
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: 'task-1',
+    userId: 'owner-1',
+    domainId: 'domain-1',
+    projectId: 'project-1',
+    goalId: 'goal-1',
+    title: 'Priority task',
+    status: 'pending',
+    priority: 'high',
+    estimatedMinutes: 30,
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makeGoal(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: 'goal-1',
+    userId: 'owner-1',
+    domainId: 'domain-1',
+    title: 'Disposable Goal',
+    status: 'active',
+    priority: 'high',
+    targetDate: new Date('2026-12-31T00:00:00.000Z'),
+    timeAllocationTarget: 5,
+    keyResults: [],
+    category: 'important_not_urgent',
+    complexity: 'moderate',
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function makeProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: 'project-1',
+    userId: 'owner-1',
+    domainId: 'domain-1',
+    goalId: 'goal-1',
+    name: 'Disposable Project',
+    status: 'active',
+    priority: 'high',
     createdAt: new Date('2026-08-01T00:00:00.000Z'),
     updatedAt: new Date('2026-08-01T00:00:00.000Z'),
     ...overrides,

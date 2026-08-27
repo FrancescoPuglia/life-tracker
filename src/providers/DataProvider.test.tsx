@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import type { Goal, KeyResult, Project, Task } from '@/types';
+import type { Goal, KeyResult, Project, Task, TimeBlock } from '@/types';
 import type { AtomicDeleteOperation } from '@/lib/firebaseAdapter';
 
 // ---- Mounted-provider harness (db fully mocked) -----------------------------
@@ -11,7 +11,8 @@ const { dbMock, entityStore } = vi.hoisted(() => {
     keyResults: KeyResult[];
     projects: Project[];
     tasks: Task[];
-  } = { goals: [], keyResults: [], projects: [], tasks: [] };
+    timeBlocks: TimeBlock[];
+  } = { goals: [], keyResults: [], projects: [], tasks: [], timeBlocks: [] };
   const dbMock = {
     init: vi.fn(async () => undefined),
     switchToFirebase: vi.fn(async () => undefined),
@@ -63,6 +64,7 @@ function Probe() {
       <div data-testid="probe-key-results">{ctx.keyResults.map((keyResult) => keyResult.id).join(',')}</div>
       <div data-testid="probe-projects">{ctx.projects.map((project) => project.id).join(',')}</div>
       <div data-testid="probe-tasks">{ctx.tasks.map((task) => task.id).join(',')}</div>
+      <div data-testid="probe-time-blocks">{ctx.timeBlocks.map((block) => block.id).join(',')}</div>
     </div>
   );
 }
@@ -100,6 +102,7 @@ describe('DataProvider', () => {
     entityStore.keyResults = [];
     entityStore.projects = [];
     entityStore.tasks = [];
+    entityStore.timeBlocks = [];
     capturedRetryLoad = null;
     capturedDeleteGoal = null;
     dbMock.init.mockResolvedValue(undefined);
@@ -343,6 +346,66 @@ describe('DataProvider', () => {
       expect(screen.getByTestId('probe-tasks')).not.toHaveTextContent('task-1');
       expect(dbMock.init).not.toHaveBeenCalled();
     });
+
+    it('rejects a legacy orphan after delete, refresh, rehydrate, and restart while preserving history and Goal p', async () => {
+      const legacyTitle = 'i 100 studi che bisogna conoscere';
+      seedGoalHierarchy();
+      entityStore.goals.push(makeGoal('goal-p'));
+      entityStore.projects.push(makeProject('project-p', 'goal-p'));
+      entityStore.tasks[0] = makeStoredTask({
+        id: 'legacy-task',
+        title: legacyTitle,
+        priority: 'critical',
+        projectId: 'project-1',
+        goalId: 'goal-1',
+      });
+      entityStore.tasks.push(makeStoredTask({
+        id: 'task-p',
+        title: 'Task del Goal p',
+        projectId: 'project-p',
+        goalId: 'goal-p',
+      }));
+      entityStore.timeBlocks = [
+        makeTimeBlock('legacy-future', 'planned'),
+        makeTimeBlock('legacy-history', 'completed'),
+        makeTimeBlock('block-p', 'planned', {
+          taskId: 'task-p', projectId: 'project-p', goalId: 'goal-p', title: 'Goal p block',
+        }),
+      ];
+      const firstMount = await mountProvider();
+
+      expect(screen.getByTestId('probe-tasks')).toHaveTextContent('legacy-task,task-p');
+      await act(async () => capturedDeleteGoal!('goal-1'));
+
+      expect(screen.getByTestId('probe-goals')).toHaveTextContent('goal-p');
+      expect(screen.getByTestId('probe-tasks')).toHaveTextContent('task-p');
+      expect(screen.getByTestId('probe-time-blocks')).not.toHaveTextContent('legacy-future');
+      expect(screen.getByTestId('probe-time-blocks')).toHaveTextContent('legacy-history');
+      expect(screen.getByTestId('probe-time-blocks')).toHaveTextContent('block-p');
+
+      // Reproduce the real persistence condition: an undeleted legacy Task
+      // still exists in the owner-scoped collection after its parents are gone.
+      entityStore.tasks.push(makeStoredTask({
+        id: 'legacy-orphan',
+        title: legacyTitle,
+        priority: 'critical',
+        projectId: 'project-1',
+        goalId: 'goal-1',
+      }));
+      await act(() => capturedRetryLoad!());
+      await waitFor(() => expect(dbMock.switchToFirebase).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.getByTestId('probe-status')).toHaveTextContent('ready'));
+      expect(screen.getByTestId('probe-tasks')).toHaveTextContent('task-p');
+      expect(screen.getByTestId('probe-tasks')).not.toHaveTextContent('legacy-orphan');
+
+      firstMount.unmount();
+      await mountProvider();
+      expect(screen.getByTestId('probe-goals')).toHaveTextContent('goal-p');
+      expect(screen.getByTestId('probe-tasks')).toHaveTextContent('task-p');
+      expect(screen.getByTestId('probe-tasks')).not.toHaveTextContent('legacy-orphan');
+      expect(screen.getByTestId('probe-time-blocks')).not.toHaveTextContent('legacy-future');
+      expect(screen.getByTestId('probe-time-blocks')).toHaveTextContent('legacy-history');
+    });
   });
 });
 
@@ -407,5 +470,28 @@ function makeProject(id: string, goalId: string): Project {
     priority: 'medium',
     createdAt: new Date(2026, 6, 1),
     updatedAt: new Date(2026, 6, 1),
+  };
+}
+
+function makeTimeBlock(
+  id: string,
+  status: TimeBlock['status'],
+  overrides: Partial<TimeBlock> = {},
+): TimeBlock {
+  return {
+    id,
+    userId: 'user-a',
+    domainId: 'd1',
+    title: id,
+    taskId: 'legacy-task',
+    projectId: 'project-1',
+    goalId: 'goal-1',
+    startTime: new Date('2026-08-27T09:00:00.000Z'),
+    endTime: new Date('2026-08-27T10:00:00.000Z'),
+    status,
+    type: 'focus',
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    ...overrides,
   };
 }
